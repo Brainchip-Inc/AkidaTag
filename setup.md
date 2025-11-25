@@ -2,6 +2,8 @@
 
 ## Prerequisites
 
+Min OS version as of 11/25/2025 for this testing is Ubuntu 22.
+
 Min version for main dependencies
 
 | **Tool**     | **Min. Version** |
@@ -29,25 +31,20 @@ dtc --version
 
 If `cmake` version is not higher than min version mentioned, then follow installation of a proper version through this [link](https://docs.zephyrproject.org/latest/develop/getting_started/installation_linux.html#installation-linux).
 
-In my case, I had `cmake version 3.16.3` and I downloaded a higher version by first adding the [kitware third-party apt repository](https://apt.kitware.com/) using the script `scripts/kitware-archive.sh`
-
-```
-sudo ./scripts/kitware-archive.sh
-sudo apt-get install cmake
-```
-
-This installed `cmake version 4.2.0` for me.
+> A higher version of cmake can also be added using the [kitware third-party apt repository](https://apt.kitware.com/) using the script `scripts/kitware-archive.sh`
 
 Verify other versions:
 
 ```
-# currently running ninja 1.10.0
+# currently running ninja 1.10.1
 ninja --version
 ```
 
 ### Install J-Link Software
 
 If it is not installed, then download from [J-Link Software](https://www.segger.com/downloads/jlink/). Current version installed in `v8.88`.
+
+`sudo apt install ./JLink_Linux_V888_x86_64.deb`
 
 After connecting board through USB, run `JLinkExe` and check if board is detected. The following output should be seen:
 
