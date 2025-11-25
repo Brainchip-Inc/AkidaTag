@@ -1,2 +1,5 @@
 # folder
 zephyrproject
+
+# ignore tools
+tools/nrfutil
