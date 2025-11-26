@@ -149,7 +149,18 @@ west flash -d build/blinky
 
 Upon running this, the board should show flashing light as shown below:
 
-![Blinky Sample Gif](./images_and_videos/Blink%20Sample.gif)
+![Blinky Sample Gif](./images_and_videos/Blinky.gif)
+
+**To see output on the terminal through UART**
+
+```
+# replace /dev/ttyACM1 with endpoint at your system
+minicom -D /dev/ttyACM1
+```
+
+Following output should be seen:
+
+![Blinky UART Output](./images_and_videos/Blinky-UART-Output.png)
 
 ---
 
