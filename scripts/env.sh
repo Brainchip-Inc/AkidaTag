@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Load local tools for Project Spark
 
-set -e
+# set -e
 
 print_help() {
     cat <<EOF
