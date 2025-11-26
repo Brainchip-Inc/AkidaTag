@@ -1,5 +1,6 @@
 # folder
 zephyrproject
 
-# ignore build folders
+# ignore folders
+tools/*
 build/*
