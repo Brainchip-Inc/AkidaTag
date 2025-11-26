@@ -48,7 +48,10 @@
 
   After download, install using the following command:
 
-  `sudo apt install ./JLink_Linux_V888_x86_64.deb`
+  ```
+  wget https://www.segger.com/downloads/jlink/JLink_Linux_V888_x86_64.deb
+  sudo apt install ./JLink_Linux_V888_x86_64.deb
+  ```
 
   After connecting board through USB, run `JLinkExe` and check if board is detected. The following output should be seen:
 
