@@ -68,33 +68,26 @@ RUN dpkg-deb -x /tmp/JLink.deb / && \
     ln -s /opt/SEGGER/JLink/JLinkExe /usr/local/bin/JLinkExe && \
     rm -rf /tmp/JLink.deb
 
-# -------------------------------
-# Create non-root user "demo" 
-# ------------------------------
-
-ARG USERNAME=demo
-ARG USER_UID=1000
-ARG USER_GID=1000
-
-RUN groupadd --gid ${USER_GID} ${USERNAME} && \
-    useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} -s /bin/bash && \
-    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \
-    chmod 0440 /etc/sudoers.d/${USERNAME}
-
-USER ${USERNAME}
-WORKDIR /home/${USERNAME}
-ENV HOME="/home/${USERNAME}"
-
 # -----------------------------
 # Install nRF Util
 # -----------------------------
- 
+ENV NRF="/opt/nrf"
+
+RUN groupadd -g 2000 nrf && \
+    mkdir -p "$NRF" && \
+    chown root:nrf "$NRF" && \
+    chmod 2770 "$NRF"
+    
 ENV NRFUTIL_URL="https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil"
-ENV NRFUTIL="${HOME}/nrfutil"
+ENV NRFUTIL="${NRF}/nrfutil"
 
 RUN wget -q "$NRFUTIL_URL" -O "$NRFUTIL" && \
     chmod +x "$NRFUTIL" && \
-    sudo ln -s "$NRFUTIL" /usr/local/bin/nrfutil
+    ln -s "$NRFUTIL" /usr/local/bin/nrfutil
+
+# make NRFUTIL HOME
+ENV NRFUTIL_HOME="${NRF}/.nrfutil"
+RUN mkdir -p "$NRFUTIL_HOME"
 
 # -----------------------------
 # Install nrfutil sdk-manager and device
@@ -102,6 +95,9 @@ RUN wget -q "$NRFUTIL_URL" -O "$NRFUTIL" && \
  
 ARG NCS_VERSION=v3.1.1
 ENV NCS_VERSION=${NCS_VERSION}
+ENV NCS="${NRF}/ncs"
+ENV NCS_SDK="${NCS}/${NCS_VERSION}"
+ENV ZEPHYR_BASE="${NCS_SDK}/zephyr"
 
 # install sdk-manager
 RUN nrfutil install sdk-manager=1.9.1
@@ -110,35 +106,45 @@ RUN nrfutil install sdk-manager=1.9.1
 RUN nrfutil install device=2.15.4
 
 # install ncs v3.1.1
-RUN nrfutil sdk-manager install "${NCS_VERSION}"
+RUN nrfutil sdk-manager install "${NCS_VERSION}" --install-dir "${NCS}"
 
-ENV NCS="${HOME}/ncs"
-ENV NCS_SDK="${NCS}/${NCS_VERSION}"
-ENV ZEPHYR_BASE="${NCS_SDK}/zephyr"
+# Tell git that this NCS workspace and its subrepos are safe for all users
+RUN git config --system --add safe.directory "${NCS}" && \
+    git config --system --add safe.directory "${NCS_SDK}" && \
+    git config --system --add safe.directory "${NCS_SDK}/zephyr" && \
+    git config --system --add safe.directory "${NCS_SDK}/nrf" && \
+    git config --system --add safe.directory "${NCS_SDK}/nrfxlib" && \
+    git config --system --add safe.directory "${NCS_SDK}/tools/bsim"
 
-# -----------------------------
-# Install python packages
-# -----------------------------
-
-USER root
-RUN pip install west==1.5.0
-
-RUN pip install -r "${ZEPHYR_BASE}/scripts/requirements.txt"
+ENV TOOLCHAIN_DB_DIR="${ZEPHYR_BASE}/.cache/ToolchainCapabilityDatabase"
+RUN mkdir -p "${TOOLCHAIN_DB_DIR}" && \
+    chown -R root:nrf "${ZEPHYR_BASE}/.cache" && \
+    chmod -R g+rwxs "${ZEPHYR_BASE}/.cache" && \
+    chmod -R g+rwx "${NRFUTIL_HOME}/logs"
 
 # -----------------------------
 # Set other ENV
 # -----------------------------
-USER ${USERNAME}
-WORKDIR ${HOME}
-
-# add local path incase any other pip install required
-ENV PATH="${HOME}/.local/bin:${PATH}"
 
 ARG BOARD=nrf5340dk/nrf5340/cpuapp
 ENV BOARD="$BOARD"
 ENV ZEPHYR_TOOLCHAIN_VARIANT="zephyr"
 ENV ZEPHYR_SDK_INSTALL_DIR="${NCS}/toolchains/${NCS_VERSION}/opt/zephyr-sdk"
 
+# -----------------------------
+# Install python packages
+# -----------------------------
+RUN pip install west==1.5.0
+
+RUN pip install -r "${ZEPHYR_BASE}/scripts/requirements.txt"
+
+# WORKDIR /
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 SHELL ["/bin/bash", "-lc"]
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 CMD ["/bin/bash"]
