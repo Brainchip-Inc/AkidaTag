@@ -6,6 +6,7 @@ There are two ways to test samples and connections.
 2. Build & Flash on system
 
 ---
+
 ## 1. Follow below if build/flash using docker image.
 
 ### Step 1: Build Docker Image
@@ -239,10 +240,10 @@ Go to blinky repo and run the sample
 source ./scripts/env.sh --build
 
 # build
-west build -p always -b "$BOARD" -s samples/blinky -d build/blinky
+west build -p always -b "$BOARD" -s samples/blinky -d build_local/blinky
 
 # flash
-west flash -d build/blinky
+west flash -d build_local/blinky
 ```
 
 Upon running this, the board should show flashing light as shown below:
@@ -270,9 +271,9 @@ Just as blinky sample, build and flash the lib-akd1500 sample to test connection
 # set environment
 source ./scripts/env.sh --build
 # build
-west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -d build/sending-model
+west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -d build_local/sending-model
 # flash
-west flash -d build/sending-model
+west flash -d build_local/sending-model
 ```
 
 ```
