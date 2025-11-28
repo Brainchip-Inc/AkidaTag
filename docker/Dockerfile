@@ -104,10 +104,10 @@ ARG NCS_VERSION=v3.1.1
 ENV NCS_VERSION=${NCS_VERSION}
 
 # install sdk-manager
-RUN nrfutil install sdk-manager
+RUN nrfutil install sdk-manager=1.9.1
 
 # install device
-RUN nrfutil install device
+RUN nrfutil install device=2.15.4
 
 # install ncs v3.1.1
 RUN nrfutil sdk-manager install "${NCS_VERSION}"
