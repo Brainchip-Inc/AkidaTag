@@ -1,6 +1,104 @@
 # Setup For nRF5340 DK And AKD1500 PCIe (SPI mode) + Interposer Board
 
-## Prerequisites
+There are two ways to test samples and connections.
+
+1. Build & Flash using Docker Image
+2. Build & Flash on system
+
+---
+## 1. Follow below if build/flash using docker image.
+
+### Step 1: Build Docker Image
+
+Run the following script from Project Root To Build The Docker Image.
+
+```
+# get help and usage for the script
+./scripts/build_docker_image.sh -h
+
+# build docker image for ncs v3.1.1
+./scripts/build_docker_image.sh --ncs v3.1.1
+
+# build docker image for ncs v2.6.0
+./scripts/build_docker_image.sh --ncs v2.6.0
+```
+
+The build will take some time as it downloads ncs sdk.
+
+Based on the scripts you ran, following images should be build and seen. See below table for reference:
+
+`docker images`
+
+| IMAGE            | ID           | DISK USAGE |
+|------------------|--------------|------------|
+| spark-ncs:v2.6.0 | 54df5c0702ed | 14GB       | 0B            |       |
+| spark-ncs:v2.7.0 | c60a27221d72 | 14.2GB     | 0B            |       |
+| spark-ncs:v3.1.1 | b2e9bb9eacef | 13.2GB     | 0B            |       |
+
+
+---
+
+### Step 2: Build & Flash Blinky Sample
+
+Build the Blinky Sample.
+
+```
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c "west build -p always -b "$BOARD" -s samples/blinky -d build_docker/blinky"
+```
+
+Flash the Blinky Sample.
+
+```
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c "west flash -d build_docker/blinky"
+```
+
+Upon running this, the board should show flashing light as shown below:
+
+![Blinky Sample Gif](./images_and_videos/Blinky.gif)
+
+**To see output on the terminal through UART**
+
+```
+# replace /dev/ttyACM1 with endpoint at your system
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark -it spark-ncs:v3.1.1 bash -c "minicom -D /dev/ttyACM1"
+```
+
+Following output should be seen:
+
+![Blinky UART Output](./images_and_videos/Blinky-UART-Output.png)
+
+---
+
+### Step 3. Build & Flash lib-akd1500 sending model sample
+
+Build the lib-akd1500 sending model sample
+
+```
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c "west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -d build_docker/sending-model"
+```
+
+Flash the lib-akd1500 sending model sample
+
+```
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c "west flash -d build_docker/sending-model"
+```
+
+**To see output on the terminal through UART**
+
+```
+# replace /dev/ttyUSB0 with endpoint at your system
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark -it spark-ncs:v3.1.1 bash -c "minicom -D /dev/ttyUSB0"
+```
+
+Following output should be seen:
+
+![Lib-AKD1500-Sending-Model](./images_and_videos/Lib-Akd1500-sending-model.png)
+
+---
+
+## 2. Follow below if build/flash on system.
+
+### Prerequisites
 
 - `sudo` access
 - Working on Ubuntu 22 LTS (as of 11/25/2025)
@@ -164,7 +262,7 @@ Following output should be seen:
 
 ---
 
-### Step 4: Test the board and AKD1500 connection with lib-akd1500 sample
+### Step 4: Test the board and AKD1500 connection with lib-akd1500 sending model sample
 
 Just as blinky sample, build and flash the lib-akd1500 sample to test connection between nRF5340 and AKD1500 through SPI
 
@@ -176,6 +274,15 @@ west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -
 # flash
 west flash -d build/sending-model
 ```
+
+```
+# replace /dev/ttyUSB0 with endpoint at your system
+minicom -D /dev/ttyUSB0
+```
+
+Following output should be seen:
+
+![Lib-AKD1500-Sending-Model](./images_and_videos/Lib-Akd1500-sending-model.png)
 
 ---
 
