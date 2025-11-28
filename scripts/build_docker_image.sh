@@ -5,7 +5,7 @@
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NCS_VERSION="v3.1.1"
-IMAGE="spark-ncs-env"
+IMAGE="spark-ncs"
 
 # -----------------------------
 # Usage helper
