@@ -27,7 +27,7 @@ EOF
 # Defaults
 # ----------------------------------------------------------
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_DIR="$PROJECT_ROOT/tools"
 
 BOARD="nrf5340dk/nrf5340/cpuapp"
