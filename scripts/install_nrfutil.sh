@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -e
 
 # Determine project root (directory containing this script)
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
