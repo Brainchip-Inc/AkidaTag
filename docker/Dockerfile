@@ -1,15 +1,10 @@
 FROM ubuntu:22.04
 
-LABEL maintainer="nkotecha@brainchip.com" \
-      version="1.0.0" \
-      description="Dev container for nRF5340 DK + AKD1500 PCIe+SPI w/ Interposer Board"
-
 ENV DEBIAN_FRONTEND=noninteractive
-ENV VERSION=1.0.0
 
-# -------------------------------
+# -----------------------------------------------------------------------------
 # System Packages
-# ------------------------------
+# -----------------------------------------------------------------------------
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -29,48 +24,9 @@ RUN apt-get update && \
       minicom \
     && rm -rf /var/lib/apt/lists/*
 
-# -----------------------------
-# Install Python 3.12
-# -----------------------------
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      software-properties-common gnupg && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update && \
-    add-apt-repository ppa:deadsnakes/ppa -y
-
-RUN apt-get update && \
-    apt-get install --no-install-recommends -y \
-      python3.12 python3.12-venv && \
-    rm -rf /var/lib/apt/lists/*
-
-# -----------------------------
-# Update python and python3 to python3.12
-# -----------------------------
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 2 && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 2
-
-# -----------------------------
-# Update default pip to pip3.12
-# -----------------------------
-RUN python3.12 -m ensurepip --upgrade
-
-RUN update-alternatives --install /usr/bin/pip pip /usr/local/bin/pip3.12 2 && \
-    update-alternatives --install /usr/bin/pip3 pip3 /usr/local/bin/pip3.12 2
-
 # -----------------------------------------------------------------------------
-# Install J-Link
-# -----------------------------------------------------------------------------
-COPY tools/JLink_Linux_V888_x86_64.deb /tmp/JLink.deb
-
-RUN dpkg-deb -x /tmp/JLink.deb / && \
-    ln -s /opt/SEGGER/JLink/JLinkExe /usr/local/bin/JLinkExe && \
-    rm -rf /tmp/JLink.deb
-
-# -----------------------------
 # Install nRF Util
-# -----------------------------
+# -----------------------------------------------------------------------------
 ENV NRF="/opt/nrf"
 
 RUN groupadd -g 2000 nrf && \
@@ -89,9 +45,9 @@ RUN wget -q "$NRFUTIL_URL" -O "$NRFUTIL" && \
 ENV NRFUTIL_HOME="${NRF}/.nrfutil"
 RUN mkdir -p "$NRFUTIL_HOME"
 
-# -----------------------------
+# -----------------------------------------------------------------------------
 # Install nrfutil sdk-manager and device
-# -----------------------------
+# -----------------------------------------------------------------------------
  
 ARG NCS_VERSION=v3.1.1
 ENV NCS_VERSION=${NCS_VERSION}
@@ -122,26 +78,91 @@ RUN mkdir -p "${TOOLCHAIN_DB_DIR}" && \
     chmod -R g+rwxs "${ZEPHYR_BASE}/.cache" && \
     chmod -R g+rwx "${NRFUTIL_HOME}/logs"
 
-# -----------------------------
+# -----------------------------------------------------------------------------
 # Set other ENV
-# -----------------------------
+# -----------------------------------------------------------------------------
 
-ARG BOARD=nrf5340dk/nrf5340/cpuapp
-ENV BOARD="$BOARD"
+ENV BOARD="nrf5340dk/nrf5340/cpuapp"
 ENV ZEPHYR_TOOLCHAIN_VARIANT="zephyr"
 ENV ZEPHYR_SDK_INSTALL_DIR="${NCS}/toolchains/${NCS_VERSION}/opt/zephyr-sdk"
 
-# -----------------------------
-# Install python packages
-# -----------------------------
+# -----------------------------------------------------------------------------
+# Python version selector
+# -----------------------------------------------------------------------------
+ARG PYTHON_VERSION=3.12
+ENV PYTHON_VERSION=${PYTHON_VERSION}
+
+# -----------------------------------------------------------------------------
+# Install Python 3.12
+# -----------------------------------------------------------------------------
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      software-properties-common gnupg && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && \
+    add-apt-repository ppa:deadsnakes/ppa -y
+
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y \
+      python${PYTHON_VERSION} python${PYTHON_VERSION}-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------------------
+# Update python and python3 to python version
+# -----------------------------------------------------------------------------
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 2 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 2
+
+# -----------------------------------------------------------------------------
+# Update default pip to pip python version
+# -----------------------------------------------------------------------------
+RUN python${PYTHON_VERSION} -m ensurepip --upgrade
+
+RUN update-alternatives --install /usr/bin/pip pip /usr/local/bin/pip${PYTHON_VERSION} 2 && \
+    update-alternatives --install /usr/bin/pip3 pip3 /usr/local/bin/pip${PYTHON_VERSION} 2
+
+# -----------------------------------------------------------------------------
+# Install west and ncs related python packages
+# -----------------------------------------------------------------------------
 RUN pip install west==1.5.0
 
 RUN pip install -r "${ZEPHYR_BASE}/scripts/requirements.txt"
 
-# WORKDIR /
+# -----------------------------------------------------------------------------
+# Install python packages for project
+# -----------------------------------------------------------------------------
+COPY scripts/requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt && \
+    rm -rf /tmp/requirements.txt
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+# -----------------------------------------------------------------------------
+# Any additions or changes above this
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Install J-Link
+# -----------------------------------------------------------------------------
+COPY docker/tools/JLink_Linux_V888_x86_64.deb /tmp/JLink.deb
+
+RUN dpkg-deb -x /tmp/JLink.deb / && \
+    ln -s /opt/SEGGER/JLink/JLinkExe /usr/local/bin/JLinkExe && \
+    rm -rf /tmp/JLink.deb
+
+# -----------------------------------------------------------------------------
+# Entrypoint when container starts
+# -----------------------------------------------------------------------------
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ARG VERSION=1.0.0
+ENV VERSION=${VERSION}
+LABEL maintainer="nkotecha@brainchip.com" \
+      version="${VERSION}" \
+      ncs.version="${NCS_VERSION}" \
+      python.version="${PYTHON_VERSION}" \
+      description="Dev container for nRF5340 DK + AKD1500 SPI w/ Interposer Board"
 
 SHELL ["/bin/bash", "-lc"]
 
