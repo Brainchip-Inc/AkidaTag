@@ -4,7 +4,6 @@
 USER_NAME="${USER_NAME:-demo}"
 USER_UID="${USER_UID:-1000}"
 USER_GID="${USER_GID:-1000}"
-WORKDIR="${WORKDIR:-/spark}"
 
 echo "[entrypoint] USER_NAME=${USER_NAME}, UID=${USER_UID}, GID=${USER_GID}"
 
@@ -51,7 +50,6 @@ user_bashrc="/home/${USER_NAME}/.bashrc"
     echo "export ZEPHYR_SDK_INSTALL_DIR=\"${ZEPHYR_SDK_INSTALL_DIR}\""
     echo "export BOARD=\"${BOARD}\""
     echo "export PATH=\"/home/${USER_NAME}/.local/bin:\$PATH\""
-    echo "cd \"${WORKDIR}\""
 } >> "$user_bashrc"
 
 echo "[entrypoint] Running as ${USER_NAME} (uid=${USER_UID}, gid=${USER_GID}), groups: $(id -nG "${USER_NAME}")"
@@ -66,10 +64,8 @@ echo "[entrypoint] Running as ${USER_NAME} (uid=${USER_UID}, gid=${USER_GID}), g
 # If a command was passed to `docker run ... IMAGE <cmd> ...`
 if [ "$#" -gt 0 ]; then
     # One-shot mode: run the given command as the user, then exit
-    cd "${WORKDIR}" || exit 1
     exec sudo -E -u "${USER_NAME}" "$@"
 else
     # Interactive mode: start a login shell as the user, in WORKDIR
-    cd "${WORKDIR}" || exit 1
     exec su - "${USER_NAME}"
 fi
