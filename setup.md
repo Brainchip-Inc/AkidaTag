@@ -18,10 +18,10 @@ Run the following script from Project Root To Build The Docker Image.
 ./scripts/build_docker_image.sh -h
 
 # build docker image for ncs v3.1.1
-./scripts/build_docker_image.sh --ncs v3.1.1
+./scripts/build_docker_image.sh --ncs v3.1.1 --python3.12
 
-# build docker image for ncs v2.6.0
-./scripts/build_docker_image.sh --ncs v2.6.0
+# build docker image for python3.11
+./scripts/build_docker_image.sh --ncs v3.1.1 --python3.11
 ```
 
 The build will take some time as it downloads ncs sdk.
@@ -30,12 +30,10 @@ Based on the scripts you ran, following images should be build and seen. See bel
 
 `docker images`
 
-| IMAGE            | ID           | DISK USAGE |
-|------------------|--------------|------------|
-| spark-ncs:v2.6.0 | 54df5c0702ed | 14GB       | 0B            |       |
-| spark-ncs:v2.7.0 | c60a27221d72 | 14.2GB     | 0B            |       |
-| spark-ncs:v3.1.1 | b2e9bb9eacef | 13.2GB     | 0B            |       |
-
+| IMAGE                   | ID           | DISK USAGE |
+|-------------------------|--------------|------------|
+| spark-ncs:v3.1.1-py3.11 | 08927c788e57 | 13.3GB     |
+| spark-ncs:v3.1.1-py3.12 | 7d2f06ee0930 | 17.6GB     |
 
 ---
 
@@ -44,13 +42,13 @@ Based on the scripts you ran, following images should be build and seen. See bel
 Build the Blinky Sample.
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c 'west build -p always -b "$BOARD" -s samples/blinky -d build_docker/blinky'
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1-py3.12 bash -c 'west build -p always -b "$BOARD" -s samples/blinky -d build_docker/blinky'
 ```
 
 Flash the Blinky Sample.
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c 'west flash -d build_docker/blinky'
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1-py3.12 bash -c 'west flash -d build_docker/blinky'
 ```
 
 Upon running this, the board should show flashing light as shown below:
@@ -61,7 +59,7 @@ Upon running this, the board should show flashing light as shown below:
 
 ```
 # replace /dev/ttyACM1 with endpoint at your system
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark -it spark-ncs:v3.1.1 bash -c 'minicom -D /dev/ttyACM1'
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark -it spark-ncs:v3.1.1-py3.12 bash -c 'minicom -D /dev/ttyACM1'
 ```
 
 Following output should be seen:
@@ -75,20 +73,20 @@ Following output should be seen:
 Build the lib-akd1500 sending model sample
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c 'west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -d build_docker/sending-model'
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1-py3.12 bash -c 'west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -d build_docker/sending-model'
 ```
 
 Flash the lib-akd1500 sending model sample
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c 'west flash -d build_docker/sending-model'
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1-py3.12 bash -c 'west flash -d build_docker/sending-model'
 ```
 
 **To see output on the terminal through UART**
 
 ```
 # replace /dev/ttyUSB0 with endpoint at your system
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark -it spark-ncs:v3.1.1 bash -c 'minicom -D /dev/ttyUSB0'
+docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark -it spark-ncs:v3.1.1-py3.12 bash -c 'minicom -D /dev/ttyUSB0'
 ```
 
 Following output should be seen:
