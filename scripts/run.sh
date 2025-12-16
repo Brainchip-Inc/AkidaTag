@@ -7,6 +7,8 @@ Usage: $(basename "$0") [OPTIONS]
 Options:
   -d, --docker  | (str)  | Run build/flash using Docker
                 |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
+  -i, --shell   | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
+  -b, --build   | (flag) | Do Build
   -b, --build   | (flag) | Do Build
   -f, --flash   | (flag) | Do Flash
   --app         | (str)  | App to build/flash 
@@ -30,6 +32,7 @@ EOF
 # variables
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
+DO_SHELL=false
 DO_BUILD=false
 DO_FLASH=false
 APP=""
@@ -48,6 +51,8 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
+        -i|--shell)
+            DO_SHELL=true; shift;;
         -b|--build)
             DO_BUILD=true; shift;;
         -f|--flash)
@@ -61,11 +66,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if ! $DO_BUILD && ! $DO_FLASH; then
-    echo "Nothing to do: pass --build and/or --flash"
-    exit 1
-fi
-
 # -----------------------------------------------------------------------------
 # DOCKER COMMAND BASE
 # -----------------------------------------------------------------------------
@@ -77,7 +77,6 @@ DOCKER_BASE=(
     -e USER_NAME=demo
     -e USER_UID="$(id -u)"
     -e USER_GID="$(id -g)"
-    -e WORKDIR=/spark
     "$DOCKER_IMAGE"
 )
 
@@ -91,6 +90,38 @@ run_cmd() {
         bash -lc "$cmd"
     fi
 }
+
+# -----------------------------------------------------------------------------
+# SHELL MODE (launch container only)
+# -----------------------------------------------------------------------------
+if $DO_SHELL; then
+    if ! $DOCKER; then
+        echo "Error: --shell requires --docker"
+        exit 1
+    fi
+
+    echo "=== Launching interactive shell inside Docker image: $DOCKER_IMAGE ==="
+    # Add -it only for interactive shell usage
+    docker run --rm --privileged -it \
+        --device /dev/bus/usb:/dev/bus/usb \
+        -v "$PWD":/spark \
+        -w /spark \
+        -e USER_NAME=demo \
+        -e USER_UID="$(id -u)" \
+        -e USER_GID="$(id -g)" \
+        -e WORKDIR=/spark \
+        "$DOCKER_IMAGE" \
+        bash -l
+    exit $?
+fi
+
+# -----------------------------------------------------------------------------
+# Normal build/flash flow
+# -----------------------------------------------------------------------------
+if ! $DO_BUILD && ! $DO_FLASH; then
+    echo "Nothing to do: pass --build and/or --flash, or use --shell"
+    exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # BUILD/FLASH COMMANDS PER APP
