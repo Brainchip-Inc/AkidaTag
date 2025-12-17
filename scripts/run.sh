@@ -1,75 +1,114 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 print_help() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  -d, --docker  | (str)  | Run build/flash using Docker
-                |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
-  -i, --shell   | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
-  -b, --build   | (flag) | Do Build
-  -b, --build   | (flag) | Do Build
-  -f, --flash   | (flag) | Do Flash
-  --app         | (str)  | App to build/flash 
-  -h, --help    | (flag) | Show this help message
+  --app            | (str)  | App to build/flash
+  -b, --build      | (flag) | Do Build
+  -f, --flash      | (flag) | Do Flash
+  --bin            | (str)  | If provided, send a model .bin to Akida External Flash via BLE
+  -d, --docker     | (str)  | Run build/flash using Docker
+                   |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
+  -i, --shell      | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
+  -h, --help       | (flag) | Show this help message
 
 Examples:
-  # Build blinky locally
+  # Build locally (eg. app - blinky)
   $(basename "$0") -b --app blinky
 
-  # Build blinky inside Docker
-  $(basename "$0") -d spark-ncs:v3.1.1-py3.12 -b --app blinky
+  # Build akida_spi_flash_app inside Docker
+  $(basename "$0") -d --app akida_spi_flash_app
 
-APP(s):
-  - blinky
-  - lib-akd1500 (sending model)
-  - ble (ble ota blinky)
-  - peripheral_lbs
+  # Flash blinky inside Docker
+  $(basename "$0") -d --app akida_spi_flash_app
+
+  # Send model To Akida External Flash via BLE
+  $(basename "$0") -d --app akida_spi_flash_app --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin
+
+  # If have a customer docker image then provide docker image name with -d
+  $(basename "$0") -d -b --app akida_spi_flash_app  
+
 EOF
 }
 
-# variables
+# -----------------------------------------------------------------------------
+# Variables
+# -----------------------------------------------------------------------------
+APP=""
+DO_BUILD=false
+DO_FLASH=false
+MODEL_BIN=""
+
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
 DO_SHELL=false
-DO_BUILD=false
-DO_FLASH=false
-APP=""
 
+# -----------------------------------------------------------------------------
+# Arg parsing
+# -----------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --app) APP="${2:-}"; shift 2;;
+        -b|--build) DO_BUILD=true; shift;;
+        -f|--flash) DO_FLASH=true; shift;;
+        --bin) MODEL_BIN="${2:-}"; shift 2;;
         -d|--docker)
             DOCKER=true
-            # Look ahead: if next argument exists and is NOT a flag, treat it as image name
-            if [[ -n "$2" && "$2" != -* ]]; then
+            # Optional image name
+            if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
                 DOCKER_IMAGE="$2"
                 shift 2
             else
-                # Use default DOCKER_IMAGE
                 echo "Using default Docker image: $DOCKER_IMAGE"
                 shift
             fi
             ;;
-        -i|--shell)
-            DO_SHELL=true; shift;;
-        -b|--build)
-            DO_BUILD=true; shift;;
-        -f|--flash)
-            DO_FLASH=true; shift;;
-        --app)
-            APP="$2"; shift 2;;
-        -h|--help)
-            print_help; exit 0;;
-        *)
-            echo "Unknown option $1"; shift;;
+        -i|--shell) DO_SHELL=true; shift;;
+        -h|--help) print_help; exit 0;;
+        *) echo "Unknown option $1"; shift;;
     esac
 done
 
 # -----------------------------------------------------------------------------
-# DOCKER COMMAND BASE
+# Validations
 # -----------------------------------------------------------------------------
-DOCKER_BASE=(
+if $DO_SHELL && ! $DOCKER; then
+    echo "Error: --shell requires --docker"
+    exit 1
+fi
+
+if ! $DO_SHELL && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
+    echo "Nothing to do: pass --build and/or --flash and/or --bin, or use --shell"
+    exit 1
+fi
+
+if ! $DO_SHELL && [[ -z "$APP" ]]; then
+    echo "Error: --app is required"
+    exit 1
+fi
+
+if [[ -n "$MODEL_BIN" && ! -f "$MODEL_BIN" ]]; then
+    echo "Error: --bin file not found: $MODEL_BIN"
+    exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# BLE needed?
+#   - if --bin present (sending model), OR
+#   - if --shell requested (BLE access in shell)
+# -----------------------------------------------------------------------------
+BLE_NEEDED=false
+if [[ -n "$MODEL_BIN" ]] || $DO_SHELL; then
+    BLE_NEEDED=true
+fi
+
+# -----------------------------------------------------------------------------
+# Docker run base (IMPORTANT: image name is NOT included here)
+# -----------------------------------------------------------------------------
+DOCKER_RUN_BASE=(
     docker run --rm --privileged
     --device /dev/bus/usb:/dev/bus/usb
     -v "$PWD":/spark
@@ -77,97 +116,108 @@ DOCKER_BASE=(
     -e USER_NAME=demo
     -e USER_UID="$(id -u)"
     -e USER_GID="$(id -g)"
-    "$DOCKER_IMAGE"
+    -it
 )
 
-run_cmd() {
-    local cmd="$1"
-    if $DOCKER; then
-        # Run inside container; BOARD expands inside docker via bash -lc
-        "${DOCKER_BASE[@]}" bash -lc "$cmd"
-    else
-        # Run directly on host
-        bash -lc "$cmd"
-    fi
-}
+if $BLE_NEEDED; then
+    DOCKER_RUN_BASE+=(-v /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket:ro)
+fi
 
 # -----------------------------------------------------------------------------
-# SHELL MODE (launch container only)
+# SHELL MODE (interactive)
+# NOTE: -it MUST be before the image name
 # -----------------------------------------------------------------------------
 if $DO_SHELL; then
-    if ! $DOCKER; then
-        echo "Error: --shell requires --docker"
-        exit 1
+    echo "=== Launching interactive shell inside Docker image: $DOCKER_IMAGE ==="
+    if $BLE_NEEDED; then
+        echo "    (dbus socket mounted: /var/run/dbus/system_bus_socket)"
     fi
 
-    echo "=== Launching interactive shell inside Docker image: $DOCKER_IMAGE ==="
-    # Add -it only for interactive shell usage
-    docker run --rm --privileged -it \
-        --device /dev/bus/usb:/dev/bus/usb \
-        -v "$PWD":/spark \
-        -w /spark \
-        -e USER_NAME=demo \
-        -e USER_UID="$(id -u)" \
-        -e USER_GID="$(id -g)" \
-        -e WORKDIR=/spark \
-        "$DOCKER_IMAGE" \
-        bash -l
+    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -l
     exit $?
 fi
 
 # -----------------------------------------------------------------------------
-# Normal build/flash flow
+# App → source dir (dynamic by default)
 # -----------------------------------------------------------------------------
-if ! $DO_BUILD && ! $DO_FLASH; then
-    echo "Nothing to do: pass --build and/or --flash, or use --shell"
-    exit 1
-fi
+APP_SRC_DIR="samples/$APP"
 
-# -----------------------------------------------------------------------------
-# BUILD/FLASH COMMANDS PER APP
-# IMPORTANT: -b "$BOARD" MUST BE IN SINGLE QUOTES so HOST does NOT expand it
-# -----------------------------------------------------------------------------
+# Overrides for non-standard layouts
 case "$APP" in
-    blinky)
-        BUILD_CMD='west build -p always -b "$BOARD" -s samples/blinky -d build_docker/blinky'
-        FLASH_CMD='west flash -d build_docker/blinky'
-        ;;
-    lib-akd1500)
-        BUILD_CMD='west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -d build_docker/sending_model'
-        FLASH_CMD='west flash -d build_docker/sending_model'
-        ;;
-    ble)
-        BUILD_CMD='west build -p always -b "$BOARD" -s samples/lib-mada-BT/examples/ble_jlink_example -d build_docker/ble_jlink_example'
-        FLASH_CMD='west flash -d build_docker/ble_jlink_example'
-        ;;
-    peripheral_lbs)
-        BUILD_CMD='west build -p always -b "$BOARD" -s samples/peripheral_lbs -d build_docker/peripheral_lbs'
-        FLASH_CMD='west flash -d build_docker/peripheral_lbs'
-        ;;
-    *)
-        echo "Unknown app $APP"; exit 1;;
+  lib-akd1500)
+    APP_SRC_DIR="samples/lib-akd1500/examples/sending-model"
+    ;;
+  ble)
+    APP_SRC_DIR="samples/lib-mada-BT/examples/ble_jlink_example"
+    ;;
 esac
 
-# -----------------------------------------------------------------------------
-# EXECUTE BUILD / FLASH
-# -----------------------------------------------------------------------------
-if $DO_BUILD; then
-    if $DOCKER; then
-        echo "=== Building $APP inside Docker image: $DOCKER_IMAGE ==="
-    else
-        echo "=== Building $APP locally ==="
-    fi
-    echo "$BUILD_CMD"
-    run_cmd "$BUILD_CMD"
+if [[ ! -d "$APP_SRC_DIR" ]]; then
+  echo "Error: app source directory not found: $APP_SRC_DIR"
+  exit 1
 fi
 
-if $DO_FLASH; then
-    if $DOCKER; then
-        echo "=== Flashing $APP inside Docker image: $DOCKER_IMAGE ==="
-    else
-        echo "=== Flashing $APP locally ==="
-    fi
-    run_cmd "$FLASH_CMD"
+# -----------------------------------------------------------------------------
+# Build directory depends on local vs docker
+# -----------------------------------------------------------------------------
+if $DOCKER; then
+  APP_BUILD_DIR="build_docker/$APP"
+else
+  APP_BUILD_DIR="build/$APP"
 fi
 
-echo "Done."
+# -----------------------------------------------------------------------------
+# Commands
+# IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
+# -----------------------------------------------------------------------------
+BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
+FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
+
+SEND_MODEL_CMD=""
+if [[ -n "$MODEL_BIN" ]]; then
+  SEND_MODEL_CMD="python samples/${APP}/utils/send_model_via_ble.py --bin \"${MODEL_BIN}\""
+fi
+
+# -----------------------------------------------------------------------------
+# Assemble ordered steps: BUILD -> FLASH -> SEND MODEL
+# -----------------------------------------------------------------------------
+declare -a STEPS=()
+$DO_BUILD && STEPS+=("$BUILD_CMD")
+$DO_FLASH && STEPS+=("$FLASH_CMD")
+[[ -n "$SEND_MODEL_CMD" ]] && STEPS+=("$SEND_MODEL_CMD")
+
+if [[ ${#STEPS[@]} -eq 0 ]]; then
+  echo "Nothing to do"
+  exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# Execute steps
+# - Docker: ONE container, run all steps sequentially
+# - Local : run all steps sequentially on host
+# -----------------------------------------------------------------------------
+if $DOCKER; then
+    echo "=== Running in Docker image: $DOCKER_IMAGE ==="
+    if $BLE_NEEDED; then
+        echo "    (dbus socket mounted: /var/run/dbus/system_bus_socket)"
+    fi
+
+    joined=""
+    for c in "${STEPS[@]}"; do
+        # Print command in container, then run it
+        joined+="echo; echo \">>> $c\"; "
+        joined+="$c; "
+    done
+
+    echo ">>> Docker command:"
+    printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -lc "$joined"
+    echo
+
+    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -lc "$joined"
+else
+    for c in "${STEPS[@]}"; do
+        echo
+        echo ">>> $c"
+        bash -lc "$c"
+    done
+fi
