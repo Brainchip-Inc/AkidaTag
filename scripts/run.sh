@@ -13,6 +13,8 @@ Options:
   -d, --docker     | (str)  | Run build/flash using Docker
                    |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
   -i, --shell      | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
+  -m, --minicom    | (opt)  | Run minicom inside Docker (default: ttyUSB0).
+                   |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
   -h, --help       | (flag) | Show this help message
 
 Examples:
@@ -31,6 +33,9 @@ Examples:
   # If have a customer docker image then provide docker image name with -d
   $(basename "$0") -d -b --app akida_spi_flash_app  
 
+  # Minicom on /dev/ttyACM0
+  $(basename "$0") -d -m ttyUSB0
+
 EOF
 }
 
@@ -45,6 +50,9 @@ MODEL_BIN=""
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
 DO_SHELL=false
+
+DO_MINICOM=false
+MINICOM_DEV="/dev/ttyUSB0"
 
 # -----------------------------------------------------------------------------
 # Arg parsing
@@ -67,6 +75,21 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         -i|--shell) DO_SHELL=true; shift;;
+        -m|--minicom)
+            DO_MINICOM=true
+            if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                # Accept ttyUSB0 or /dev/ttyUSB0 etc.
+                if [[ "$2" == /dev/* ]]; then
+                    MINICOM_DEV="$2"
+                else
+                    MINICOM_DEV="/dev/$2"
+                fi
+                shift 2
+            else
+                # default /dev/ttyUSB0
+                shift
+            fi
+            ;;
         -h|--help) print_help; exit 0;;
         *) echo "Unknown option $1"; shift;;
     esac
@@ -75,21 +98,30 @@ done
 # -----------------------------------------------------------------------------
 # Validations
 # -----------------------------------------------------------------------------
+if $DO_MINICOM && ! $DOCKER; then
+    echo "Error: --minicom requires --docker"
+    exit 1
+fi
+
+# --shell requires --docker
 if $DO_SHELL && ! $DOCKER; then
     echo "Error: --shell requires --docker"
     exit 1
 fi
 
-if ! $DO_SHELL && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
-    echo "Nothing to do: pass --build and/or --flash and/or --bin, or use --shell"
+# If not shell/minicom, require at least one action: build/flash/bin
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
+    echo "Nothing to do: pass --build and/or --flash and/or --bin, or use --shell / --minicom"
     exit 1
 fi
 
-if ! $DO_SHELL && [[ -z "$APP" ]]; then
+# Require --app when doing build/flash/bin (minicom and shell don't need it)
+if ! $DO_SHELL && ! $DO_MINICOM && ( $DO_BUILD || $DO_FLASH || [[ -n "$MODEL_BIN" ]] ) && [[ -z "$APP" ]]; then
     echo "Error: --app is required"
     exit 1
 fi
 
+# Validate --bin file existence on host (works for local and docker since we mount PWD)
 if [[ -n "$MODEL_BIN" && ! -f "$MODEL_BIN" ]]; then
     echo "Error: --bin file not found: $MODEL_BIN"
     exit 1
@@ -121,6 +153,25 @@ DOCKER_RUN_BASE=(
 
 if $BLE_NEEDED; then
     DOCKER_RUN_BASE+=(-v /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket:ro)
+fi
+
+# Add tty device for minicom
+if $DO_MINICOM; then
+    DOCKER_RUN_BASE+=(--device "${MINICOM_DEV}:${MINICOM_DEV}")
+fi
+
+# -----------------------------------------------------------------------------
+# MINICOM MODE
+# -----------------------------------------------------------------------------
+if $DO_MINICOM; then
+    echo "=== Launching minicom inside Docker image: $DOCKER_IMAGE ==="
+    echo "    Device: $MINICOM_DEV"
+    echo ">>> Docker command:"
+    printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" minicom -D "$MINICOM_DEV"
+    echo
+
+    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" minicom -D "$MINICOM_DEV"
+    exit $?
 fi
 
 # -----------------------------------------------------------------------------
