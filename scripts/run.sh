@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+print_help() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  --app            | (str)  | App to build/flash
+  -b, --build      | (flag) | Do Build
+  -f, --flash      | (flag) | Do Flash
+  --bin            | (str)  | If provided, send a model .bin to Akida External Flash via BLE
+  -d, --docker     | (str)  | Run build/flash using Docker
+                   |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
+  -i, --shell      | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
+  -m, --minicom    | (str)  | Run minicom inside Docker (default: ttyUSB0).
+                   |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
+  -r, --reset      | (flag) | Do Board Reset
+  -h, --help       | (flag) | Show this help message
+
+Examples:
+  # Build locally (eg. app - blinky)
+  $(basename "$0") -b --app blinky
+
+  # Build akida_spi_flash_app inside Docker
+  $(basename "$0") -d --app akida_spi_flash_app
+
+  # Flash blinky inside Docker
+  $(basename "$0") -d --app akida_spi_flash_app
+
+  # Send model To Akida External Flash via BLE
+  $(basename "$0") -d --app akida_spi_flash_app --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin
+
+  # If have a customer docker image then provide docker image name with -d
+  $(basename "$0") -d -b --app akida_spi_flash_app  
+
+  # Minicom on /dev/ttyACM0
+  $(basename "$0") -d -m ttyUSB0
+
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Variables
+# -----------------------------------------------------------------------------
+APP=""
+DO_BUILD=false
+DO_FLASH=false
+MODEL_BIN=""
+
+DOCKER=false
+DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
+DO_SHELL=false
+
+DO_MINICOM=false
+MINICOM_DEV="/dev/ttyUSB0"
+
+DO_RESET=false
+
+# -----------------------------------------------------------------------------
+# Arg parsing
+# -----------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --app) APP="${2:-}"; shift 2;;
+        -b|--build) DO_BUILD=true; shift;;
+        -f|--flash) DO_FLASH=true; shift;;
+        --bin) MODEL_BIN="${2:-}"; shift 2;;
+        -d|--docker)
+            DOCKER=true
+            # Optional image name
+            if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                DOCKER_IMAGE="$2"
+                shift 2
+            else
+                echo "Using default Docker image: $DOCKER_IMAGE"
+                shift
+            fi
+            ;;
+        -i|--shell) DO_SHELL=true; shift;;
+        -m|--minicom)
+            DO_MINICOM=true
+            if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                # Accept ttyUSB0 or /dev/ttyUSB0 etc.
+                if [[ "$2" == /dev/* ]]; then
+                    MINICOM_DEV="$2"
+                else
+                    MINICOM_DEV="/dev/$2"
+                fi
+                shift 2
+            else
+                # default /dev/ttyUSB0
+                shift
+            fi
+            ;;
+        -r|--reset) DO_RESET=true; shift;;
+        -h|--help) print_help; exit 0;;
+        *) echo "Unknown option $1"; shift;;
+    esac
+done
+
+# -----------------------------------------------------------------------------
+# Validations
+# -----------------------------------------------------------------------------
+# --shell requires --docker
+if $DO_SHELL && ! $DOCKER; then
+    echo "Error: --shell requires --docker"
+    exit 1
+fi
+
+# If not shell/minicom, require at least one action: build/flash/bin
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
+    echo "Nothing to do: pass --build and/or --flash and/or --bin, or use --shell / --minicom"
+    exit 1
+fi
+
+# Require --app when doing build/flash/bin (minicom and shell don't need it)
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ( $DO_BUILD || $DO_FLASH || [[ -n "$MODEL_BIN" ]] ) && [[ -z "$APP" ]]; then
+    echo "Error: --app is required"
+    exit 1
+fi
+
+# Validate --bin file existence on host (works for local and docker since we mount PWD)
+if [[ -n "$MODEL_BIN" && ! -f "$MODEL_BIN" ]]; then
+    echo "Error: --bin file not found: $MODEL_BIN"
+    exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# BLE needed?
+#   - if --bin present (sending model), OR
+#   - if --shell requested (BLE access in shell)
+# -----------------------------------------------------------------------------
+BLE_NEEDED=false
+if [[ -n "$MODEL_BIN" ]] || $DO_SHELL; then
+    BLE_NEEDED=true
+fi
+
+# -----------------------------------------------------------------------------
+# Docker run base (IMPORTANT: image name is NOT included here)
+# -----------------------------------------------------------------------------
+DOCKER_RUN_BASE=(
+    docker run --rm --privileged
+    --device /dev/bus/usb:/dev/bus/usb
+    -v "$PWD":/spark
+    -w /spark
+    -e USER_NAME=demo
+    -e USER_UID="$(id -u)"
+    -e USER_GID="$(id -g)"
+    -it
+)
+
+if $BLE_NEEDED; then
+    DOCKER_RUN_BASE+=(-v /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket:ro)
+fi
+
+# Add tty device for minicom
+if $DO_MINICOM; then
+    DOCKER_RUN_BASE+=(--device "${MINICOM_DEV}:${MINICOM_DEV}")
+fi
+
+# -----------------------------------------------------------------------------
+# RESET
+# -----------------------------------------------------------------------------
+if $DO_RESET; then
+    echo "=== Reset board inside Docker image: $DOCKER_IMAGE ==="
+    echo ">>> Docker command:"
+    printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" nrfutil device reset
+    echo
+
+    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" nrfutil device reset
+    exit $?
+fi
+
+# -----------------------------------------------------------------------------
+# MINICOM MODE
+# -----------------------------------------------------------------------------
+if $DO_MINICOM; then
+    echo "=== Launching minicom inside Docker image: $DOCKER_IMAGE ==="
+    echo "    Device: $MINICOM_DEV"
+    echo ">>> Docker command:"
+    printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" minicom -D "$MINICOM_DEV"
+    echo
+
+    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" minicom -D "$MINICOM_DEV"
+    exit $?
+fi
+
+# -----------------------------------------------------------------------------
+# SHELL MODE (interactive)
+# NOTE: -it MUST be before the image name
+# -----------------------------------------------------------------------------
+if $DO_SHELL; then
+    echo "=== Launching interactive shell inside Docker image: $DOCKER_IMAGE ==="
+    if $BLE_NEEDED; then
+        echo "    (dbus socket mounted: /var/run/dbus/system_bus_socket)"
+    fi
+
+    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -l
+    exit $?
+fi
+
+# -----------------------------------------------------------------------------
+# App → source dir (dynamic by default)
+# -----------------------------------------------------------------------------
+APP_SRC_DIR="samples/$APP"
+
+# Overrides for non-standard layouts
+case "$APP" in
+  lib-akd1500)
+    APP_SRC_DIR="samples/lib-akd1500/examples/sending-model"
+    ;;
+  ble)
+    APP_SRC_DIR="samples/lib-mada-BT/examples/ble_jlink_example"
+    ;;
+esac
+
+if [[ ! -d "$APP_SRC_DIR" ]]; then
+  echo "Error: app source directory not found: $APP_SRC_DIR"
+  exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# Build directory depends on local vs docker
+# -----------------------------------------------------------------------------
+if $DOCKER; then
+  APP_BUILD_DIR="build_docker/$APP"
+else
+  APP_BUILD_DIR="build/$APP"
+fi
+
+# -----------------------------------------------------------------------------
+# Commands
+# IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
+# -----------------------------------------------------------------------------
+BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
+FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
+
+SEND_MODEL_CMD=""
+if [[ -n "$MODEL_BIN" ]]; then
+  SEND_MODEL_CMD="python samples/${APP}/utils/send_model_via_ble.py --bin \"${MODEL_BIN}\""
+fi
+
+# -----------------------------------------------------------------------------
+# Assemble ordered steps: BUILD -> FLASH -> SEND MODEL
+# -----------------------------------------------------------------------------
+declare -a STEPS=()
+$DO_BUILD && STEPS+=("$BUILD_CMD")
+$DO_FLASH && STEPS+=("$FLASH_CMD")
+[[ -n "$SEND_MODEL_CMD" ]] && STEPS+=("$SEND_MODEL_CMD")
+
+if [[ ${#STEPS[@]} -eq 0 ]]; then
+  echo "Nothing to do"
+  exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# Execute steps
+# - Docker: ONE container, run all steps sequentially
+# - Local : run all steps sequentially on host
+# -----------------------------------------------------------------------------
+if $DOCKER; then
+    echo "=== Running in Docker image: $DOCKER_IMAGE ==="
+    if $BLE_NEEDED; then
+        echo "    (dbus socket mounted: /var/run/dbus/system_bus_socket)"
+    fi
+
+    joined=""
+    for c in "${STEPS[@]}"; do
+        # Print command in container, then run it
+        joined+="echo; echo \">>> $c\"; "
+        joined+="$c; "
+    done
+
+    echo ">>> Docker command:"
+    printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -lc "$joined"
+    echo
+
+    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -lc "$joined"
+else
+    for c in "${STEPS[@]}"; do
+        echo
+        echo ">>> $c"
+        bash -lc "$c"
+    done
+fi
