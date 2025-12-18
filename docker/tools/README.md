@@ -1,0 +1,3 @@
+- Go to [J-Link Software and Documentation Pack](https://www.segger.com/downloads/jlink/)
+- Download `.deb` file, version `v8.88`
+- Agree and accept terms
