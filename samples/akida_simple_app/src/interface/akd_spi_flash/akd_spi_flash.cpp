@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(AKD_SPI_FLASH, LOG_LEVEL_DBG);
 
 #define FLASH_CMD_WR_ENABLE (0x6)
 #define FLASH_CMD_WR (0x2)
@@ -43,7 +46,6 @@ static int spi_flash_wait_until_ready(akida::ZephyrSpiDriver spi_flash_driver_, 
   uint32_t tx_rx_len = ((1 << 16) | 1);
 
   while (elapsed_ms < timeout_ms) {
-    // spi_flash_driver_.spiflashwrite(0, &cmd, 1);
     spi_flash_driver_.spiflashread(0, &cmd, &status, tx_rx_len);
 
     if ((status & 0x01) == 0) {
@@ -60,9 +62,9 @@ static uint8_t spi_flash_read_flag_status(akida::ZephyrSpiDriver spi_flash_drive
   uint8_t cmd = CMD_READ_FLAG_STATUS_REG;
   uint32_t status = 0;
   uint32_t tx_rx_len = ((1 << 16) | 1);
-  // spi_flash_driver_.spiflashwrite(0, &cmd, 1);
+
   spi_flash_driver_.spiflashread(0, &cmd, (uint8_t *)&status, tx_rx_len);
-  // printf ("Flag status ID 0x%x\n", status);
+
   return status;
 }
 
@@ -71,9 +73,9 @@ uint32_t spi_flash_read_id(akida::ZephyrSpiDriver spi_flash_driver_) {
   uint8_t cmd = CMD_READ_ID;
   uint32_t device_id = 0;
   uint32_t tx_rx_len = ((1 << 16) | 4);
-  // spi_flash_driver_.spiflashwrite(0, &cmd, 1);
+
   spi_flash_driver_.spiflashread(0, &cmd, (uint8_t *)&device_id, tx_rx_len);
-  printf("device ID 0x%x\n", device_id);
+  LOG_PRINTK("AKD_SPI_FLASH: Serial Flash Device ID 0x%x\n", device_id);
   return device_id;
 }
 
@@ -135,12 +137,12 @@ int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t secto
 
     ret = spi_flash_wait_until_ready(spi_flash_driver_);
     if (ret != 0) {
-      printf("Error in erase operation\n");
+      LOG_ERR("AKD_SPI_FLASH: Error in erase operation\n");
       return ret;
     }
     ret = spi_flash_read_flag_status(spi_flash_driver_);
     if ((ret & 0x20) == 0x20) {
-      printf("read_flag_status error in erase operation, error value %x\n",
+      LOG_ERR("AKD_SPI_FLASH: read_flag_status error in erase operation, error value %x\n",
              ret);
       return ret;
     }
@@ -184,12 +186,12 @@ int spi_flash_write(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, 
 
     ret = spi_flash_wait_until_ready(spi_flash_driver_);
     if (ret != 0) {
-      printf("Error in write operation");
+      LOG_ERR("AKD_SPI_FLASH: Error in write operation");
       return ret;
     }
     ret = spi_flash_read_flag_status(spi_flash_driver_);
     if ((ret & 0x10) == 0x10) {
-      printf("read_flag_status error in flash write operation");
+      LOG_ERR("AKD_SPI_FLASH: read_flag_status error in flash write operation");
       return ret;
     }
     address += chunk;
@@ -226,9 +228,3 @@ int spi_flash_read(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, u
 
   return 0;
 }
-
-/*
-int flashread(akida::ZephyrSpiDriver spi_flash_driver_, unsigned char *data, uint32_t addr, uint32_t len) {
-  spi_flash_read(spi_flash_driver_, addr, data, len);
-  return 0;
-}*/

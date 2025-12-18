@@ -437,7 +437,6 @@ int main(void)
 	{
 		printk("Sanity test of 1 MB SRAM is failed\n");
 	}
-
      
     akida::HardwareDeviceImpl device(&akd1500);
     akida::ProgramInfo program_info(&kws_model[0], kws_model_len);

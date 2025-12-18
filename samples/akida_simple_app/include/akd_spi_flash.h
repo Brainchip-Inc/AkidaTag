@@ -1,5 +1,5 @@
-#ifndef SPI_FLASH_H
-#define SPI_FLASH_H
+#ifndef AKD_SPI_FLASH_H
+#define AKD_SPI_FLASH_H
 #include "nrf_spi.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -17,4 +17,4 @@ uint32_t spi_flash_read_id(akida::ZephyrSpiDriver spi_flash_driver_);
 }
 #endif
 
-#endif // SPI_FLASH_H
+#endif // AKD_SPI_FLASH_H

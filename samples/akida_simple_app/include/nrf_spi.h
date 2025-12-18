@@ -1,5 +1,5 @@
-#ifndef LIB_AKD1500_H
-#define LIB_AKD1500_H
+#ifndef NRF_SPI_H
+#define NRF_SPI_H
 
 #include <cstddef>
 #include <cstdint>
@@ -19,7 +19,7 @@ namespace akida
 
         ZephyrSpiDriver()
         {
-            int ret = init_qspi();
+            int ret = init_spi();
             if (ret != 0) {
                 printk("Failed to initialize SPI in constructor! Error: %d\n", ret);
             } else {
@@ -27,8 +27,8 @@ namespace akida
             }
         }
 
-        // Manually initialize and deinitialize QSPI
-        int init_qspi();
+        // Manually initialize SPI
+        int init_spi();
 
         // SPI functions with address support
         void read_api(uint32_t address, uint8_t *data, size_t size) ;
@@ -44,4 +44,4 @@ namespace akida
 } // namespace akida
 void akd1500_send_custom_cmd(uint8_t opcode, const void *tx_data, size_t tx_len, void *rx_data, size_t rx_len);
 
-#endif // LIB_AKD1500_H
+#endif // NRF_SPI_H
