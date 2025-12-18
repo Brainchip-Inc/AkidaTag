@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(AKD_SPI_FLASH, LOG_LEVEL_DBG);
 
 #define FLASH_CMD_WR_ENABLE (0x6)
 #define FLASH_CMD_WR (0x2)
@@ -73,7 +76,7 @@ uint32_t spi_flash_read_id(akida::ZephyrSpiDriver spi_flash_driver_) {
   uint32_t tx_rx_len = ((1 << 16) | 4);
 
   spi_flash_driver_.spiflashread(0, &cmd, (uint8_t *)&device_id, tx_rx_len);
-  printf("Serial Flash Device ID 0x%x\n", device_id);
+  LOG_PRINTK("AKD_SPI_FLASH: Serial Flash Device ID 0x%x\n", device_id);
   return device_id;
 }
 
@@ -135,12 +138,12 @@ int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t secto
 
     ret = spi_flash_wait_until_ready(spi_flash_driver_);
     if (ret != 0) {
-      printf("Error in erase operation\n");
+      LOG_ERR("AKD_SPI_FLASH: Error in erase operation\n");
       return ret;
     }
     ret = spi_flash_read_flag_status(spi_flash_driver_);
     if ((ret & 0x20) == 0x20) {
-      printf("read_flag_status error in erase operation, error value %x\n",
+      LOG_ERR("AKD_SPI_FLASH: read_flag_status error in erase operation, error value %x\n",
              ret);
       return ret;
     }
@@ -184,12 +187,12 @@ int spi_flash_write(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, 
 
     ret = spi_flash_wait_until_ready(spi_flash_driver_);
     if (ret != 0) {
-      printf("Error in write operation");
+      LOG_ERR("AKD_SPI_FLASH: Error in write operation");
       return ret;
     }
     ret = spi_flash_read_flag_status(spi_flash_driver_);
     if ((ret & 0x10) == 0x10) {
-      printf("read_flag_status error in flash write operation");
+      LOG_ERR("AKD_SPI_FLASH: read_flag_status error in flash write operation");
       return ret;
     }
     address += chunk;
@@ -226,9 +229,3 @@ int spi_flash_read(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, u
 
   return 0;
 }
-
-/*
-int flashread(akida::ZephyrSpiDriver spi_flash_driver_, unsigned char *data, uint32_t addr, uint32_t len) {
-  spi_flash_read(spi_flash_driver_, addr, data, len);
-  return 0;
-}*/

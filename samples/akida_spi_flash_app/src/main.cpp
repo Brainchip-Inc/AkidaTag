@@ -629,26 +629,24 @@ static int infer(int app_index_l) {
     return -1;
   }
 
-  if(app_index != app_index_l) {
-      akida_config_spi(1);
-      int ret = check_program_data(flash_offsets[app_index_l], 4, app_index_l);
-      akida_config_spi(0);
+  akida_config_spi(1);
+  int ret = check_program_data(flash_offsets[app_index_l], 4, app_index_l);
+  akida_config_spi(0);
 
-      if (ret == false) {
-        printk("model data, not present in SPI Flash, upload the model\n");
-        return -1;
-      } else {
-      printk("model is already present \n");
-    // program the model info part to AKD1500
+  if (ret == false) {
+	printk("model data, not present in SPI Flash, upload the model\n");
+	return -1;
+  } else {
+  printk("model is already present \n");
+// program the model info part to AKD1500
 
-      printk("Programming the model\n");
-      akida_program_info((uint8_t *)program_info[app_index_l], program_info_len[app_index_l],
-                flash_offsets[app_index_l]);
-      device.set_batch_size(1, true);
-      app_index = app_index_l;
+  printk("Programming the model\n");
+  akida_program_info((uint8_t *)program_info[app_index_l], program_info_len[app_index_l],
+			flash_offsets[app_index_l]);
+  device.set_batch_size(1, true);
+  app_index = app_index_l;
 
-      }
-    }
+  }
 
   device.toggle_clock_counter(true);
 
@@ -714,18 +712,23 @@ static int cmd_infer(const struct shell *shell, size_t argc, char **argv) {
     return -EINVAL;
   }
 
-  int app_index_l = -1;
   char* string = argv[1];
   if(!strcmp(string, "kws"))
-      app_index_l = 1;
+  {
+      app_index = 1;
+	  printk("inference kws requested, app index %d", app_index);
+  }
   else if(!strcmp(string, "mnist"))
-      app_index_l = 0;
+  {
+      app_index = 0;
+	  printk("inference mnist requested, app index %d", app_index);
+  }
   else {
     printk("Illegal model inference request");
     return -EINVAL;
   }
 
-  return infer(app_index_l);
+  return infer(app_index);
 }
 
 /* shell cli function to set external host MCU/AKD1500 as SPI master */
@@ -933,7 +936,7 @@ extern "C" ssize_t file_transfer_write(struct bt_conn *conn,
         akida_program_info((uint8_t *)program_info, program_info_len,
                            flash_offsets[app_index]);
         device.set_batch_size(1, true);
-        if (infer()) {
+        if (infer(app_index)) {
           return 1;
         }
         ble_pgm_offset = 0;

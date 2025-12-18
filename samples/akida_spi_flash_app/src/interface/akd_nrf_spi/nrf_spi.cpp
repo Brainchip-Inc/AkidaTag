@@ -13,26 +13,14 @@
 #include <string.h>
 #include <zephyr/kernel.h>
 
-LOG_MODULE_REGISTER(akd1500_driver, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(NRF_SPI, LOG_LEVEL_DBG);
 
-#define SPI_WRITE_CMD 0x80
-#define SPI_READ_CMD  0x60
-
-#define AKD_SLEEP_NODE DT_ALIAS(akdsleep)
-#define AKD_RESET_NODE DT_ALIAS(akdreset)
 #define AKD_CS_NODE DT_ALIAS(akdcs)
 #define FLASH_CS_NODE DT_ALIAS(flashcs)
 
-
-const struct gpio_dt_spec akdSleep = GPIO_DT_SPEC_GET(AKD_SLEEP_NODE, gpios);
-const struct gpio_dt_spec akdReset = GPIO_DT_SPEC_GET(AKD_RESET_NODE, gpios);
 const struct gpio_dt_spec akd_cs = GPIO_DT_SPEC_GET(AKD_CS_NODE, gpios);
 const struct gpio_dt_spec flash_cs = GPIO_DT_SPEC_GET(FLASH_CS_NODE, gpios);
 
-/*static struct spi_cs_control spi_cs = {
-    .gpio = GPIO_DT_SPEC_GET(DT_ALIAS(spi1), cs_gpios),
-    .delay = 0,
-};*/
 
 static struct spi_config spi_cfg = {
     .frequency = 400000U, // match Python default for stability
@@ -42,30 +30,30 @@ static struct spi_config spi_cfg = {
 
 namespace akida {
 
-int ZephyrSpiDriver::init_qspi() {
+int ZephyrSpiDriver::init_spi() {
     this->spi_dev = DEVICE_DT_GET(DT_ALIAS(spi1));
     if (!device_is_ready(this->spi_dev)) {
-        printk("SPI device not ready\n");
+        LOG_ERR("NRF_SPI: SPI device not ready\n");
         return -ENODEV;
     }
 
     if (!device_is_ready(akd_cs.port)) {
-        printf("Akida CS GPIO not ready.\n");
+        LOG_ERR("NRF_SPI: Akida CS GPIO not ready.\n");
         return 0;
     }
     if (gpio_pin_configure_dt(&akd_cs, GPIO_OUTPUT_ACTIVE) != 0) {
-        printf("Failed to configure Akida CS pin.\n");
+        LOG_ERR("NRF_SPI: Failed to configure Akida CS pin.\n");
         return 0;
     }
     gpio_pin_set_dt(&akd_cs, 1); // CS high (not selected)
 
 
     if (!device_is_ready(flash_cs.port)) {
-        printf("Flash CS GPIO not ready.\n");
+        LOG_ERR("NRF_SPI: Flash CS GPIO not ready.\n");
         return 0;
     }
     if (gpio_pin_configure_dt(&flash_cs, GPIO_OUTPUT_ACTIVE) != 0) {
-        printf("Failed to configure Flash CS pin.\n");
+        LOG_ERR("NRF_SPI: Failed to configure Flash CS pin.\n");
         return 0;
     }
     gpio_pin_set_dt(&flash_cs, 1); // CS high (not selected)
@@ -76,12 +64,10 @@ int ZephyrSpiDriver::init_qspi() {
 
 void ZephyrSpiDriver::read(uint8_t *data, size_t size) 
 {
-	printf("ZephyrSpiDriver::read 2 args");
 	return;
 }
 void ZephyrSpiDriver::write(const uint8_t *data, size_t size)
 {
-	printf("ZephyrSpiDriver::write 2 args");
 	return;
 }
 
@@ -99,7 +85,7 @@ void ZephyrSpiDriver::read_api(uint32_t header_size, uint8_t *data, size_t size)
 	int err = spi_transceive(this->spi_dev, &spi_cfg, &tx_set, &rx_set);
 	gpio_pin_set_dt(&akd_cs, 1); // CS HIGH
 	if (err != 0) {
-		printk("SPI transfer failed: %d\n", err);
+		LOG_ERR("NRF_SPI: SPI transfer failed: %d\n", err);
 		return;
 	}        
 	memcpy(&data[0], &tx_buf[header_size], size);
@@ -115,7 +101,7 @@ void ZephyrSpiDriver::write_api(uint32_t header_size, const uint8_t *data, size_
 	int err = spi_write(this->spi_dev, &spi_cfg, &tx_set);
 	gpio_pin_set_dt(&akd_cs, 1); // CS HIGH
 	if (err != 0) {
-		LOG_ERR("SPI write failed: %d", err);
+		LOG_ERR("NRF_SPI: SPI write failed: %d", err);
 		return;
 	}
     return;
@@ -133,7 +119,7 @@ void ZephyrSpiDriver::spiflashwrite(uint32_t address, const uint8_t *data, size_
 	int err = spi_write(this->spi_dev, &spi_cfg, &tx_set);
 	gpio_pin_set_dt(&flash_cs, 1); // CS HIGH
 	if (err != 0) {
-		LOG_ERR("SPI write failed: %d", err);
+		LOG_ERR("NRF_SPI: SPI write failed: %d", err);
 	}
 	return;
 }
@@ -153,7 +139,7 @@ void ZephyrSpiDriver::spiflashread(uint32_t address, uint8_t *cmd, uint8_t *data
 	int err = spi_transceive(this->spi_dev, &spi_cfg, &tx_set, &rx_set);
 	gpio_pin_set_dt(&flash_cs, 1); // CS HIGH
 	if (err != 0) {
-		printk("SPI transfer failed: %d\n", err);
+		LOG_ERR("NRF_SPI: SPI transfer failed: %d\n", err);
 		return;
 	}
 
