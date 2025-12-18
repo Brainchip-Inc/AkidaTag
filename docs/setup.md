@@ -1,15 +1,23 @@
 # Setup For nRF5340 DK And AKD1500 PCIe (SPI mode) + Interposer Board
 
-There are two ways to test samples and connections.
+### Step 1: Pin Connections with nRF5340 DK, AKD1500 & UART
 
-1. Build & Flash using Docker Image
-2. Build & Flash on system
+Follow the pin connections as shown below:
+
+![Pin Connections](./images_and_videos/images_and_videos/Pin-Connection-nRF-AK.jpg)
+
+![Pin Connections](./images_and_videos/images_and_videos/Pin-Connection-nRF-UART.jpg)
+
 
 ---
 
-## 1. Follow below if build/flash using docker image.
+### Step 2: Install Dependencies
 
-### Step 1: Build Docker Image
+Current setup provide dockerfile to create a docker image that will have all the required dependices.
+
+*Note: If you'd like to install depenencies locally then follow Appendix I: Install Dependency On System.*
+
+**Build Docker Image**
 
 Run the following script from Project Root To Build The Docker Image.
 
@@ -19,9 +27,6 @@ Run the following script from Project Root To Build The Docker Image.
 
 # build docker image for ncs v3.1.1
 ./scripts/build_docker_image.sh --ncs v3.1.1 --python3.12
-
-# build docker image for python3.11
-./scripts/build_docker_image.sh --ncs v3.1.1 --python3.11
 ```
 
 The build will take some time as it downloads ncs sdk.
@@ -32,23 +37,24 @@ Based on the scripts you ran, following images should be build and seen. See bel
 
 | IMAGE                   | ID           | DISK USAGE |
 |-------------------------|--------------|------------|
-| spark-ncs:v3.1.1-py3.11 | 08927c788e57 | 13.3GB     |
 | spark-ncs:v3.1.1-py3.12 | 7d2f06ee0930 | 17.6GB     |
 
 ---
 
-### Step 2: Build & Flash Blinky Sample
+### Step 3: Test Connections
 
-Build the Blinky Sample.
+*Note: Following scripts are running through docker. If installed dependency locally then simply remove `-d` from below runs. 
 
-```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1-py3.12 bash -c 'west build -p always -b "$BOARD" -s samples/blinky -d build_docker/blinky'
-```
+**1. Blinky Sample**
 
-Flash the Blinky Sample.
+This app will confirm if nRF5340 DK board is functioning. 
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1-py3.12 bash -c 'west flash -d build_docker/blinky'
+# build
+./scripts/run.sh -d -b --app blinky
+
+# flash
+./scripts/run.sh -d -f --app blinky
 ```
 
 Upon running this, the board should show flashing light as shown below:
@@ -59,45 +65,153 @@ Upon running this, the board should show flashing light as shown below:
 
 ```
 # replace /dev/ttyACM1 with endpoint at your system
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark -it spark-ncs:v3.1.1-py3.12 bash -c 'minicom -D /dev/ttyACM1'
+minicom -D /dev/ttyACM1'
+
+# install minicom if not there
+sudo apt-get install minicom
 ```
 
 Following output should be seen:
 
-![Blinky UART Output](./images_and_videos/Blinky-UART-Output.png)
+![Blinky UART Output](./images_and_videos/Blinky-UART-Output.jpg)
 
 ---
 
-### Step 3. Build & Flash lib-akd1500 sending model sample
+**2. Akida Simple App**
 
-Build the lib-akd1500 sending model sample
-
-```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1-py3.12 bash -c 'west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -d build_docker/sending-model'
-```
-
-Flash the lib-akd1500 sending model sample
+This app will confirm that there is communication established between nRF5340 DK and AKD1500.
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1-py3.12 bash -c 'west flash -d build_docker/sending-model'
+# build
+./scripts/run.sh -d -b --app akida_simple_app
+
+# flash
+./scripts/run.sh -d -f --app akida_simple_app
 ```
 
-**To see output on the terminal through UART**
+The application flashed already contains a kws model. This flashed code will loads the model to Akida and run a single inference. You should see the following output on the UART
 
 ```
 # replace /dev/ttyUSB0 with endpoint at your system
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -w /spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark -it spark-ncs:v3.1.1-py3.12 bash -c 'minicom -D /dev/ttyUSB0'
+minicom -D /dev/ttyUSB0
 ```
 
-Following output should be seen:
+```
+Welcome to minicom 2.8
 
-![Lib-AKD1500-Sending-Model](./images_and_videos/Lib-Akd1500-sending-model.png)
+OPTIONS: I18n
+Port /dev/ttyUSB0, 21:54:50
+
+Press CTRL-A Z for help on special keys
+
+E: JEDEC id [ff ff ff] expect [c2 28 17]
+*** Booting My Application v2.6.0-b3a1d8f06189 ***
+*** Using nRF Connect SDK v3.1.1-e2a97fe2578a ***
+*** Using Zephyr OS v4.1.99-ff8f0c579eeb ***
+SPI initialized in ZephyrSpiDriver constructor.
+
+uart:~$ Starting Bluetooth Peripheral LBS example
+I: 2 Sectors of 4096 bytes
+I: alloc wra: 0, f98
+I: data wra: 0, 8c
+I: HW Platform: Nordic Semiconductor (0x0002)
+I: HW Variant: nRF53x (0x0003)
+I: Firmware: Standard Bluetooth controller (0x00) Version 252.16862 Build 1121034987
+I: No ID address. App must call settings_load()
+Bluetooth initialized
+I: HCI transport: IPC
+I: Identity: E6:EE:31:07:78:41 (random)
+I: HCI: version 6.1 (0x0f) revision 0x2069, manufacturer 0x0059
+I: LMP: version 6.1 (0x0f) subver 0x2069
+Advertising successfully started
+Enabling external host as SPI master
+Akida Device ID:
+Word 0: 0x0903A1BC
+Sanity test of 1 MB SRAM is passed
+Device Version: v3.9
+Program Version: v3.9
+model program time= 4294850211 dma cycles, model_prog_time = 1912 ms
+input Shape = 49x10x1
+
+inference time= 117085 dma cycles, time = 29 ms
+Output-0 = -48
+Output-1 = -44
+Output-2 = -14
+Output-3 = -19
+Output-4 = -8
+Output-5 = -25
+Output-6 = -38
+Output-7 = -15
+Output-8 = 66
+Output-9 = 7
+Output-10 = -29
+Output-11 = 21
+Output-12 = -9
+Output-13 = -55
+Output-14 = -31
+Output-15 = -28
+Output-16 = -14
+Output-17 = 7
+Output-18 = -2
+Output-19 = -31
+Output-20 = -45
+Output-21 = -29
+Output-22 = -22
+Output-23 = -10
+Output-24 = -9
+Output-25 = -13
+Output-26 = -19
+Output-27 = 3
+Output-28 = -10
+Output-29 = -32
+Output-30 = -10
+Output-31 = -24
+Output-32 = 1
+
+Class : 8
+Word : four
+```
 
 ---
 
-## 2. Follow below if build/flash on system.
+**3. Akida SPI Flash App**
 
-### Prerequisites
+This app will confirm there model can be stored in Akida External Flash and then loaded to Akida for inference. It also confirm that model can be updated over BLE to Akida External Flash. It also demonstrates BLE FOTA update for an application with nRF Connect Mobile App.
+
+```
+# build
+./scripts/run.sh -d -b --app akida_spi_flash_app
+
+# flash
+./scripts/run.sh -d -f --app akida_spi_flash_app
+```
+
+After flashing, run the following through the host where BLE is present and model is present. 
+
+```
+./scripts/run.sh -d --app akida_spi_flash_app --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin
+```
+
+Upon running the script, it will scan for BLE devices.Write the index number for the Nordic Device from the list of devices it prints. 
+
+After successful connection, you should see the transfer in progress. Once the transfer is complete, head over to minicom to see if the app has made a single inference of the model.
+
+```
+# replace /dev/ttyUSB0 with endpoint at your system
+minicom -D /dev/ttyUSB0
+```
+
+On the same minicom, you can also type in commands to infer again. Type `infer kws` to infer above programmed kws model again. Similarly if you transferred mnist model then type `infer mnist` to infer the mnist model that was transfer to external flash.
+
+Upon this successful test, to check if BLE FOTA is also successful, make a change to the app and rebuild the app. After successful rebuild, head over to the folder where the build is kept and search for `dfu_application.zip`. Download the file on the mobile device that has nRF Connect Mobile App. Connect with the Nordic Device on the app and upload this `dfu_application.zip`. After successful upload, the board will reboot and you should see the changes that you must have made.
+
+*Tip: A simple change that I make is adding a print statement in main.cpp*
+
+---
+
+### Appendix I: Install Dependency On System.
+
+**Prerequisites**
 
 - `sudo` access
 - Working on Ubuntu 22 LTS (as of 11/25/2025)
@@ -175,9 +289,8 @@ Following output should be seen:
 
   > This confirms that the nRF5340 DK board is connected.
 
----
 
-### Step 1: Download And Setup nRF Util
+**Download And Setup nRF Util**
 
 - Download the latest [nrfutil file](https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil).
 
@@ -189,9 +302,8 @@ Add nrfutil to path - environment variable for further steps
 
 `source ./script/env.sh`
 
----
 
-### Step 2: Install nrfutil sdk-manager and device
+**Install nrfutil sdk-manager and device**
 
 Install sdk-manager and device with nrfutil
 
@@ -218,82 +330,15 @@ nrfutil sdk-manager install v3.1.1
 
 ---
 
-### Step 3: Test the board with Blinky sample
-
-Setup python environment and install west. Following is shown with conda
-
-```
-conda create --name spark python=3.12
-conda activate spark
-# install west
-pip install west
-# install requirements from zephyr where it is kept in ncs
-pip install -r $HOME/ncs/v3.1.1/zephyr/scripts/requirements.txt
-```
-
-Go to blinky repo and run the sample
-
-```
-# set environment
-source ./scripts/env.sh --build
-
-# build
-west build -p always -b "$BOARD" -s samples/blinky -d build_local/blinky
-
-# flash
-west flash -d build_local/blinky
-```
-
-Upon running this, the board should show flashing light as shown below:
-
-![Blinky Sample Gif](./images_and_videos/Blinky.gif)
-
-**To see output on the terminal through UART**
-
-```
-# replace /dev/ttyACM1 with endpoint at your system
-minicom -D /dev/ttyACM1
-```
-
-Following output should be seen:
-
-![Blinky UART Output](./images_and_videos/Blinky-UART-Output.png)
-
----
-
-### Step 4: Test the board and AKD1500 connection with lib-akd1500 sending model sample
-
-Just as blinky sample, build and flash the lib-akd1500 sample to test connection between nRF5340 and AKD1500 through SPI
-
-```
-# set environment
-source ./scripts/env.sh --build
-# build
-west build -p always -b "$BOARD" -s samples/lib-akd1500/examples/sending-model -d build_local/sending-model
-# flash
-west flash -d build_local/sending-model
-```
-
-```
-# replace /dev/ttyUSB0 with endpoint at your system
-minicom -D /dev/ttyUSB0
-```
-
-Following output should be seen:
-
-![Lib-AKD1500-Sending-Model](./images_and_videos/Lib-Akd1500-sending-model.png)
-
----
-
 ### Prototype Board
 
 <u>Full Setup</u>
 
-![Full Setup](./images_and_videos/Full-Setup.png)
+![Full Setup](./images_and_videos/Full-Setup.jpg)
 
 <u>UART Connection For Ubuntu</u>
 
-![UART Connection For Ubuntu](./images_and_videos/UART-Connection.png)
+![UART Connection For Ubuntu](./images_and_videos/UART-Connection.jpg)
 
 ---
 
