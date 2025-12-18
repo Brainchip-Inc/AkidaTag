@@ -14,20 +14,20 @@ After compiling the project, MCUBoot is automatically built along with the appli
 The sysbuild system generates a combined image that includes both MCUBoot and the akida_spi_flash_app application.
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c 'west build -p always -b "$BOARD" -s samples/akida_spi_flash_app -d build_docker/akida_spi_flash_app'
+./scripts/run.sh -d -b --app akida_spi_flash_app
 ```
 
 ### Flash the akida_spi_flash_app Sample.
 This flashes both mcuboot and akida_spi_flash_app application together
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c 'west flash -d build_docker/akida_spi_flash_app'
+./scripts/run.sh -d -f --app akida_spi_flash_app
 ```
 
 ### To reset the board
 
 ```
-docker run --rm --privileged --device /dev/bus/usb:/dev/bus/usb -v "$PWD":/spark -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" -e WORKDIR=/spark spark-ncs:v3.1.1 bash -c 'nrfutil device reset'
+./scripts/run.sh -d -r
 ```
 
 
