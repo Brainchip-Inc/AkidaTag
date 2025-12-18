@@ -13,8 +13,9 @@ Options:
   -d, --docker     | (str)  | Run build/flash using Docker
                    |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
   -i, --shell      | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
-  -m, --minicom    | (opt)  | Run minicom inside Docker (default: ttyUSB0).
+  -m, --minicom    | (str)  | Run minicom inside Docker (default: ttyUSB0).
                    |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
+  -r, --reset      | (flag) | Do Board Reset
   -h, --help       | (flag) | Show this help message
 
 Examples:
@@ -54,6 +55,8 @@ DO_SHELL=false
 DO_MINICOM=false
 MINICOM_DEV="/dev/ttyUSB0"
 
+DO_RESET=false
+
 # -----------------------------------------------------------------------------
 # Arg parsing
 # -----------------------------------------------------------------------------
@@ -90,6 +93,7 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
+        -r|--reset) DO_RESET=true; shift;;
         -h|--help) print_help; exit 0;;
         *) echo "Unknown option $1"; shift;;
     esac
@@ -98,11 +102,6 @@ done
 # -----------------------------------------------------------------------------
 # Validations
 # -----------------------------------------------------------------------------
-if $DO_MINICOM && ! $DOCKER; then
-    echo "Error: --minicom requires --docker"
-    exit 1
-fi
-
 # --shell requires --docker
 if $DO_SHELL && ! $DOCKER; then
     echo "Error: --shell requires --docker"
@@ -110,13 +109,13 @@ if $DO_SHELL && ! $DOCKER; then
 fi
 
 # If not shell/minicom, require at least one action: build/flash/bin
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
     echo "Nothing to do: pass --build and/or --flash and/or --bin, or use --shell / --minicom"
     exit 1
 fi
 
 # Require --app when doing build/flash/bin (minicom and shell don't need it)
-if ! $DO_SHELL && ! $DO_MINICOM && ( $DO_BUILD || $DO_FLASH || [[ -n "$MODEL_BIN" ]] ) && [[ -z "$APP" ]]; then
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ( $DO_BUILD || $DO_FLASH || [[ -n "$MODEL_BIN" ]] ) && [[ -z "$APP" ]]; then
     echo "Error: --app is required"
     exit 1
 fi
@@ -158,6 +157,19 @@ fi
 # Add tty device for minicom
 if $DO_MINICOM; then
     DOCKER_RUN_BASE+=(--device "${MINICOM_DEV}:${MINICOM_DEV}")
+fi
+
+# -----------------------------------------------------------------------------
+# RESET
+# -----------------------------------------------------------------------------
+if $DO_RESET; then
+    echo "=== Reset board inside Docker image: $DOCKER_IMAGE ==="
+    echo ">>> Docker command:"
+    printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" nrfutil device reset
+    echo
+
+    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" nrfutil device reset
+    exit $?
 fi
 
 # -----------------------------------------------------------------------------
