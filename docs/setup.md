@@ -57,9 +57,7 @@ This app will confirm if nRF5340 DK board is functioning.
 ./scripts/run.sh -d -f --app blinky
 ```
 
-Upon running this, the board should show flashing light as shown below:
-
-![Blinky Sample Gif](./images_and_videos/Blinky.gif)
+Upon running this, the board should show flashing led light.
 
 **To see output on the terminal through UART**
 
