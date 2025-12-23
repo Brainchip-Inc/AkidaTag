@@ -93,4 +93,8 @@ sram_primary:
   region: sram_primary
   size: 0x70000
   
-
+# LittleFS starting AFTER mcuboot_secondary
+littlefs_storage:
+  address: 0xf0000
+  region: external_flash
+  size: 0x710000 # Total 8MB (0x800000) minus 960KB (0xf0000)

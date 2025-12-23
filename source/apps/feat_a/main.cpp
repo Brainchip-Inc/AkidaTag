@@ -53,6 +53,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include "littlefs_storage.h"
 #include "boot_manager.h"
 #include "ble_services/ble_initialization.h"
 #include "ble_services/file_transfer.h"
@@ -164,15 +165,22 @@ int main(void)
 	{
 		printk("QSPI device ready: %s \n", qspi->name);
 	}
+    int err = storage_init ();
+	if (err != 0)
+	{
+		printk("LittleFS mount failed %d", err);
+	}
+	else
+	{
+		printk("LittleFS mount succeeded %d", err);
+	}
+	//test_create_file();    
 
 
 	for (;;) {
 		prcess_led();
 	}
 }
-
-
-
 
 
 /* function to run the inference */
@@ -312,7 +320,6 @@ static int cmd_set(const struct shell *shell, size_t argc, char **argv) {
 /* shell cli function to invoke erase function */
 static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
 
-
   if (spi_flash_erase_helper_func(0x1000, FLASH_MAX_16_MB_SIZE - 0x1000)) {
     return 1;
   }
@@ -322,10 +329,9 @@ static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
 
 
 
-
-
 SHELL_CMD_REGISTER(full_erase, NULL, "Erase flash: erase <size>", cmd_full_erase);
 SHELL_CMD_REGISTER(
     set, NULL, "Set MCU/AKD1500 as SPI-Master: set <bool> (0:AKD1500 1:MCU)",
     cmd_set);
 SHELL_CMD_REGISTER(infer, NULL, "Start the Inference: infer", cmd_infer);
+

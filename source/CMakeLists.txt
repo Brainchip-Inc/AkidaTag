@@ -42,6 +42,7 @@ target_sources(app PRIVATE
 	core/interface/ble_services/ble_initialization.c
 	core/io_objects.cpp
 	core/boot_manager.c
+	core/littlefs_storage.c
 )
 
 target_include_directories(app PRIVATE include)	
