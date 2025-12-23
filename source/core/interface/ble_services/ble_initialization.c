@@ -206,7 +206,8 @@ void ble_init(void )
 	printk("Bluetooth initialized\n");
 
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		settings_load();
+		settings_load_subtree("bt");
+		settings_load_subtree("boot"); 
 	}
 
 	err = bt_lbs_init(&lbs_callbacs);

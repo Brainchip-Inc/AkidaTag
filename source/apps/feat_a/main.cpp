@@ -152,6 +152,7 @@ int post_processing(auto out, const int32_t *bytes_out, int app_index_l){
 int main(void)
 {
 	confirm_image_if_needed();
+	init_setting_sub_system();
 	file_transfer_init();
 	ble_init();
 	akida_spiflash_init();
@@ -176,7 +177,7 @@ int main(void)
 	}
 	//test_create_file();    
 
-
+    init_boot_count();
 	for (;;) {
 		prcess_led();
 	}
