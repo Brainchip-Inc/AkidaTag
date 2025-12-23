@@ -53,6 +53,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include "boot_manager.h"
 #include "ble_services/ble_initialization.h"
 #include "ble_services/file_transfer.h"
 
@@ -144,11 +145,25 @@ int post_processing(auto out, const int32_t *bytes_out, int app_index_l){
   }
 }
 
+
+
+
 int main(void)
 {
+	confirm_image_if_needed();
 	file_transfer_init();
 	ble_init();
 	akida_spiflash_init();
+	
+    const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
+
+	if (!device_is_ready(qspi)) {
+		printk("QSPI not ready\n");
+	}
+	else 
+	{
+		printk("QSPI device ready: %s \n", qspi->name);
+	}
 
 
 	for (;;) {
