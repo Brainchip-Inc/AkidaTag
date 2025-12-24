@@ -204,14 +204,12 @@ fi
 # App → source dir (dynamic by default)
 # -----------------------------------------------------------------------------
 APP_SRC_DIR="samples/$APP"
-
+APP_CONFIG=
 # Overrides for non-standard layouts
 case "$APP" in
-  lib-akd1500)
-    APP_SRC_DIR="samples/lib-akd1500/examples/sending-model"
-    ;;
-  ble)
-    APP_SRC_DIR="samples/lib-mada-BT/examples/ble_jlink_example"
+  demo_apps)
+    APP_SRC_DIR="source"
+	APP_CONFIG=-DCONFIG_DEMO_APPS=y
     ;;
 esac
 
@@ -233,7 +231,7 @@ fi
 # Commands
 # IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
 # -----------------------------------------------------------------------------
-BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
+BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\" -- \"$APP_CONFIG\""
 FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
 
 SEND_MODEL_CMD=""

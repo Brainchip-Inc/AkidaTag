@@ -11,6 +11,6 @@
 #include <zephyr/settings/settings.h>
 
 #include <dk_buttons_and_leds.h>
-void ble_init(void );
+int ble_init(void );
 void prcess_led(void);
 #endif /* BLE_INITIALIZATION_H */
