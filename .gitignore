@@ -5,6 +5,7 @@ zephyrproject
 # ignore folders
 tools/*
 build*
+source/external/*
 
 # ignore specific files
 *JLink_Linux_V888_x86_64.deb

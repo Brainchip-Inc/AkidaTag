@@ -25,7 +25,6 @@ LOG_MODULE_REGISTER(AKD_SPI_FLASH, LOG_LEVEL_DBG);
 
 #define SPI_FLASH_SECTOR_TYPE_4KB 0x0c
 
-
 static int spi_flash_clear_flag(akida::ZephyrSpiDriver spi_flash_driver_) {
   uint8_t cmd = CMD_CLEAR_FLAG_STATUS_REG;
   spi_flash_driver_.spiflashwrite(0, &cmd, 1);
@@ -38,7 +37,8 @@ static int spi_flash_write_enable(akida::ZephyrSpiDriver spi_flash_driver_) {
   return 0;
 }
 
-static int spi_flash_wait_until_ready(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t timeout_ms = 1000) {
+static int spi_flash_wait_until_ready(akida::ZephyrSpiDriver spi_flash_driver_,
+                                      uint32_t timeout_ms = 1000) {
   uint8_t cmd = FLASH_CMD_RD_STAT_REG;
   uint8_t status = 0;
   uint32_t elapsed_ms = 0;
@@ -59,7 +59,8 @@ static int spi_flash_wait_until_ready(akida::ZephyrSpiDriver spi_flash_driver_, 
   return -ETIMEDOUT;
 }
 
-static uint8_t spi_flash_read_flag_status(akida::ZephyrSpiDriver spi_flash_driver_) {
+static uint8_t
+spi_flash_read_flag_status(akida::ZephyrSpiDriver spi_flash_driver_) {
   uint8_t cmd = CMD_READ_FLAG_STATUS_REG;
   uint32_t status = 0;
   uint32_t tx_rx_len = ((1 << 16) | 1);
@@ -99,7 +100,8 @@ static uint32_t get_sector_size(spi_flash_sector_type_t type) {
   }
 }
 
-int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t sector_id, uint32_t no_of_sectors,
+int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_,
+                        uint32_t sector_id, uint32_t no_of_sectors,
                         spi_flash_sector_type_t sector_type) {
   uint32_t sector_size = get_sector_size(sector_type);
   if (sector_size == 0) {
@@ -143,8 +145,9 @@ int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t secto
     }
     ret = spi_flash_read_flag_status(spi_flash_driver_);
     if ((ret & 0x20) == 0x20) {
-      LOG_ERR("AKD_SPI_FLASH: read_flag_status error in erase operation, error value %x\n",
-             ret);
+      LOG_ERR("AKD_SPI_FLASH: read_flag_status error in erase operation, error "
+              "value %x\n",
+              ret);
       return ret;
     }
   }
@@ -152,15 +155,18 @@ int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t secto
   return 0;
 }
 
-int spi_flash_erase(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, uint32_t size) {
+int spi_flash_erase(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address,
+                    uint32_t size) {
   uint32_t sector_size = 1 << SPI_FLASH_SECTOR_TYPE_4KB;
   int s_sector = address / sector_size;
   int e_sector = (address + size - 1) / sector_size;
   int count = e_sector - s_sector + 1;
-  return spi_flash_erase_api(spi_flash_driver_, s_sector, count, SECTOR_TYPE_4KB);
+  return spi_flash_erase_api(spi_flash_driver_, s_sector, count,
+                             SECTOR_TYPE_4KB);
 }
 
-int spi_flash_write(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, const uint8_t *data, size_t length) {
+int spi_flash_write(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address,
+                    const uint8_t *data, size_t length) {
   size_t offset = 0;
   spi_flash_clear_flag(spi_flash_driver_);
 
@@ -202,7 +208,8 @@ int spi_flash_write(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, 
   return 0;
 }
 
-int spi_flash_read(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, uint8_t *data, size_t length) {
+int spi_flash_read(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address,
+                   uint8_t *data, size_t length) {
   size_t offset = 0;
 
   while (offset < length) {

@@ -10,7 +10,7 @@ extern struct fs_mount_t lfs_storage_mnt;
 int storage_init(void);
 
 void test_create_file(void);
-void read_and_print_file(const char *path) ;
+void read_and_print_file(const char *path);
 
 int cmd_dir(const struct shell *shell, size_t argc, char **argv);
 int cmd_mkfs(const struct shell *shell, size_t argc, char **argv);

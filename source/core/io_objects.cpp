@@ -13,6 +13,3 @@ akida::ZephyrSpiDriver spi_driver;
 akida::Akd1500SpiDriver akd1500(&spi_driver, akida_visible_memory_base,
                                 akida_visible_memory_size);
 akida::HardwareDeviceImpl akd_device(&akd1500);
-
-
-

@@ -1,15 +1,12 @@
 #ifndef AKD_SPI_FLASH_HANDLER_H
 #define AKD_SPI_FLASH_HANDLER_H
 
-
-#include <zephyr/types.h>
-#include <stddef.h>
-#include <string.h>
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <zephyr/types.h>
 
 #define FLASH_BASE_ADDRESS 0x80000000
 #define FLASH_READ_BACK_CHECK 0
@@ -31,17 +28,14 @@ extern uint32_t buff_size;
 extern uint32_t flash_offsets[];
 extern int app_index;
 
-
 /* #################################################################### */
-/* These have to be defined by the application */ 
-extern const unsigned char* inputs[];
+/* These have to be defined by the application */
+extern const unsigned char *inputs[];
 extern uint32_t valid_program_data[];
-extern const unsigned char* program_info[];
+extern const unsigned char *program_info[];
 extern const int64_t program_info_len[];
 
 /* #################################################################### */
-
-
 
 void akida_config_spi(bool is_mcu_master);
 void init_akd_1500_spi_flash();
@@ -54,7 +48,7 @@ extern "C" {
 int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
 void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
                                  size_t size);
-								
+
 int akida_program_infer();
 
 #ifdef __cplusplus

@@ -1,12 +1,11 @@
 #ifndef IO_OBJECTS_H
 #define IO_OBJECTS_H
 
-#include <zephyr/types.h>
-#include "akida/hardware_device.h"
 #include "akd_spi_flash.h"
+#include "akida/hardware_device.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <hardware_device_impl.h>
-
+#include <zephyr/types.h>
 
 #define SRAM_128_BYTES_LEN 128
 
@@ -21,15 +20,10 @@
 #define EN_SPI_S2M_Msk (0x1UL << EN_SPI_S2M_Pos)
 #define EN_SPI_S2M EN_SPI_S2M_Msk
 
-
-
-
-
 // Create an instance of ZephyrSpiDriver
 extern akida::ZephyrSpiDriver spi_driver;
 // Create an instance of Akd1500SpiDriver with predefined memory regions
 extern akida::Akd1500SpiDriver akd1500;
 extern akida::HardwareDeviceImpl akd_device;
 
-
-#endif //IO_OBJECTS_H
+#endif // IO_OBJECTS_H

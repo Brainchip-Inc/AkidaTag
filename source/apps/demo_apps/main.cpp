@@ -4,21 +4,21 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
-#include <zephyr/types.h>
+#include <errno.h>
+#include <soc.h>
 #include <stddef.h>
 #include <string.h>
-#include <errno.h>
-#include <zephyr/sys/printk.h>
-#include <zephyr/sys/byteorder.h>
-#include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
-#include <soc.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/types.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/conn.h>
-#include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/uuid.h>
 
 #include <bluetooth/services/lbs.h>
 
@@ -26,14 +26,15 @@
 
 #include <dk_buttons_and_leds.h>
 
-
-#include "akida/hardware_device.h"
-#include "sample_input/mnist/mnist_inputs.h"
-#include "sample_input/kws/kws_inputs.h"
-#include "nrf_spi.h"
-#include "mnist/mnist_program_info.h"
-#include "kws/kws_program_info.h"
 #include "akd_spi_flash.h"
+#include "akd_spi_flash_handler.h"
+#include "akida/hardware_device.h"
+#include "io_objects.h"
+#include "kws/kws_program_info.h"
+#include "mnist/mnist_program_info.h"
+#include "nrf_spi.h"
+#include "sample_input/kws/kws_inputs.h"
+#include "sample_input/mnist/mnist_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <cmath>
 #include <hardware_device_impl.h>
@@ -46,24 +47,18 @@
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
-#include "io_objects.h"
-#include "akd_spi_flash_handler.h"
-
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include "littlefs_storage.h"
-#include "boot_manager.h"
 #include "ble_services/ble_initialization.h"
 #include "ble_services/file_transfer.h"
+#include "boot_manager.h"
+#include "littlefs_storage.h"
 
 #ifdef __cplusplus
 }
 #endif
-
-
-
 
 /*
 FLash offset indices
@@ -71,16 +66,15 @@ KWS - 1
 MNIST - 0
 */
 
-#define VALID_PROGRAM_DATA_MNIST  0xD8130700
+#define VALID_PROGRAM_DATA_MNIST 0xD8130700
 #define VALID_PROGRAM_DATA_KWS 0x64d70000
 
-
-const unsigned char* inputs[] = {mnist_inputs, kws_inputs};
-uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST, VALID_PROGRAM_DATA_KWS};
-const unsigned char* program_info[] = {mnist_program_info, kws_program_info};
-const int64_t program_info_len[] = {mnist_program_info_len, kws_program_info_len};
-
-
+const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
+uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
+                                 VALID_PROGRAM_DATA_KWS};
+const unsigned char *program_info[] = {mnist_program_info, kws_program_info};
+const int64_t program_info_len[] = {mnist_program_info_len,
+                                    kws_program_info_len};
 
 const struct device *wdt_dev; // Global watchdog device
 void kick_watchdog(void) {
@@ -102,19 +96,16 @@ uint32_t swap_endian(uint32_t value) {
 bool check_program_data(int offset, int len, int app_index_l) {
   uint32_t data;
   spi_flash_read(spi_driver, offset, (uint8_t *)&data, 4);
-  if (swap_endian(data) == valid_program_data[app_index_l])
-  {
-	printk("program data @%x: %x is same as the expected one\n", offset,  valid_program_data[app_index_l]);
+  if (swap_endian(data) == valid_program_data[app_index_l]) {
+    printk("program data @%x: %x is same as the expected one\n", offset,
+           valid_program_data[app_index_l]);
     return true;
   }
   printk("program data @%x: %x is not the expected one\n", offset, data);
   return false;
 }
 
-
-
-//int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
-
+// int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
 
 int64_t time_ms() { return k_uptime_get(); }
 
@@ -128,66 +119,54 @@ void panic(const char *format, ...) {
   exit(EXIT_FAILURE);
 }
 
-
-int post_processing(auto out, const int32_t *bytes_out, int app_index_l){
-  if(app_index_l <= 1){
+int post_processing(auto out, const int32_t *bytes_out, int app_index_l) {
+  if (app_index_l <= 1) {
     int32_t max_val = bytes_out[0];
     int max_index = -1;
     for (int i = 0; i < (int)out->size(); i++) {
-        if (bytes_out[i] > max_val) {
-            max_val = bytes_out[i];
-            max_index = i;
-        }
+      if (bytes_out[i] > max_val) {
+        max_val = bytes_out[i];
+        max_index = i;
+      }
     }
     return max_index;
-  }
-  else{
+  } else {
     return -1;
   }
 }
 
+int main(void) {
+  confirm_image_if_needed();
+  init_setting_sub_system();
+  file_transfer_init();
+  ble_init();
+  akida_spiflash_init();
 
+  const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
 
+  if (!device_is_ready(qspi)) {
+    printk("QSPI not ready\n");
+  } else {
+    printk("QSPI device ready: %s \n", qspi->name);
+  }
+  int err = storage_init();
+  if (err != 0) {
+    printk("LittleFS mount failed %d", err);
+  } else {
+    printk("LittleFS mount succeeded %d", err);
+  }
+  // test_create_file();
 
-int main(void)
-{
-	confirm_image_if_needed();
-	init_setting_sub_system();
-	file_transfer_init();
-	ble_init();
-	akida_spiflash_init();
-	
-    const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
-
-	if (!device_is_ready(qspi)) {
-		printk("QSPI not ready\n");
-	}
-	else 
-	{
-		printk("QSPI device ready: %s \n", qspi->name);
-	}
-    int err = storage_init ();
-	if (err != 0)
-	{
-		printk("LittleFS mount failed %d", err);
-	}
-	else
-	{
-		printk("LittleFS mount succeeded %d", err);
-	}
-	//test_create_file();    
-
-    init_boot_count();
-	for (;;) {
-		prcess_led();
-	}
+  init_boot_count();
+  for (;;) {
+    prcess_led();
+  }
 }
-
 
 /* function to run the inference */
 int infer(int app_index_l) {
-  if(app_index_l > 1) {
-    printk("Illegal model index %d\n", app_index_l);  
+  if (app_index_l > 1) {
+    printk("Illegal model index %d\n", app_index_l);
     return -1;
   }
 
@@ -196,22 +175,21 @@ int infer(int app_index_l) {
   akida_config_spi(0);
 
   if (ret == false) {
-	printk("model data, not present in SPI Flash, upload the model\n");
-	return -1;
+    printk("model data, not present in SPI Flash, upload the model\n");
+    return -1;
   } else {
-  printk("model is already present \n");
-// program the model info part to AKD1500
+    printk("model is already present \n");
+    // program the model info part to AKD1500
 
-  printk("Programming the model\n");
-  akida_program_info((uint8_t *)program_info[app_index_l], program_info_len[app_index_l],
-			flash_offsets[app_index_l]);
-  akd_device.set_batch_size(1, true);
-  app_index = app_index_l;
-
+    printk("Programming the model\n");
+    akida_program_info((uint8_t *)program_info[app_index_l],
+                       program_info_len[app_index_l],
+                       flash_offsets[app_index_l]);
+    akd_device.set_batch_size(1, true);
+    app_index = app_index_l;
   }
 
   akd_device.toggle_clock_counter(true);
-
 
   uint32_t inf_complete = 0;
   uint32_t s_dma_cycls = 0;
@@ -221,14 +199,14 @@ int infer(int app_index_l) {
   uint32_t e_dma_cycls = 0;
   uint32_t delta_cycle = 0;
 
-auto shape = mnist_inputs_shape;
+  auto shape = mnist_inputs_shape;
 
-if(app_index_l == 1)
+  if (app_index_l == 1)
     shape = kws_inputs_shape;
 
   akida::TensorConstPtr in = akida::Dense::create_view(
-      reinterpret_cast<const char *>(inputs[app_index_l]), akida::TensorType::uint8,
-      {shape}, akida::Dense::Layout::RowMajor);
+      reinterpret_cast<const char *>(inputs[app_index_l]),
+      akida::TensorType::uint8, {shape}, akida::Dense::Layout::RowMajor);
 
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
@@ -248,13 +226,12 @@ if(app_index_l == 1)
   }
   int class_id = post_processing(out, bytes_out, app_index_l);
 
-  if(class_id == -1){
+  if (class_id == -1) {
     return -1;
   }
-  if(app_index_l == 0){ //mnist
+  if (app_index_l == 0) { // mnist
     printk("Predicted Digit : %d\n", class_id);
-  }
-  else if (app_index_l == 1){  //kws
+  } else if (app_index_l == 1) { // kws
     printk("\nClass : %d\n", class_id);
     printk("Word : %s\n", kws_tags[class_id]);
   }
@@ -274,18 +251,14 @@ static int cmd_infer(const struct shell *shell, size_t argc, char **argv) {
     return -EINVAL;
   }
 
-  char* string = argv[1];
-  if(!strcmp(string, "kws"))
-  {
-      app_index = 1;
-	  printk("inference kws requested, app index %d", app_index);
-  }
-  else if(!strcmp(string, "mnist"))
-  {
-      app_index = 0;
-	  printk("inference mnist requested, app index %d", app_index);
-  }
-  else {
+  char *string = argv[1];
+  if (!strcmp(string, "kws")) {
+    app_index = 1;
+    printk("inference kws requested, app index %d", app_index);
+  } else if (!strcmp(string, "mnist")) {
+    app_index = 0;
+    printk("inference mnist requested, app index %d", app_index);
+  } else {
     printk("Illegal model inference request");
     return -EINVAL;
   }
@@ -316,8 +289,6 @@ static int cmd_set(const struct shell *shell, size_t argc, char **argv) {
   return 0;
 }
 
-
-
 /* shell cli function to invoke erase function */
 static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
 
@@ -328,11 +299,9 @@ static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
   return 0;
 }
 
-
-
-SHELL_CMD_REGISTER(full_erase, NULL, "Erase flash: erase <size>", cmd_full_erase);
+SHELL_CMD_REGISTER(full_erase, NULL, "Erase flash: erase <size>",
+                   cmd_full_erase);
 SHELL_CMD_REGISTER(
     set, NULL, "Set MCU/AKD1500 as SPI-Master: set <bool> (0:AKD1500 1:MCU)",
     cmd_set);
 SHELL_CMD_REGISTER(infer, NULL, "Start the Inference: infer", cmd_infer);
-
