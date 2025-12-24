@@ -10,10 +10,10 @@
 
 LOG_MODULE_REGISTER(littlefs_storage, CONFIG_LOG_DEFAULT_LEVEL);
 
-/* 1. Define internal LittleFS data structures */
+/* Define internal LittleFS data structures */
 FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(storage_data);
 
-/* 2. Define the mount point structure */
+/* Define the mount point structure */
 struct fs_mount_t lfs_storage_mnt = {
     .type = FS_LITTLEFS,
     .fs_data = &storage_data,
@@ -21,7 +21,7 @@ struct fs_mount_t lfs_storage_mnt = {
     .mnt_point = "/ext",
 };
 
-/* 3. The robust mount function we discussed earlier */
+/* Code to Mount the filesytem */
 int storage_init(void) {
     int rc = fs_mount(&lfs_storage_mnt);
 
@@ -42,7 +42,7 @@ int storage_init(void) {
 }
 
 
-
+/* code to list all the files present in the file system */
 static int lsdir(const char *path)
 {
 	int res;
@@ -58,7 +58,7 @@ static int lsdir(const char *path)
 		return res;
 	}
 
-	LOG_PRINTK("\nListing dir %s ...\n", path);
+	LOG_INF("\nListing dir %s ...\n", path);
 	for (;;) {
 		/* Verify fs_readdir() */
 		res = fs_readdir(&dirp, &entry);
@@ -72,9 +72,9 @@ static int lsdir(const char *path)
 		}
 
 		if (entry.type == FS_DIR_ENTRY_DIR) {
-			LOG_PRINTK("[DIR ] %s\n", entry.name);
+			LOG_INF("[DIR ] %s\n", entry.name);
 		} else {
-			LOG_PRINTK("[FILE] %s (size = %zu)\n",
+			LOG_INF("[FILE] %s (size = %zu)\n",
 				   entry.name, entry.size);
 		}
 	}
@@ -85,53 +85,7 @@ static int lsdir(const char *path)
 	return res;
 }
 
-static int littlefs_increase_infile_value(char *fname)
-{
-	uint8_t boot_count = 0;
-	struct fs_file_t file;
-	int rc, ret;
-
-	fs_file_t_init(&file);
-	rc = fs_open(&file, fname, FS_O_CREATE | FS_O_RDWR);
-	if (rc < 0) {
-		LOG_ERR("FAIL: open %s: %d", fname, rc);
-		return rc;
-	}
-
-	rc = fs_read(&file, &boot_count, sizeof(boot_count));
-	if (rc < 0) {
-		LOG_ERR("FAIL: read %s: [rd:%d]", fname, rc);
-		goto out;
-	}
-	LOG_PRINTK("%s read count:%u (bytes: %d)\n", fname, boot_count, rc);
-
-	rc = fs_seek(&file, 0, FS_SEEK_SET);
-	if (rc < 0) {
-		LOG_ERR("FAIL: seek %s: %d", fname, rc);
-		goto out;
-	}
-
-	boot_count += 1;
-	rc = fs_write(&file, &boot_count, sizeof(boot_count));
-	if (rc < 0) {
-		LOG_ERR("FAIL: write %s: %d", fname, rc);
-		goto out;
-	}
-
-	LOG_PRINTK("%s write new boot count %u: [wr:%d]\n", fname,
-		   boot_count, rc);
-
- out:
-	ret = fs_close(&file);
-	if (ret < 0) {
-		LOG_ERR("FAIL: close %s: %d", fname, ret);
-		return ret;
-	}
-
-	return (rc < 0 ? rc : 0);
-}
-
-
+/* function to format the filesystem storage */
 static int storage_format(void)
 {
     int rc;
@@ -159,6 +113,7 @@ static int storage_format(void)
     return fs_mount(&lfs_storage_mnt);
 }
 
+/* Test code to create the hello.txt file in file system */
 void test_create_file(void) {
     struct fs_file_t file;
     fs_file_t_init(&file);
@@ -168,14 +123,14 @@ void test_create_file(void) {
         char *text = "nRF5340 LittleFS Test";
         fs_write(&file, text, strlen(text));
         fs_close(&file);
-        printk("Test file created successfully!\n");
+        LOG_INF("Test file created successfully!\n");
     } else {
-        printk("Failed to create test file: %d\n", rc);
+        LOG_ERR("Failed to create test file: %d\n", rc);
     }
 }
 
 
-
+/* Code to read the passed file and print the content */
 void read_and_print_file(const char *path) {
     struct fs_file_t file;
     struct fs_dirent info;
@@ -186,14 +141,14 @@ void read_and_print_file(const char *path) {
     /* 1. Get file size first to allocate a buffer */
     rc = fs_stat(path, &info);
     if (rc != 0) {
-        printk("Error: Could not find file %s (%d)\n", path, rc);
+        LOG_ERR("Error: Could not find file %s (%d)\n", path, rc);
         return;
     }
 
     /* 2. Open for reading */
     rc = fs_open(&file, path, FS_O_READ);
     if (rc != 0) {
-        printk("Error: Failed to open %s for reading (%d)\n", path, rc);
+        LOG_ERR("Error: Failed to open %s for reading (%d)\n", path, rc);
         return;
     }
 
@@ -204,45 +159,55 @@ void read_and_print_file(const char *path) {
     
     if (rc >= 0) {
         buffer[rc] = '\0'; // Null-terminate the string
-        printk("--- Content of %s ---\n", path);
-        printk("%s\n", buffer);
-        printk("----------------------\n");
+        LOG_INF("--- Content of %s ---\n", path);
+        LOG_INF("%s\n", buffer);
+        LOG_INF("----------------------\n");
     } else {
-        printk("Error reading file: %d\n", rc);
+        LOG_ERR("Error reading file: %d\n", rc);
     }
 
     fs_close(&file);
 }
 
 
-int mkfs_littlefs(void)
-{
-	return storage_format();
-}
-
-int list_littlefs(void)
-{
-	return lsdir(lfs_storage_mnt.mnt_point);	
-}
-
-
 int cmd_dir(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
-    printk("invalid command ");
+    LOG_ERR("invalid command ");
     return -EINVAL;
   }
-  list_littlefs();
+  lsdir(lfs_storage_mnt.mnt_point);	
   return 0;
 }
 
 int cmd_mkfs(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
-    printk("invalid command ");
+    LOG_ERR("invalid command ");
     return -EINVAL;
   }
-  mkfs_littlefs();
+  storage_format();
+  return 0;
+}
+
+int cmd_create_test_file(const struct shell *shell, size_t argc, char **argv) {
+  if (argc > 1) {
+    LOG_ERR("invalid command ");
+    return -EINVAL;
+  }
+  test_create_file();
+  return 0;
+}
+
+int cmd_print_file(const struct shell *shell, size_t argc, char **argv) {
+  if (argc > 2) {
+    LOG_ERR("invalid command ");
+    return -EINVAL;
+  }
+  char* file_path = argv[1];
+  read_and_print_file(file_path);
   return 0;
 }
 
 SHELL_CMD_REGISTER(dir, NULL, "File System listing", cmd_dir);
 SHELL_CMD_REGISTER(mkfs, NULL, "Make File System", cmd_mkfs);
+SHELL_CMD_REGISTER(test_file, NULL, "test file creation", cmd_create_test_file);
+SHELL_CMD_REGISTER(print_file, NULL, "print file", cmd_print_file);

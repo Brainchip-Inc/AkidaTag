@@ -169,7 +169,7 @@ int ble_init(void )
 	
 	int err;
 
-	printk("Starting Bluetooth Peripheral LBS example\n");
+	printk("BLE Initialization\n");
 
 	err = dk_leds_init();
 	if (err) {

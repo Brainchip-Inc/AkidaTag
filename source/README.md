@@ -74,6 +74,10 @@ Use the following commands on the console:
 - Erase full serial flash memory: `full_erase`. This erases 16,773,120 bytes out of the total 16 MB serial flash.
 - Run MNIST inference: `infer mnist`
 - Run KWS inference: `infer kws`
+- List all the files in file system: `dir`
+- Clear the file system: `mkfs`
+- To create a test file in file system: `test_file`
+- To print a file content present in file system: `print_file <file_name>`
 
 
 

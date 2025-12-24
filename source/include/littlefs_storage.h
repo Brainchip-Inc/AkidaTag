@@ -9,8 +9,6 @@ extern struct fs_mount_t lfs_storage_mnt;
 /* High-level initialization function */
 int storage_init(void);
 
-int list_littlefs(void);
-int mkfs_littlefs(void);
 void test_create_file(void);
 void read_and_print_file(const char *path) ;
 

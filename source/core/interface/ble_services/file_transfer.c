@@ -9,6 +9,9 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <string.h>
 #include <zephyr/bluetooth/uuid.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(file_transfer, CONFIG_LOG_DEFAULT_LEVEL);
 
 static ssize_t get_app_index(struct bt_conn *conn,
                             const struct bt_gatt_attr *attr,
@@ -24,13 +27,15 @@ static ssize_t get_file_size(struct bt_conn *conn,
                                  const void *buf, uint16_t len, uint16_t offset,
                                  uint8_t flags);
 
-// UUID definitions
+// UUID definitions, the client must have the same UUIDs during communication
 #define BT_UUID_FILE_TRANSFER_SERVICE_VAL \
 	BT_UUID_128_ENCODE(0xf000aa00, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FILE_TRANSFER_CHAR_VAL \
 	BT_UUID_128_ENCODE(0xf000aa01, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FILE_TRANSFER_ACK_CHAR_VAL \
 	BT_UUID_128_ENCODE(0xf000aa02, 0x0451, 0x4000, 0xb000, 0x000000000000)
+
+/* this macro is unused in code */
 #define BT_UUID_FILE_TRANSFER_CTRL_CHAR_VAL \
 	BT_UUID_128_ENCODE(0xf000aa03, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FILE_TRANSFER_SIZE_CHAR_VAL \
@@ -43,7 +48,6 @@ static ssize_t get_file_size(struct bt_conn *conn,
 static struct bt_uuid_128 file_transfer_service_uuid = BT_UUID_INIT_128(BT_UUID_FILE_TRANSFER_SERVICE_VAL);
 static struct bt_uuid_128 file_transfer_char_uuid    = BT_UUID_INIT_128(BT_UUID_FILE_TRANSFER_CHAR_VAL);
 static struct bt_uuid_128 file_transfer_ack_uuid     = BT_UUID_INIT_128(BT_UUID_FILE_TRANSFER_ACK_CHAR_VAL);
-static struct bt_uuid_128 file_transfer_ctrl_uuid    = BT_UUID_INIT_128(BT_UUID_FILE_TRANSFER_CTRL_CHAR_VAL);
 static struct bt_uuid_128 file_transfer_size_uuid    = BT_UUID_INIT_128(BT_UUID_FILE_TRANSFER_SIZE_CHAR_VAL);
 static struct bt_uuid_128 app_char_uuid_struct = BT_UUID_INIT_128(APP_CHAR_UUID_VAL);
 
@@ -54,7 +58,6 @@ static struct bt_uuid_128 app_char_uuid_struct = BT_UUID_INIT_128(APP_CHAR_UUID_
 #define FILE_SVC_UUID   (&file_transfer_service_uuid.uuid)
 #define FILE_CHAR_UUID  (&file_transfer_char_uuid.uuid)
 #define FILE_ACK_UUID   (&file_transfer_ack_uuid.uuid)
-#define FILE_CTRL_UUID  (&file_transfer_ctrl_uuid.uuid)
 #define FILE_SIZE_UUID  (&file_transfer_size_uuid.uuid)
 
 
@@ -103,25 +106,7 @@ BT_GATT_SERVICE_DEFINE(file_transfer_svc,
 
 int file_transfer_init(void)
 {
-	printf("File transfer service initialized (static definition)\n");
-	
-	// To store the string representation (37 bytes for 128-bit UUID + null terminator)
-	/*char uuid_str[BT_UUID_STR_LEN];
-
-    
-    bt_uuid_str(APP_CHAR_UUID_PTR, uuid_str, sizeof(uuid_str));
-    printk("APP_CHAR_UUID: %s\n", uuid_str);
-    
-    bt_uuid_str(FILE_CHAR_UUID, uuid_str, sizeof(uuid_str));
-    printk("FILE_TRANSFER_CHAR: %s\n", uuid_str);	
-	
-    bt_uuid_str(FILE_ACK_UUID, uuid_str, sizeof(uuid_str));
-    printk("FILE_ACK_UUID: %s\n", uuid_str);
-    
-    bt_uuid_str(FILE_SIZE_UUID, uuid_str, sizeof(uuid_str));
-    printk("FILE_SIZE_UUID: %s\n", uuid_str);*/
-
-
+	LOG_INF("File transfer service initialized (static definition)\n");
 	return 0;
 }
 
@@ -134,26 +119,28 @@ static void reset_buffer(void) {
 }
 #endif			   
 			   
-
+/* This function implements a BLE service that receives the application index.
+The client must send this request first before any other communication
+ */
 ssize_t get_app_index(struct bt_conn *conn,
                             const struct bt_gatt_attr *attr,
                             const void *app, uint16_t len,
                             uint16_t offset, uint8_t flags){
     if((uint32_t *)app == NULL)
     {
-       printk(" app index is NULL \n\r");
+       LOG_ERR(" app index is NULL \n\r");
        return -1;   
     }
 
     uint8_t app_index_local = *(uint8_t *)app;
     if(app_index_local > 1)
     {
-       printk("illegal app request: %d\n", app_index_local);
+       LOG_ERR("illegal app request: %d\n", app_index_local);
        return -1;
     }
     app_index = app_index_local; 
     app_flash_offset = flash_offsets[app_index];  
-    printk(" app index is %d \n\r", app_index);
+    LOG_INF(" app index is %d \n\r", app_index);
     return len;
 }
 
@@ -175,7 +162,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
 
     total_received += len;
 
-    printk("Rx B %d, len %d\n", total_received, len);
+    LOG_INF("Rx B %d, len %d\n", total_received, len);
 
     if (ble_pgm_offset == BUFFER_SIZE || total_received == total_pgm_size) {
       spi_flash_write_helper_func(
@@ -189,6 +176,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
 		if (akida_program_infer() != 0)
 		{
 			/*there is an error here*/
+			LOG_ERR("akida model program/inference failed\n");
 			return 1;
 		}
 		
@@ -198,19 +186,20 @@ ssize_t file_transfer_write(struct bt_conn *conn,
       }
     } else if (ble_pgm_offset > BUFFER_SIZE) {
       ble_pgm_offset = 0;
-      printk("Data exceeds buffer size %d\n", BUFFER_SIZE);
+      LOG_ERR("Data exceeds buffer size %d\n", BUFFER_SIZE);
     }
 #else
     if ((ble_pgm_offset + len) <= total_pgm_size) {
       spi_flash_write_helper_func((uint8_t *)buf,
                                   ble_pgm_offset, len);  
       ble_pgm_offset += len;
-      printk("Received chunk (%d bytes), total: %d bytes\n", len,
+      LOG_INF("Received chunk (%d bytes), total: %d bytes\n", len,
              ble_pgm_offset);
       if ((ble_pgm_offset) == total_pgm_size) {
 		if (akida_program_infer() != 0)
 		{
 			/*there is an error here*/
+			LOG_ERR("akida model program/inference failed\n");
 			return 1;
 		}
         ble_pgm_offset = 0;
@@ -219,7 +208,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
       }
     } else {
       ble_pgm_offset = 0;
-      printk("Data exceeds given model size %d\n", total_pgm_size);
+      LOG_ERR("Data exceeds given model size %d\n", total_pgm_size);
     }
 #endif
     return len;
@@ -237,17 +226,17 @@ ssize_t get_file_size(struct bt_conn *conn,
 
     memcpy((void *)&total_pgm_size, buf, len);
 
-    printk("size = %d\n", total_pgm_size);
+    LOG_INF("size = %d\n", total_pgm_size);
 
     if (total_pgm_size == 0 ||
         total_pgm_size > (FLASH_MAX_16_MB_SIZE - flash_offsets[app_index])) {
-      printk("Invalid size. Must be > 0 and <= %d\n",
+      LOG_ERR("Invalid size. Must be > 0 and <= %d\n",
              (FLASH_MAX_16_MB_SIZE - flash_offsets[app_index]));
       return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
-    printk("Received file size: %u bytes\n", total_pgm_size);
+    LOG_INF("Received file size: %u bytes\n", total_pgm_size);
     if (spi_flash_erase_helper_func(flash_offsets[app_index], total_pgm_size)) {
-	  printk("returning due to error");
+	  LOG_ERR("returning due to error");
       return 1;
     } 
     send_ack_to_host(ACK_FLASH_ERASE_DONE);
@@ -255,57 +244,29 @@ ssize_t get_file_size(struct bt_conn *conn,
   
 }
 
-/*
-// === BLE File Transfer Service ===
-BT_GATT_SERVICE_DEFINE(file_transfer_svc,
-    BT_GATT_PRIMARY_SERVICE(BT_UUID_FILE_TRANSFER_SERVICE),
-
-	BT_GATT_CHARACTERISTIC(BT_UUID_FILE_TRANSFER_SIZE_CHAR,
-		BT_GATT_CHRC_WRITE,
-		BT_GATT_PERM_WRITE,
-		NULL, get_file_size, NULL),
-
-    // Write Characteristic (for receiving file chunks)
-    BT_GATT_CHARACTERISTIC(BT_UUID_FILE_TRANSFER_CHAR,
-        BT_GATT_CHRC_WRITE,
-        BT_GATT_PERM_WRITE,
-        NULL, file_transfer_write, NULL),
-
-    // Notify Characteristic (for sending ACKs)
-    BT_GATT_CHARACTERISTIC(BT_UUID_FILE_TRANSFER_ACK_CHAR,
-        BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_NONE,
-        NULL, NULL, NULL),
-
-    // CCC descriptor to enable central notification subscription
-    BT_GATT_CCC(ack_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-   
-	BT_GATT_CHARACTERISTIC(APP_CHAR_UUID,
-		BT_GATT_CHRC_WRITE,
-		BT_GATT_PERM_WRITE,
-		NULL, get_app_index, NULL)    
-);*/
-
-
 
 void ack_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
     notify_enabled = (value == BT_GATT_CCC_NOTIFY);
-    printk("ACK notify %s\n", notify_enabled ? "enabled" : "disabled");
+    LOG_INF("ACK notify %s\n", notify_enabled ? "enabled" : "disabled");
 }
 
+
+/* 
+This function sends ack notification to client
+*/
 void send_ack_to_host(uint8_t ack_code)
 {
     if (!notify_enabled) {
-        printk("ACK notification skipped: notify not enabled by central\n");
+        LOG_ERR("ACK notification skipped: notify not enabled by central\n");
         return;
     }
 
     uint8_t ack_data[1] = { ack_code };
     int err = bt_gatt_notify(NULL, &file_transfer_svc.attrs[5], ack_data, sizeof(ack_data));
     if (err) {
-        printk("Failed to send ACK notification (err %d)\n", err);
+        LOG_ERR("Failed to send ACK notification (err %d)\n", err);
     } else {
-        printk("ACK (0x%02X) sent to central\n", ack_code);
+        LOG_INF("ACK (0x%02X) sent to central\n", ack_code);
     }
 }

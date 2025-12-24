@@ -22,7 +22,7 @@ config BT_LBS_SECURITY_ENABLED
 	  "Enable BLE security for the LED-Button service"
 
 config DEMO_APPS
-    bool "Enable Feature A"
+    bool "Enable Feature KWS, Gyro"
     default n
 
 config FEAT_B
