@@ -1,5 +1,5 @@
 if(NOT FEATURE)
-    message(FATAL_ERROR ${FEATURE} "FEAT_NAME is not defined! Ensure you pass --DCONFIG_FEAT_A=y after the -- separator.")
+    message(FATAL_ERROR ${FEATURE} "APP Name is not defined! Ensure you pass --DDEMO_APPS=y after the -- separator.")
 endif()
 
 

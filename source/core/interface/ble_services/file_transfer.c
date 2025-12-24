@@ -106,7 +106,7 @@ int file_transfer_init(void)
 	printf("File transfer service initialized (static definition)\n");
 	
 	// To store the string representation (37 bytes for 128-bit UUID + null terminator)
-	char uuid_str[BT_UUID_STR_LEN];
+	/*char uuid_str[BT_UUID_STR_LEN];
 
     
     bt_uuid_str(APP_CHAR_UUID_PTR, uuid_str, sizeof(uuid_str));
@@ -119,7 +119,7 @@ int file_transfer_init(void)
     printk("FILE_ACK_UUID: %s\n", uuid_str);
     
     bt_uuid_str(FILE_SIZE_UUID, uuid_str, sizeof(uuid_str));
-    printk("FILE_SIZE_UUID: %s\n", uuid_str);
+    printk("FILE_SIZE_UUID: %s\n", uuid_str);*/
 
 
 	return 0;

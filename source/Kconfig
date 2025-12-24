@@ -21,7 +21,7 @@ config BT_LBS_SECURITY_ENABLED
 	help
 	  "Enable BLE security for the LED-Button service"
 
-config FEAT_A
+config DEMO_APPS
     bool "Enable Feature A"
     default n
 

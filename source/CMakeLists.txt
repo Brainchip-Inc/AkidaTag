@@ -7,8 +7,8 @@ cmake_minimum_required(VERSION 3.20.0)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-if(CONFIG_FEAT_A)
-  set(FEATURE "feat_a")
+if(CONFIG_DEMO_APPS)
+  set(FEATURE "demo_apps")
 endif()
 
 project({FEATURE})
@@ -17,7 +17,7 @@ project({FEATURE})
 if(NOT DEFINED FEATURE)
     message(FATAL_ERROR
         "FEATURE not provided. "
-        "Use -DCONFIG_FEAT_A=y"
+        "Use -DCONFIG_DEMO_APPS=y"
     )
 endif()
 
