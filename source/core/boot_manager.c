@@ -15,7 +15,7 @@ reset. This function prevents that rollback by writing a confirmation flag to
 the image trailer in flash */
 void confirm_image_if_needed(void) {
   if (!boot_is_img_confirmed()) {
-    LOG_INF("Confirming image\n");
+    LOG_INF("New image detected. Confirming to prevent revert...");
     int rc = boot_write_img_confirmed();
     if (rc) {
       LOG_ERR("Image confirm failed: %d\n", rc);

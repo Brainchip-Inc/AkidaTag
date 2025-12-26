@@ -59,6 +59,15 @@ For loading `MNIST` model:
 `python source/utils/send_model_via_ble.py --bin source/external/model_files/mnist/mnist_program_data.bin`
 
 
+### Application Security
+This project utilizes Secure Boot and Secure DFU (Device Firmware Update) via MCUboot. Security is enforced through an RSA-3072 digital signature.
+The signing_key.pem file contains a Private Key used to cryptographically sign your firmware binaries. During the boot process and OTA updates, the bootloader (MCUboot) uses a corresponding Public Key (embedded in its own code) to verify that the firmware is authentic and has not been tampered with.
+
+- To generate this file install `pip3 install imgtool` 
+- To run `imgtool keygen -k signing_key.pem -t rsa-3072`
+
+KEEP THIS FILE SECRET. If an attacker gains access to signing_key.pem, they can sign and install malicious firmware on your devices. Never commit this file to public repositories.
+
 ### Console Logging Information
 The MCUboot log messages are output over the same USB cable used to power the board. To view these logs, open minicom and connect to the corresponding USB serial port.
 The demo_apps log messages are output on the dedicated UART pins. To view these logs, connect the UART TX/RX pins to a USB-to-TTL converter, plug the converter into the host PC, and open the associated serial port in minicom.
