@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 cmake_minimum_required(VERSION 3.20.0)
-
+# Append to existing CONF_FILE
+set(CONF_FILE "prj.conf" "custom_app.conf")
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 if(CONFIG_DEMO_APPS)
@@ -22,6 +23,8 @@ if(NOT DEFINED FEATURE)
 endif()
 
 message(STATUS "Top-level FEAT_NAME = ${FEATURE}")
+
+
 
 
 include(core/cmake/akida_engine_setup.cmake)

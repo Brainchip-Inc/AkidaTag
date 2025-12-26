@@ -1,5 +1,7 @@
 
 #include "ble_services/ble_initialization.h"
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(ble_initilaization, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
@@ -26,19 +28,35 @@ static const struct bt_data sd[] = {
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_LBS_VAL),
 };
 
-static void connected_ble(struct bt_conn *conn, uint8_t err) {
-  if (err) {
-    printk("Connection failed (err %u)\n", err);
-    return;
-  }
+static void connected_ble(struct bt_conn *conn, uint8_t err)
+{
+    char addr[BT_ADDR_LE_STR_LEN];
 
-  printk("Connected\n");
+    if (err) {
+        LOG_ERR("Connection failed (err 0x%02x)\n", err);
+        return;
+    }
 
-  dk_set_led_on(CON_STATUS_LED);
+	LOG_INF("connected_ble: %s\n", addr);
+	
+#ifdef CONFIG_BT_ENCRYPTION_EN	
+    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+
+    // FORCE SECURITY UPGRADE TO LEVEL 4
+    err = bt_conn_set_security(conn, BT_SECURITY_L4);
+    if (err) {
+        LOG_ERR("Failed to set security (err %d)\n", err);
+    } else {
+        LOG_INF("Security level 4 requested - pairing should start\n");
+    }
+#endif
+	dk_set_led_on(CON_STATUS_LED);
 }
 
+
 static void disconnected_ble(struct bt_conn *conn, uint8_t reason) {
-  printk("Disconnected (reason %u)\n", reason);
+  LOG_INF("Disconnected_ble (reason %u)\n", reason);
 
   dk_set_led_off(CON_STATUS_LED);
 }
@@ -51,9 +69,9 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
   if (!err) {
-    printk("Security changed: %s level %u\n", addr, level);
+    LOG_INF("Security changed: %s level %u\n", addr, level);
   } else {
-    printk("Security failed: %s level %u err %d\n", addr, level, err);
+    LOG_ERR("Security failed: %s level %u err %d\n", addr, level, err);
   }
 }
 #endif
@@ -72,7 +90,7 @@ static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey) {
 
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-  printk("Passkey for %s: %06u\n", addr, passkey);
+  LOG_INF("Passkey for %s: %06u\n", addr, passkey);
 }
 
 static void auth_cancel(struct bt_conn *conn) {
@@ -80,7 +98,7 @@ static void auth_cancel(struct bt_conn *conn) {
 
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-  printk("Pairing cancelled: %s\n", addr);
+  LOG_INF("Pairing cancelled: %s\n", addr);
 }
 
 static void pairing_complete(struct bt_conn *conn, bool bonded) {
@@ -88,7 +106,7 @@ static void pairing_complete(struct bt_conn *conn, bool bonded) {
 
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-  printk("Pairing completed: %s, bonded: %d\n", addr, bonded);
+  LOG_INF("Pairing completed: %s, bonded: %d\n", addr, bonded);
 }
 
 static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason) {
@@ -96,7 +114,7 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason) {
 
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-  printk("Pairing failed conn: %s, reason %d\n", addr, reason);
+  LOG_INF("Pairing failed conn: %s, reason %d\n", addr, reason);
 }
 
 static struct bt_conn_auth_cb conn_auth_callbacks = {
@@ -134,7 +152,7 @@ static int init_button(void) {
 
   err = dk_buttons_init(button_changed);
   if (err) {
-    printk("Cannot init buttons (err: %d)\n", err);
+    LOG_ERR("Cannot init buttons (err: %d)\n", err);
   }
 
   return err;
@@ -146,41 +164,48 @@ int ble_init(void)
 
   int err;
 
-  printk("BLE Initialization\n");
+  LOG_INF("BLE Initialization\n");
 
   err = dk_leds_init();
   if (err) {
-    printk("LEDs init failed (err %d)\n", err);
+    LOG_ERR("LEDs init failed (err %d)\n", err);
     return -1;
   }
 
   err = init_button();
   if (err) {
-    printk("Button init failed (err %d)\n", err);
+    LOG_INF("Button init failed (err %d)\n", err);
     return -1;
   }
 
   if (IS_ENABLED(CONFIG_BT_LBS_SECURITY_ENABLED)) {
     err = bt_conn_auth_cb_register(&conn_auth_callbacks);
     if (err) {
-      printk("Failed to register authorization callbacks.\n");
+      LOG_ERR("Failed to register authorization callbacks.\n");
       return -1;
     }
 
     err = bt_conn_auth_info_cb_register(&conn_auth_info_callbacks);
     if (err) {
-      printk("Failed to register authorization info callbacks.\n");
+      LOG_ERR("Failed to register authorization info callbacks.\n");
       return -1;
     }
+	LOG_INF("BLE Security is enabled");
+#ifdef CONFIG_BT_ENCRYPTION_EN	
+	LOG_INF("with Passkey");
+#else
+	LOG_INF("without Passkey");
+#endif
+	
   }
 
   err = bt_enable(NULL);
   if (err) {
-    printk("Bluetooth init failed (err %d)\n", err);
+    LOG_ERR("Bluetooth init failed (err %d)\n", err);
     return -1;
   }
 
-  printk("Bluetooth initialized\n");
+  LOG_INF("Bluetooth initialized\n");
 
   if (IS_ENABLED(CONFIG_SETTINGS)) {
     settings_load_subtree("bt");
@@ -189,17 +214,17 @@ int ble_init(void)
 
   err = bt_lbs_init(&lbs_callbacs);
   if (err) {
-    printk("Failed to init LBS (err:%d)\n", err);
+    LOG_ERR("Failed to init LBS (err:%d)\n", err);
     return -1;
   }
 
   err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
   if (err) {
-    printk("Advertising failed to start (err %d)\n", err);
+    LOG_ERR("Advertising failed to start (err %d)\n", err);
     return -1;
   }
 
-  printk("Advertising successfully started\n");
+  LOG_INF("Advertising successfully started\n");
   return 0;
 }
 

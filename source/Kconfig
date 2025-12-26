@@ -21,6 +21,12 @@ config BT_LBS_SECURITY_ENABLED
 	help
 	  "Enable BLE security for the LED-Button service"
 
+config BT_ENCRYPTION_EN
+    bool "Enable Custom Encryption Feature"
+    depends on BT
+    help
+      This enables the custom encryption logic.
+
 config DEMO_APPS
     bool "Enable Feature KWS, Gyro"
     default n

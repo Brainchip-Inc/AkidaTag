@@ -205,11 +205,13 @@ fi
 # -----------------------------------------------------------------------------
 APP_SRC_DIR="samples/$APP"
 APP_CONFIG=
+BT_SECURITY_CONFIG=
 # Overrides for non-standard layouts
 case "$APP" in
   demo_apps)
     APP_SRC_DIR="source"
 	APP_CONFIG=-DCONFIG_DEMO_APPS=y
+	BT_SECURITY_CONFIG=-DCONFIG_BT_ENCRYPTION_EN=y
     ;;
 esac
 
@@ -231,7 +233,7 @@ fi
 # Commands
 # IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
 # -----------------------------------------------------------------------------
-BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\" -- \"$APP_CONFIG\""
+BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\" -- \"$APP_CONFIG\" \"$BT_SECURITY_CONFIG\""
 FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
 
 SEND_MODEL_CMD=""
