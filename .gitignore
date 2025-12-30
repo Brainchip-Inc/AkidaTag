@@ -1,9 +1,9 @@
 # folder
-samples/*
+#samples/*
 zephyrproject
 .env/*
 
-# ignore folders
+# ignore foldersgit l
 tools/*
 build*
 source/external/*
