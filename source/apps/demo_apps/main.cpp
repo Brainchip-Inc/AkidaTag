@@ -47,6 +47,7 @@
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+#include "pdm_mic.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -135,6 +136,39 @@ int post_processing(auto out, const int32_t *bytes_out, int app_index_l) {
   }
 }
 
+k_tid_t capture_tid;
+struct k_thread capture_thread;
+K_THREAD_STACK_DEFINE(capture_stack, CAPTURE_STACK_SIZE);
+
+static int start_dmic_audio_proc (void)
+{
+  
+  if (dmic_rms_init() < 0) {
+		printk("DMIC init failed\n");
+		return -1;
+	}
+  /* -------- MIC PDM Start -------- */
+	if (dmic_rms_start() < 0) {
+		printk("DMIC start failed\n");
+		return -1;
+	}
+
+	capture_tid = k_thread_create(
+	&capture_thread,
+	capture_stack,
+	CAPTURE_STACK_SIZE,
+	dmic_capture_thread,
+	NULL, NULL, NULL,
+	CAPTURE_PRIORITY,
+	K_USER,
+	K_FOREVER   // START SUSPENDED
+	);
+
+	k_thread_start(capture_tid);
+	return 0;
+
+}
+
 int main(void) {
   printk("Akida TAG Application\n");
   confirm_image_if_needed();
@@ -158,8 +192,15 @@ int main(void) {
   }
 
   init_boot_count();
+
+  /* -------- MIC PDM Init -------- */
+  
+  start_dmic_audio_proc ();
+
   for (;;) {
-    prcess_led();
+    
+    prcess_led();    
+  
   }
 }
 
