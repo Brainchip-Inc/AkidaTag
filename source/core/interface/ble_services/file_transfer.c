@@ -81,42 +81,40 @@ BT_GATT_SERVICE_DEFINE(
     file_transfer_svc, BT_GATT_PRIMARY_SERVICE(FILE_SVC_UUID),
 
     BT_GATT_CHARACTERISTIC(FILE_SIZE_UUID, BT_GATT_CHRC_WRITE,
-#ifdef CONFIG_BT_ENCRYPTION_EN	
+#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
                            BT_GATT_PERM_WRITE_ENCRYPT,
 #else
-						   BT_GATT_PERM_WRITE,
+                           BT_GATT_PERM_WRITE,
 #endif
-						   NULL, get_file_size, NULL),
+                           NULL, get_file_size, NULL),
 
     BT_GATT_CHARACTERISTIC(FILE_CHAR_UUID, BT_GATT_CHRC_WRITE,
-#ifdef CONFIG_BT_ENCRYPTION_EN	
+#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
                            BT_GATT_PERM_WRITE_ENCRYPT,
 #else
-						   BT_GATT_PERM_WRITE,
-#endif 
-						   NULL, file_transfer_write, NULL),
-						   
+                           BT_GATT_PERM_WRITE,
+#endif
+                           NULL, file_transfer_write, NULL),
 
     BT_GATT_CHARACTERISTIC(FILE_ACK_UUID, BT_GATT_CHRC_NOTIFY,
                            BT_GATT_PERM_NONE, NULL, NULL, NULL),
 
-    BT_GATT_CCC(ack_ccc_cfg_changed, 
-#ifdef CONFIG_BT_ENCRYPTION_EN	
-                           BT_GATT_PERM_WRITE_ENCRYPT
+    BT_GATT_CCC(ack_ccc_cfg_changed,
+#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE_ENCRYPT
 #else
-						   BT_GATT_PERM_WRITE
-#endif 
-	
-	| BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE
+#endif
+                ),
 
     BT_GATT_CHARACTERISTIC(APP_CHAR_UUID_PTR, BT_GATT_CHRC_WRITE,
-#ifdef CONFIG_BT_ENCRYPTION_EN	
+#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
                            BT_GATT_PERM_WRITE_ENCRYPT,
 #else
-						   BT_GATT_PERM_WRITE,
-#endif 
-						   
-						   NULL, get_app_index, NULL));
+                           BT_GATT_PERM_WRITE,
+#endif
+
+                           NULL, get_app_index, NULL));
 
 int file_transfer_init(void) {
   LOG_INF("File transfer service initialized (static definition)\n");

@@ -15,9 +15,10 @@ LOG_MODULE_REGISTER(ble_initilaization, CONFIG_LOG_DEFAULT_LEVEL);
 #define USER_BUTTON DK_BTN1_MSK
 
 #define NUM_STATES 3
-
+#ifdef CONFIG_DK_BOARD
 static bool app_button_state;
 static int blink_status = 0;
+#endif
 
 static const struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -28,32 +29,29 @@ static const struct bt_data sd[] = {
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_LBS_VAL),
 };
 
-static void connected_ble(struct bt_conn *conn, uint8_t err)
-{
-    char addr[BT_ADDR_LE_STR_LEN];
+static void connected_ble(struct bt_conn *conn, uint8_t err) {
+  char addr[BT_ADDR_LE_STR_LEN];
 
-    if (err) {
-        LOG_ERR("Connection failed (err 0x%02x)\n", err);
-        return;
-    }
+  if (err) {
+    LOG_ERR("Connection failed (err 0x%02x)\n", err);
+    return;
+  }
 
-	LOG_INF("connected_ble: %s\n", addr);
-	
-#ifdef CONFIG_BT_ENCRYPTION_EN	
-    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+  LOG_INF("connected_ble: %s\n", addr);
 
+#ifdef CONFIG_BT_ENCRYPTION_EN
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-    // FORCE SECURITY UPGRADE TO LEVEL 4
-    err = bt_conn_set_security(conn, BT_SECURITY_L4);
-    if (err) {
-        LOG_ERR("Failed to set security (err %d)\n", err);
-    } else {
-        LOG_INF("Security level 4 requested - pairing should start\n");
-    }
+  // FORCE SECURITY UPGRADE TO LEVEL 4
+  err = bt_conn_set_security(conn, BT_SECURITY_L4);
+  if (err) {
+    LOG_ERR("Failed to set security (err %d)\n", err);
+  } else {
+    LOG_INF("Security level 4 requested - pairing should start\n");
+  }
 #endif
-	dk_set_led_on(CON_STATUS_LED);
+  dk_set_led_on(CON_STATUS_LED);
 }
-
 
 static void disconnected_ble(struct bt_conn *conn, uint8_t reason) {
   LOG_INF("Disconnected_ble (reason %u)\n", reason);
@@ -128,7 +126,7 @@ static struct bt_conn_auth_info_cb conn_auth_info_callbacks = {
 static struct bt_conn_auth_cb conn_auth_callbacks;
 static struct bt_conn_auth_info_cb conn_auth_info_callbacks;
 #endif
-
+#ifdef CONFIG_DK_BOARD
 static void app_led_cb(bool led_state) { dk_set_led(USER_LED, led_state); }
 
 static bool app_button_cb(void) { return app_button_state; }
@@ -158,13 +156,17 @@ static int init_button(void) {
   return err;
 }
 
+#endif
+
 int ble_init(void)
 
 {
 
   int err;
 
-  LOG_INF("BLE Initialization\n");
+  LOG_INF("BLE Initialization \n");
+
+#ifdef CONFIG_DK_BOARD
 
   err = dk_leds_init();
   if (err) {
@@ -178,6 +180,8 @@ int ble_init(void)
     return -1;
   }
 
+#endif
+
   if (IS_ENABLED(CONFIG_BT_LBS_SECURITY_ENABLED)) {
     err = bt_conn_auth_cb_register(&conn_auth_callbacks);
     if (err) {
@@ -190,13 +194,12 @@ int ble_init(void)
       LOG_ERR("Failed to register authorization info callbacks.\n");
       return -1;
     }
-	LOG_INF("BLE Security is enabled");
-#ifdef CONFIG_BT_ENCRYPTION_EN	
-	LOG_INF("with Passkey");
-#else
-	LOG_INF("without Passkey");
-#endif
-	
+    LOG_INF("BLE Security is enabled");
+
+    LOG_INF("with Passkey");
+
+  } else {
+    LOG_INF("without Passkey");
   }
 
   err = bt_enable(NULL);
@@ -212,12 +215,13 @@ int ble_init(void)
     settings_load_subtree("boot");
   }
 
+#ifdef CONFIG_DK_BOARD
   err = bt_lbs_init(&lbs_callbacs);
   if (err) {
     LOG_ERR("Failed to init LBS (err:%d)\n", err);
     return -1;
   }
-
+#endif
   err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
   if (err) {
     LOG_ERR("Advertising failed to start (err %d)\n", err);
@@ -229,6 +233,8 @@ int ble_init(void)
 }
 
 void prcess_led(void) {
+#ifdef CONFIG_DK_BOARD
   dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
+#endif
   k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 }

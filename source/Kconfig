@@ -21,11 +21,11 @@ config BT_LBS_SECURITY_ENABLED
 	help
 	  "Enable BLE security for the LED-Button service"
 
-config BT_ENCRYPTION_EN
-    bool "Enable Custom Encryption Feature"
+config DK_BOARD
+    bool "Enable DK Board specific initialization"
     depends on BT
     help
-      This enables the custom encryption logic.
+      This enables the DK Board specific initialization.
 
 config DEMO_APPS
     bool "Enable Feature KWS, Gyro"
