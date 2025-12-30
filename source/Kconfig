@@ -27,6 +27,12 @@ config DK_BOARD
     help
       This enables the DK Board specific initialization.
 
+config SAMPLING_RATE
+    int "Sampling Rate"
+    default 16000
+    help
+      Sampling Rate.
+      
 config DEMO_APPS
     bool "Enable Feature KWS, Gyro"
     default n
