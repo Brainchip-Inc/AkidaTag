@@ -37,6 +37,15 @@ Examples:
   # Minicom on /dev/ttyACM0
   $(basename "$0") -d -m ttyUSB0
 
+Apps:
+    The following apps are available for testing connections:
+    - blinky
+    - akida_simple_app
+    - akida_spi_flash_app
+
+    The following apps are available as default:
+    - demo_apps
+
 EOF
 }
 
