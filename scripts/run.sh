@@ -204,20 +204,23 @@ fi
 # App → source dir (dynamic by default)
 # -----------------------------------------------------------------------------
 APP_SRC_DIR="samples/$APP"
-APP_CONFIG=
-BT_SECURITY_CONFIG=
+
+# Build-time "extra CMake args" (only appended when set)
+declare -a CMAKE_EXTRA_ARGS=()
+
 # Overrides for non-standard layouts
 case "$APP" in
   demo_apps)
     APP_SRC_DIR="source"
-	APP_CONFIG=-DCONFIG_DEMO_APPS=y
-	
-# Enable LBS Security (activates pairing callbacks in your code)
-	APP_BT_SECURITY_EN=-DCONFIG_BT_LBS_SECURITY_ENABLED=n
-	
-# Run on DK Board,
-	APP_DK_BOARD_EN=-DCONFIG_DK_BOARD=y
 
+    # Add only what demo_apps needs
+    CMAKE_EXTRA_ARGS+=(-DCONFIG_DEMO_APPS=y)
+
+    # Enable/disable LBS security (pairing callbacks in your code)
+    CMAKE_EXTRA_ARGS+=(-DCONFIG_BT_LBS_SECURITY_ENABLED=n)
+
+    # Run on DK Board
+    CMAKE_EXTRA_ARGS+=(-DCONFIG_DK_BOARD=y)
     ;;
 esac
 
@@ -239,7 +242,18 @@ fi
 # Commands
 # IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
 # -----------------------------------------------------------------------------
-BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\" -- \"$APP_CONFIG\" \"$APP_BT_SECURITY_EN\" \"$APP_DK_BOARD_EN\""
+BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
+
+# Append CMake args only if we have any
+if (( ${#CMAKE_EXTRA_ARGS[@]} > 0 )); then
+  # Join array safely into the string command (space separated)
+  extra_joined=""
+  for a in "${CMAKE_EXTRA_ARGS[@]}"; do
+    extra_joined+=" $(printf '%q' "$a")"
+  done
+  BUILD_CMD+=" --${extra_joined}"
+fi
+
 FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
 
 SEND_MODEL_CMD=""
