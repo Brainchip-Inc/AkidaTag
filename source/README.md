@@ -52,11 +52,15 @@ Upon execution, the script scans for available Bluetooth devices and displays a 
 Select the index corresponding to `Nordic_LBS` to pair with the device. Once pairing is complete, the client will begin transferring the model to the target device. 
 
 For loading `KWS` model:
-`python source/utils/send_model_via_ble.py --bin source/external/model_files/kws/kws_program_data.bin`
+```
+./scripts/run.sh -d --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
+```
 
 
 For loading `MNIST` model:
-`python source/utils/send_model_via_ble.py --bin source/external/model_files/mnist/mnist_program_data.bin`
+```
+./scripts/run.sh -d --app demo_apps --bin source/external/model_files/mnist/mnist_program_data.bin
+```
 
 
 ### Application Security
