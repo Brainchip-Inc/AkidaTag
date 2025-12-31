@@ -15,6 +15,7 @@ Options:
   -i, --shell      | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
   -m, --minicom    | (str)  | Run minicom inside Docker (default: ttyUSB0).
                    |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
+  --key            | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
   -r, --reset      | (flag) | Do Board Reset
   -h, --help       | (flag) | Show this help message
 
@@ -37,6 +38,15 @@ Examples:
   # Minicom on /dev/ttyACM0
   $(basename "$0") -d -m ttyUSB0
 
+Apps:
+    The following apps are available for testing connections:
+    - blinky
+    - akida_simple_app
+    - akida_spi_flash_app
+
+    The following apps are available as default:
+    - demo_apps
+
 EOF
 }
 
@@ -56,6 +66,9 @@ DO_MINICOM=false
 MINICOM_DEV="/dev/ttyUSB0"
 
 DO_RESET=false
+
+DO_KEY=false
+KEY_FILE=".env/signing_key.pem"
 
 # -----------------------------------------------------------------------------
 # Arg parsing
@@ -93,6 +106,10 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
+        --key)
+            DO_KEY=true
+            shift
+            ;;
         -r|--reset) DO_RESET=true; shift;;
         -h|--help) print_help; exit 0;;
         *) echo "Unknown option $1"; shift;;
@@ -109,13 +126,13 @@ if $DO_SHELL && ! $DOCKER; then
 fi
 
 # If not shell/minicom, require at least one action: build/flash/bin
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
-    echo "Nothing to do: pass --build and/or --flash and/or --bin, or use --shell / --minicom"
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
+    echo "Nothing to do: pass --build and/or --flash and/or --bin, and/or --key or use --shell / --minicom"
     exit 1
 fi
 
 # Require --app when doing build/flash/bin (minicom and shell don't need it)
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ( $DO_BUILD || $DO_FLASH || [[ -n "$MODEL_BIN" ]] ) && [[ -z "$APP" ]]; then
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ( $DO_BUILD || $DO_FLASH || [[ -n "$MODEL_BIN" ]] ) && [[ -z "$APP" ]]; then
     echo "Error: --app is required"
     exit 1
 fi
@@ -201,17 +218,49 @@ if $DO_SHELL; then
 fi
 
 # -----------------------------------------------------------------------------
+# KEYGEN MODE
+# -----------------------------------------------------------------------------
+if $DO_KEY; then
+    [[ -f "$KEY_FILE" ]] && echo "Error: $KEY_FILE already exists" && exit 1
+    echo "=== Generating signing key ==="
+    echo "    Output: $KEY_FILE"
+
+    if $DOCKER; then
+        echo "    Running inside Docker image: $DOCKER_IMAGE"
+        echo ">>> Docker command:"
+        printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" imgtool keygen -k "$KEY_FILE" -t rsa-3072
+        echo
+
+        "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" imgtool keygen -k "$KEY_FILE" -t rsa-3072
+        exit $?
+    else
+        echo ">>> imgtool keygen -k \"$KEY_FILE\" -t rsa-3072"
+        imgtool keygen -k "$KEY_FILE" -t rsa-3072
+        exit $?
+    fi
+fi
+
+# -----------------------------------------------------------------------------
 # App → source dir (dynamic by default)
 # -----------------------------------------------------------------------------
 APP_SRC_DIR="samples/$APP"
 
+# Build-time "extra CMake args" (only appended when set)
+declare -a CMAKE_EXTRA_ARGS=()
+
 # Overrides for non-standard layouts
 case "$APP" in
-  lib-akd1500)
-    APP_SRC_DIR="samples/lib-akd1500/examples/sending-model"
-    ;;
-  ble)
-    APP_SRC_DIR="samples/lib-mada-BT/examples/ble_jlink_example"
+  demo_apps)
+    APP_SRC_DIR="source"
+
+    # Add only what demo_apps needs
+    CMAKE_EXTRA_ARGS+=(-DCONFIG_DEMO_APPS=y)
+
+    # Enable/disable LBS security (pairing callbacks in your code)
+    CMAKE_EXTRA_ARGS+=(-DCONFIG_BT_LBS_SECURITY_ENABLED=n)
+
+    # Run on DK Board
+    CMAKE_EXTRA_ARGS+=(-DCONFIG_DK_BOARD=y)
     ;;
 esac
 
@@ -234,11 +283,22 @@ fi
 # IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
 # -----------------------------------------------------------------------------
 BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
+
+# Append CMake args only if we have any
+if (( ${#CMAKE_EXTRA_ARGS[@]} > 0 )); then
+  # Join array safely into the string command (space separated)
+  extra_joined=""
+  for a in "${CMAKE_EXTRA_ARGS[@]}"; do
+    extra_joined+=" $(printf '%q' "$a")"
+  done
+  BUILD_CMD+=" --${extra_joined}"
+fi
+
 FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
 
 SEND_MODEL_CMD=""
 if [[ -n "$MODEL_BIN" ]]; then
-  SEND_MODEL_CMD="python samples/${APP}/utils/send_model_via_ble.py --bin \"${MODEL_BIN}\""
+  SEND_MODEL_CMD="python ${APP_SRC_DIR}/utils/send_model_via_ble.py --bin \"${MODEL_BIN}\""
 fi
 
 # -----------------------------------------------------------------------------
