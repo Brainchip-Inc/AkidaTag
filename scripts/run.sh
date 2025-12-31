@@ -267,7 +267,7 @@ FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
 
 SEND_MODEL_CMD=""
 if [[ -n "$MODEL_BIN" ]]; then
-  SEND_MODEL_CMD="python samples/${APP}/utils/send_model_via_ble.py --bin \"${MODEL_BIN}\""
+  SEND_MODEL_CMD="python ${APP_SRC_DIR}/utils/send_model_via_ble.py --bin \"${MODEL_BIN}\""
 fi
 
 # -----------------------------------------------------------------------------
