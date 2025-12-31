@@ -29,12 +29,18 @@ This project works with the following devices:
 
 ```text
 .
-├── firmware/          # Core firmware source
-├── boards/            # Board definitions and overlays
-├── drivers/           # Custom drivers and interfaces
-├── apps/              # Example and production applications
+├── source/            # Core firmware and app related code
+   ├── apps/           # Application related code
+   ├── boards/         # Configuration files for nRF5340 DK
+   ├── core/           # CMake scripts, SPI communication, BLE services, boot management, etc
+   ├── include/        # Header files
+   ├── sysbuild/       # Configuration settings
+   ├── utils/          # Utilities for BLE communication, models, etc
 ├── samples/           # Samples builds for quick tests
 ├── scripts/           # Build, flash, and utility scripts
 ├── docs/              # Setup, Architecture and design documentation
+├── .env/              # Environment related file, signing keys not to be pushed
 ├── .github/           # CI, CODEOWNERS, repo configuration
-└── README.md
+├── README.md
+├── CONTRIBUTING.md
+└── LICENSE
