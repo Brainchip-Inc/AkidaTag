@@ -80,13 +80,15 @@ This application co-hosts both MNIST and KWS models in serial flash memory:
 
 Use the following commands on the console:
 
-- Erase full serial flash memory: `full_erase`. This erases 16,773,120 bytes out of the total 16 MB serial flash.
-- Run MNIST inference: `infer mnist`
-- Run KWS inference: `infer kws`
-- List all the files in file system: `dir`
-- Clear the file system: `mkfs`
-- To create a test file in file system: `test_file`
-- To print a file content present in file system: `print_file <file_name>`
+| Command | Description |
+| --- | --- |
+| `full_erase` | Erase full serial flash memory. This erases 16,773,120 bytes out of the total 16 MB serial flash. |
+| `infer mnist` | Run MNIST inference. |
+| `infer kws` | Run KWS inference. |
+| `dir` | List all the files in file system. |
+| `mkfs` | Clear the file system. |
+| `test_file` | Create a test file in file system. |
+| `print_file <file_name>` | Print a file content present in file system. |
 
 
 
