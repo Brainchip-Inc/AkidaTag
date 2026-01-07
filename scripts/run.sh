@@ -77,6 +77,8 @@ case "$(uname -s)" in
   Linux)  IS_LINUX=true ;;
 esac
 
+BUILD_DIR="${BUILD_DIR:-}"
+
 # -----------------------------------------------------------------------------
 # Funcitons
 # -----------------------------------------------------------------------------
@@ -86,11 +88,11 @@ die() { echo "Error: $*" >&2; exit 1; }
 get_hex_path() {
   local app="$1"
   local build_dir="$2"
-  local hex="$PWD/$build_dir/$app/zephyr/zephyr.hex"
+  local hex
 
   case "$app" in
     blinky|akida_simple_app|akida_spi_flash_app)
-      hex="$PWD/$build_dir/$app/$app/zephyr/zephyr.hex"
+      hex="$PWD/$build_dir/$app/zephyr/zephyr.hex"
       ;;
     demo_apps)
       hex="$PWD/$build_dir/merged.hex"
@@ -322,10 +324,14 @@ fi
 # -----------------------------------------------------------------------------
 # Build directory depends on local vs docker
 # -----------------------------------------------------------------------------
-if $DOCKER; then
-  APP_BUILD_DIR="build_docker/$APP"
+if [[ -n "$BUILD_DIR" ]]; then
+  APP_BUILD_DIR="$BUILD_DIR/$APP"
 else
-  APP_BUILD_DIR="build/$APP"
+  if $DOCKER; then
+    APP_BUILD_DIR="build_docker/$APP"
+  else
+    APP_BUILD_DIR="build/$APP"
+  fi
 fi
 
 # -----------------------------------------------------------------------------
@@ -359,9 +365,6 @@ $'g\n'\
 $'exit\n'\
 $'EOF'
 fi
-
-# echo $FLASH_CMD
-# exit
 
 SEND_MODEL_CMD=""
 if [[ -n "$MODEL_BIN" ]]; then
