@@ -70,6 +70,13 @@ DO_RESET=false
 DO_KEY=false
 KEY_FILE=".env/signing_key.pem"
 
+IS_DARWIN=false
+IS_LINUX=false
+case "$(uname -s)" in
+  Darwin) IS_DARWIN=true ;;
+  Linux)  IS_LINUX=true ;;
+esac
+
 # -----------------------------------------------------------------------------
 # Arg parsing
 # -----------------------------------------------------------------------------
@@ -159,13 +166,12 @@ fi
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  HOST_GID="$HOST_UID"
+if $IS_DARWIN; then
+  HOST_GID="$HOST_UID"   # use 501 instead of 20 (staff) for your entrypoint logic
 fi
 
 DOCKER_RUN_BASE=(
     docker run --rm --privileged
-    --device /dev/bus/usb:/dev/bus/usb
     -v "$PWD":/spark
     -w /spark
     -e USER_NAME=demo
@@ -174,6 +180,10 @@ DOCKER_RUN_BASE=(
     -e CCACHE_DIR="/home/demo/.ccache"
     -it
 )
+
+if $IS_LINUX; then
+  DOCKER_RUN_BASE+=(--device /dev/bus/usb:/dev/bus/usb)
+fi
 
 if $BLE_NEEDED; then
     DOCKER_RUN_BASE+=(-v /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket:ro)
