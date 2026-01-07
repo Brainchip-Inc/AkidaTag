@@ -156,14 +156,22 @@ fi
 # -----------------------------------------------------------------------------
 # Docker run base (IMPORTANT: image name is NOT included here)
 # -----------------------------------------------------------------------------
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  HOST_GID="$HOST_UID"
+fi
+
 DOCKER_RUN_BASE=(
     docker run --rm --privileged
     --device /dev/bus/usb:/dev/bus/usb
     -v "$PWD":/spark
     -w /spark
     -e USER_NAME=demo
-    -e USER_UID="$(id -u)"
-    -e USER_GID="$(id -g)"
+    -e USER_UID="$HOST_UID"
+    -e USER_GID="$HOST_GID"
+    -e CCACHE_DIR="/home/demo/.ccache"
     -it
 )
 
