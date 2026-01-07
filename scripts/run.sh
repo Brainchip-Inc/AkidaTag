@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 print_help() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -56,6 +55,7 @@ EOF
 APP=""
 DO_BUILD=false
 DO_FLASH=false
+DO_JLINK_FLASH=false
 MODEL_BIN=""
 
 DOCKER=false
@@ -78,6 +78,32 @@ case "$(uname -s)" in
 esac
 
 # -----------------------------------------------------------------------------
+# Funcitons
+# -----------------------------------------------------------------------------
+
+die() { echo "Error: $*" >&2; exit 1; }
+
+get_hex_path() {
+  local app="$1"
+  local build_dir="$2"
+  local hex="$PWD/$build_dir/$app/zephyr/zephyr.hex"
+
+  case "$app" in
+    blinky|akida_simple_app|akida_spi_flash_app)
+      hex="$PWD/$build_dir/$app/$app/zephyr/zephyr.hex"
+      ;;
+    demo_apps)
+      hex="$PWD/$build_dir/merged.hex"
+      ;;
+    *)
+      die "No JLink HEX mapping defined for app: $app"
+      ;;
+  esac
+
+  echo "$hex"
+}
+
+# -----------------------------------------------------------------------------
 # Arg parsing
 # -----------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -85,6 +111,7 @@ while [[ $# -gt 0 ]]; do
         --app) APP="${2:-}"; shift 2;;
         -b|--build) DO_BUILD=true; shift;;
         -f|--flash) DO_FLASH=true; shift;;
+        -jf|--jlink_flash) DO_JLINK_FLASH=true; shift;;
         --bin) MODEL_BIN="${2:-}"; shift 2;;
         -d|--docker)
             DOCKER=true
@@ -142,6 +169,11 @@ fi
 if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ( $DO_BUILD || $DO_FLASH || [[ -n "$MODEL_BIN" ]] ) && [[ -z "$APP" ]]; then
     echo "Error: --app is required"
     exit 1
+fi
+
+# --jlink only makes sense with --flash
+if $DO_JLINK_FLASH && ! $DO_FLASH; then
+    die "--jlink_flash requires --flash"
 fi
 
 # Validate --bin file existence on host (works for local and docker since we mount PWD)
@@ -313,6 +345,23 @@ if (( ${#CMAKE_EXTRA_ARGS[@]} > 0 )); then
 fi
 
 FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
+if $DO_JLINK_FLASH; then
+  JLINK_HEX_HOST="$(get_hex_path "$APP" "$APP_BUILD_DIR")"
+  FLASH_CMD=$'JLinkExe -NoGui 1 <<EOF\n'\
+$'device NRF5340_XXAA\n'\
+$'if SWD\n'\
+$'speed 4000\n'\
+$'connect\n'\
+$'r\n'\
+$'loadfile '"$JLINK_HEX_HOST"$'\n'\
+$'r\n'\
+$'g\n'\
+$'exit\n'\
+$'EOF'
+fi
+
+# echo $FLASH_CMD
+# exit
 
 SEND_MODEL_CMD=""
 if [[ -n "$MODEL_BIN" ]]; then
