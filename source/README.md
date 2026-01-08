@@ -30,6 +30,14 @@ Chip Select (CS) handling is managed automatically by Zephyr’s SPI driver via 
 Each SPI device has its own CS GPIO defined, and CS is asserted and released automatically
 during `spi_write()` and `spi_transceive()` calls. No manual GPIO toggling is required.
 
+
+### I2C ISM330 accelerometer and gyroscope
+This application interfaces with the ISM330 accelerometer and gyroscope over I2C1.
+I2C1 is configured with SCL on P1.03 and SDA on P1.02 using Zephyr pinctrl.
+Accelerometer (CTRL1_XL) and gyroscope (CTRL2_G) registers are configured in code.
+Sensor data is read periodically to obtain linear acceleration and angular rate.
+Changed SPI1 to SPI2 port, since using I2C1 port (need to test).
+
 ### Build the demo_apps Sample.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.

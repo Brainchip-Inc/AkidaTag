@@ -51,6 +51,8 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/storage/flash_map.h>
 #include <zephyr/sys/crc.h>
+#include "acc_gyro.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -298,6 +300,11 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
 int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
+#define VALID_PROGRAM_DATA_KWS 0x64d70000
+
+/*I2C - ACC/GYRO*/
+#define I2C_NODE DT_NODELABEL(mysensor)
+#define SLEEP_TIME_MS 1000
 
 const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
 uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
@@ -774,7 +781,24 @@ int main(void) {
 void cli_worker_proc_thread(void *a, void *b, void *c) {
   printk("CLI Worker: \n\r");
 
+  static const struct i2c_dt_spec dev_i2c =
+		I2C_DT_SPEC_GET(I2C_NODE);
+
+	struct ism330_data data{};
+
+	if (acc_gyro_init(&dev_i2c) < 0) {
+		printk("ISM330 init failed\n");
+		return;
+	}
+
   while (1) {
+
+    acc_gyro_read_all(&dev_i2c, &data);
+
+		printk("ACC X:%d Y:%d Z:%d | GYR X:%d Y:%d Z:%d\n",
+		       data.accel[0], data.accel[1], data.accel[2],
+		       data.gyro[0],  data.gyro[1],  data.gyro[2]);
+        
     prcess_led();
   }
 }
