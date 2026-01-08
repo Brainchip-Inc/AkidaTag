@@ -47,6 +47,7 @@
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+#include "pdm_mic.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -158,8 +159,29 @@ int main(void) {
   }
 
   init_boot_count();
+
+  /* -------- MIC PDM Init -------- */
+  int16_t rms;
+
+	if (dmic_rms_init() < 0) {
+		printk("DMIC init failed\n");
+		return 0;
+	}
+  /* -------- MIC PDM Start -------- */
+	if (dmic_rms_start() < 0) {
+		printk("DMIC start failed\n");
+		return 0;
+	}
+
+	printk("DMIC init successful\n");
+
   for (;;) {
+
+    if (dmic_rms_read(&rms) == 0) {
+			printk("RMS = %d\n", rms);
+		}
     prcess_led();
+    
   }
 }
 
