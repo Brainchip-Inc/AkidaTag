@@ -1,43 +1,89 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+
+SCRIPT_INVOCATION="./scripts/${SCRIPT_NAME}"
+
 print_help() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --app            | (str)  | App to build/flash
-  -b, --build      | (flag) | Do Build
-  -f, --flash      | (flag) | Do Flash
-  --bin            | (str)  | If provided, send a model .bin to Akida External Flash via BLE
-  -d, --docker     | (str)  | Run build/flash using Docker
-                   |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
-  -i, --shell      | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
-  -m, --minicom    | (str)  | Run minicom inside Docker (default: ttyUSB0).
-                   |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
-  --key            | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
-  -r, --reset      | (flag) | Do Board Reset
-  -h, --help       | (flag) | Show this help message
+  --app              | (str)  | App to build/flash
+  -b, --build        | (flag) | Do Build
+  -f, --flash        | (flag) | Do Flash
+  -jf, --jlink_flash | (flag) | Do Flash using Jlink. Also pass -f for flash.
+  --bin              | (str)  | If provided, send a model .bin to Akida External Flash via BLE
+  -d, --docker       | (str)  | Run build/flash using Docker
+                     |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
+  -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
+  -m, --minicom      | (str)  | Run minicom inside Docker (default: ttyUSB0).
+                     |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
+  --key              | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
+  -r, --reset        | (flag) | Do Board Reset
+  -h, --help         | (flag) | Show this help message
 
-Examples:
-  # Build locally (eg. app - blinky)
-  $(basename "$0") -b --app blinky
+###################################################################################################
+Run the script from project root.
+
+How to use script - Examples runs:
+(eg. app - blinky, demo_apps)
+
+  # Build locally
+  $SCRIPT_INVOCATION -b --app blinky
 
   # Build akida_spi_flash_app inside Docker
-  $(basename "$0") -d --app akida_spi_flash_app
+  $SCRIPT_INVOCATION -d -b --app demo_apps
 
-  # Flash blinky inside Docker
-  $(basename "$0") -d --app akida_spi_flash_app
+  # Flash locally using west flash
+  $SCRIPT_INVOCATION -f --app demo_apps
 
-  # Send model To Akida External Flash via BLE
-  $(basename "$0") -d --app akida_spi_flash_app --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin
+  # Flash locally using Jlink
+  $SCRIPT_INVOCATION -d -f -jl --app demo_apps
 
-  # If have a customer docker image then provide docker image name with -d
-  $(basename "$0") -d -b --app akida_spi_flash_app  
+  # Flash inside Docker
+  $SCRIPT_INVOCATION -d -f --app demo_apps
 
-  # Minicom on /dev/ttyACM0
-  $(basename "$0") -d -m ttyUSB0
+  # Flash using Jlink inside Docker
+  $SCRIPT_INVOCATION -d -f -jl --app demo_apps
+  
+  # Send model To Akida External Flash via BLE locally
+  $SCRIPT_INVOCATION --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
 
-Apps:
+  # Send model To Akida External Flash via BLE using Docker
+  $SCRIPT_INVOCATION -d --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
+
+  # If there is a custom docker image then provide docker image name with -d
+  $SCRIPT_INVOCATION -d custom_docker_image -b --app akida_spi_flash_app  
+
+  # Minicom on /dev/ttyACM0 locally
+  $SCRIPT_INVOCATION -m /dev/ttyACM0
+
+  # Minicom on /dev/ttyACM0 inside Docker
+  $SCRIPT_INVOCATION -d -m /dev/ttyACM0
+
+  # Reset board locally
+  $SCRIPT_INVOCATION -r
+
+  # Reset board inside docker
+  $SCRIPT_INVOCATION -d -r
+
+  # Only launch container and stay
+  $SCRIPT_INVOCATION -d --shell
+
+  # Create signing key locally
+  $SCRIPT_INVOCATION --key
+
+  # Create signing key inside docker
+  $SCRIPT_INVOCATION -d --shell
+
+There is a BUILD_DIR env variable that can be set to override the default build
+directory location. For example:
+  BUILD_DIR=custom_build_dir $SCRIPT_INVOCATION -b --app blinky
+
+###################################################################################################
+Following Apps are available:
     The following apps are available for testing connections:
     - blinky
     - akida_simple_app
