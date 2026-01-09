@@ -85,24 +85,25 @@ BUILD_DIR="${BUILD_DIR:-}"
 
 die() { echo "Error: $*" >&2; exit 1; }
 
-get_hex_path() {
+get_jlink_jobs() {
   local app="$1"
-  local build_dir="$2"
-  local hex
+  local build_dir="$2"   # e.g. build_docker/demo_apps
 
   case "$app" in
-    blinky|akida_simple_app|akida_spi_flash_app)
-      hex="$PWD/$build_dir/$app/zephyr/zephyr.hex"
+    blinky)
+      # blinky only has merged.hex (APP)
+      printf '%s|%s\n' "NRF5340_XXAA_APP" "$PWD/$build_dir/merged.hex"
       ;;
-    demo_apps)
-      hex="$PWD/$build_dir/merged.hex"
+    akida_simple_app|akida_spi_flash_app|demo_apps)
+      # two images: NET then APP (same order as west flash output)
+      printf '%s|%s\n' \
+        "NRF5340_XXAA_NET" "$PWD/$build_dir/merged_CPUNET.hex" \
+        "NRF5340_XXAA_APP" "$PWD/$build_dir/merged.hex"
       ;;
     *)
-      die "No JLink HEX mapping defined for app: $app"
+      die "No JLink mapping defined for app: $app"
       ;;
   esac
-
-  echo "$hex"
 }
 
 # -----------------------------------------------------------------------------
@@ -352,18 +353,26 @@ fi
 
 FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
 if $DO_JLINK_FLASH; then
-  JLINK_HEX_HOST="$(get_hex_path "$APP" "$APP_BUILD_DIR")"
-  FLASH_CMD=$'JLinkExe -NoGui 1 <<EOF\n'\
-$'device NRF5340_XXAA\n'\
-$'if SWD\n'\
-$'speed 4000\n'\
-$'connect\n'\
-$'r\n'\
-$'loadfile '"$JLINK_HEX_HOST"$'\n'\
-$'r\n'\
-$'g\n'\
-$'exit\n'\
-$'EOF'
+  JOBS="$(get_jlink_jobs "$APP" "$APP_BUILD_DIR")"
+
+  # Validate files
+  while IFS='|' read -r dev hex; do
+    [[ -f "$hex" ]] || die "HEX file not found: $hex"
+  done <<< "$JOBS"
+
+  FLASH_CMD=""
+  while IFS='|' read -r dev hex; do
+    FLASH_CMD+=$'JLinkExe -NoGui 1 <<EOF\n'
+    FLASH_CMD+=$'device '"$dev"$'\n'
+    FLASH_CMD+=$'if SWD\nspeed 4000\nconnect\nr\n'
+    FLASH_CMD+=$'loadfile '"$hex"$'\n'
+    FLASH_CMD+=$'r\n'
+    # Only run ("g") after APP load
+    if [[ "$dev" == "NRF5340_XXAA_APP" ]]; then
+      FLASH_CMD+=$'g\n'
+    fi
+    FLASH_CMD+=$'exit\nEOF\n'
+  done <<< "$JOBS"
 fi
 
 SEND_MODEL_CMD=""
