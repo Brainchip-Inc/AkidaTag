@@ -125,8 +125,6 @@ RUN update-alternatives --install /usr/bin/pip pip /usr/local/bin/pip${PYTHON_VE
 # -----------------------------------------------------------------------------
 # Install west and ncs related python packages
 # -----------------------------------------------------------------------------
-RUN pip install west==1.5.0
-
 RUN pip install -r "${ZEPHYR_BASE}/scripts/requirements.txt"
 
 # -----------------------------------------------------------------------------

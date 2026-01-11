@@ -1,44 +1,89 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+
+SCRIPT_INVOCATION="./scripts/${SCRIPT_NAME}"
+
 print_help() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --app            | (str)  | App to build/flash
-  -b, --build      | (flag) | Do Build
-  -f, --flash      | (flag) | Do Flash
-  --bin            | (str)  | If provided, send a model .bin to Akida External Flash via BLE
-  -d, --docker     | (str)  | Run build/flash using Docker
-                   |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
-  -i, --shell      | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
-  -m, --minicom    | (str)  | Run minicom inside Docker (default: ttyUSB0).
-                   |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
-  --key            | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
-  -r, --reset      | (flag) | Do Board Reset
-  -h, --help       | (flag) | Show this help message
+  --app              | (str)  | App to build/flash
+  -b, --build        | (flag) | Do Build
+  -f, --flash        | (flag) | Do Flash
+  -jf, --jlink_flash | (flag) | Do Flash using Jlink. Also pass -f for flash.
+  --bin              | (str)  | If provided, send a model .bin to Akida External Flash via BLE
+  -d, --docker       | (str)  | Run build/flash using Docker
+                     |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
+  -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
+  -m, --minicom      | (str)  | Run minicom inside Docker (default: ttyUSB0).
+                     |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
+  --key              | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
+  -r, --reset        | (flag) | Do Board Reset
+  -h, --help         | (flag) | Show this help message
 
-Examples:
-  # Build locally (eg. app - blinky)
-  $(basename "$0") -b --app blinky
+###################################################################################################
+Run the script from project root.
+
+How to use script - Examples runs:
+(eg. app - blinky, demo_apps)
+
+  # Build locally
+  $SCRIPT_INVOCATION -b --app blinky
 
   # Build akida_spi_flash_app inside Docker
-  $(basename "$0") -d --app akida_spi_flash_app
+  $SCRIPT_INVOCATION -d -b --app demo_apps
 
-  # Flash blinky inside Docker
-  $(basename "$0") -d --app akida_spi_flash_app
+  # Flash locally using west flash
+  $SCRIPT_INVOCATION -f --app demo_apps
 
-  # Send model To Akida External Flash via BLE
-  $(basename "$0") -d --app akida_spi_flash_app --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin
+  # Flash locally using Jlink
+  $SCRIPT_INVOCATION -d -f -jl --app demo_apps
 
-  # If have a customer docker image then provide docker image name with -d
-  $(basename "$0") -d -b --app akida_spi_flash_app  
+  # Flash inside Docker
+  $SCRIPT_INVOCATION -d -f --app demo_apps
 
-  # Minicom on /dev/ttyACM0
-  $(basename "$0") -d -m ttyUSB0
+  # Flash using Jlink inside Docker
+  $SCRIPT_INVOCATION -d -f -jl --app demo_apps
+  
+  # Send model To Akida External Flash via BLE locally
+  $SCRIPT_INVOCATION --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
 
-Apps:
+  # Send model To Akida External Flash via BLE using Docker
+  $SCRIPT_INVOCATION -d --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
+
+  # If there is a custom docker image then provide docker image name with -d
+  $SCRIPT_INVOCATION -d custom_docker_image -b --app akida_spi_flash_app  
+
+  # Minicom on /dev/ttyACM0 locally
+  $SCRIPT_INVOCATION -m /dev/ttyACM0
+
+  # Minicom on /dev/ttyACM0 inside Docker
+  $SCRIPT_INVOCATION -d -m /dev/ttyACM0
+
+  # Reset board locally
+  $SCRIPT_INVOCATION -r
+
+  # Reset board inside docker
+  $SCRIPT_INVOCATION -d -r
+
+  # Only launch container and stay
+  $SCRIPT_INVOCATION -d --shell
+
+  # Create signing key locally
+  $SCRIPT_INVOCATION --key
+
+  # Create signing key inside docker
+  $SCRIPT_INVOCATION -d --shell
+
+There is a BUILD_DIR env variable that can be set to override the default build
+directory location. For example:
+  BUILD_DIR=custom_build_dir $SCRIPT_INVOCATION -b --app blinky
+
+###################################################################################################
+Following Apps are available:
     The following apps are available for testing connections:
     - blinky
     - akida_simple_app
@@ -56,6 +101,7 @@ EOF
 APP=""
 DO_BUILD=false
 DO_FLASH=false
+DO_JLINK_FLASH=false
 MODEL_BIN=""
 
 DOCKER=false
@@ -70,6 +116,42 @@ DO_RESET=false
 DO_KEY=false
 KEY_FILE=".env/signing_key.pem"
 
+IS_DARWIN=false
+IS_LINUX=false
+case "$(uname -s)" in
+  Darwin) IS_DARWIN=true ;;
+  Linux)  IS_LINUX=true ;;
+esac
+
+BUILD_DIR="${BUILD_DIR:-}"
+
+# -----------------------------------------------------------------------------
+# Funcitons
+# -----------------------------------------------------------------------------
+
+die() { echo "Error: $*" >&2; exit 1; }
+
+get_jlink_jobs() {
+  local app="$1"
+  local build_dir="$2"   # e.g. build_docker/demo_apps
+
+  case "$app" in
+    blinky)
+      # blinky only has merged.hex (APP)
+      printf '%s|%s\n' "NRF5340_XXAA_APP" "$PWD/$build_dir/merged.hex"
+      ;;
+    akida_simple_app|akida_spi_flash_app|demo_apps)
+      # two images: NET then APP (same order as west flash output)
+      printf '%s|%s\n' \
+        "NRF5340_XXAA_NET" "$PWD/$build_dir/merged_CPUNET.hex" \
+        "NRF5340_XXAA_APP" "$PWD/$build_dir/merged.hex"
+      ;;
+    *)
+      die "No JLink mapping defined for app: $app"
+      ;;
+  esac
+}
+
 # -----------------------------------------------------------------------------
 # Arg parsing
 # -----------------------------------------------------------------------------
@@ -78,6 +160,7 @@ while [[ $# -gt 0 ]]; do
         --app) APP="${2:-}"; shift 2;;
         -b|--build) DO_BUILD=true; shift;;
         -f|--flash) DO_FLASH=true; shift;;
+        -jf|--jlink_flash) DO_JLINK_FLASH=true; shift;;
         --bin) MODEL_BIN="${2:-}"; shift 2;;
         -d|--docker)
             DOCKER=true
@@ -137,6 +220,11 @@ if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ( $DO_BUILD || $D
     exit 1
 fi
 
+# --jlink only makes sense with --flash
+if $DO_JLINK_FLASH && ! $DO_FLASH; then
+    die "--jlink_flash requires --flash"
+fi
+
 # Validate --bin file existence on host (works for local and docker since we mount PWD)
 if [[ -n "$MODEL_BIN" && ! -f "$MODEL_BIN" ]]; then
     echo "Error: --bin file not found: $MODEL_BIN"
@@ -156,16 +244,27 @@ fi
 # -----------------------------------------------------------------------------
 # Docker run base (IMPORTANT: image name is NOT included here)
 # -----------------------------------------------------------------------------
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+
+if $IS_DARWIN; then
+  HOST_GID="$HOST_UID"   # use 501 instead of 20 (staff) for your entrypoint logic
+fi
+
 DOCKER_RUN_BASE=(
     docker run --rm --privileged
-    --device /dev/bus/usb:/dev/bus/usb
     -v "$PWD":/spark
     -w /spark
     -e USER_NAME=demo
-    -e USER_UID="$(id -u)"
-    -e USER_GID="$(id -g)"
+    -e USER_UID="$HOST_UID"
+    -e USER_GID="$HOST_GID"
+    -e CCACHE_DIR="/home/demo/.ccache"
     -it
 )
+
+if $IS_LINUX; then
+  DOCKER_RUN_BASE+=(--device /dev/bus/usb:/dev/bus/usb)
+fi
 
 if $BLE_NEEDED; then
     DOCKER_RUN_BASE+=(-v /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket:ro)
@@ -275,10 +374,14 @@ fi
 # -----------------------------------------------------------------------------
 # Build directory depends on local vs docker
 # -----------------------------------------------------------------------------
-if $DOCKER; then
-  APP_BUILD_DIR="build_docker/$APP"
+if [[ -n "$BUILD_DIR" ]]; then
+  APP_BUILD_DIR="$BUILD_DIR/$APP"
 else
-  APP_BUILD_DIR="build/$APP"
+  if $DOCKER; then
+    APP_BUILD_DIR="build_docker/$APP"
+  else
+    APP_BUILD_DIR="build/$APP"
+  fi
 fi
 
 # -----------------------------------------------------------------------------
@@ -298,6 +401,28 @@ if (( ${#CMAKE_EXTRA_ARGS[@]} > 0 )); then
 fi
 
 FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
+if $DO_JLINK_FLASH; then
+  JOBS="$(get_jlink_jobs "$APP" "$APP_BUILD_DIR")"
+
+  # Validate files
+  while IFS='|' read -r dev hex; do
+    [[ -f "$hex" ]] || die "HEX file not found: $hex"
+  done <<< "$JOBS"
+
+  FLASH_CMD=""
+  while IFS='|' read -r dev hex; do
+    FLASH_CMD+=$'JLinkExe -NoGui 1 <<EOF\n'
+    FLASH_CMD+=$'device '"$dev"$'\n'
+    FLASH_CMD+=$'if SWD\nspeed 4000\nconnect\nr\n'
+    FLASH_CMD+=$'loadfile '"$hex"$'\n'
+    FLASH_CMD+=$'r\n'
+    # Only run ("g") after APP load
+    if [[ "$dev" == "NRF5340_XXAA_APP" ]]; then
+      FLASH_CMD+=$'g\n'
+    fi
+    FLASH_CMD+=$'exit\nEOF\n'
+  done <<< "$JOBS"
+fi
 
 SEND_MODEL_CMD=""
 if [[ -n "$MODEL_BIN" ]]; then
