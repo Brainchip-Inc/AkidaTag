@@ -7,8 +7,9 @@ The application uses the LittleFS file system and also keeps track of the number
 Run the command below to generate the signing_key.pem file in the spark.env/ directory. This file is required for the build to compile successfully.
 
 Important: This key is intended only for development/testing. Do not commit this file to the Git repository. Extra care must be taken when handling signing keys for production software.
+
 ```
-./scripts/run.sh -d --key --app demo_apps
+./scripts/run.sh -d --key
 ```
 
 ## MCUBoot Integration Changes
