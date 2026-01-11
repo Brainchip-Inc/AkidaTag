@@ -17,3 +17,6 @@ source/external/*
 
 # but allow
 !.env/README.md
+
+# misc files
+*.DS_Store
