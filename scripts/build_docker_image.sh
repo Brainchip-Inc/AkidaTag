@@ -82,6 +82,7 @@ echo "Docker Image Name To Be: ${DOCKER_IMAGE}"
 echo "Version: ${VERSION}"
 
 docker build \
+  --platform=linux/amd64 \
   -f ${PROJECT_ROOT}/docker/Dockerfile \
   --build-arg NCS_VERSION=${NCS_VERSION} \
   --build-arg PYTHON_VERSION=${PYTHON_VERSION} \
