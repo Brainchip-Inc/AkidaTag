@@ -1,33 +1,19 @@
 #include "pdm_mic.h"
 
-extern "C" {
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/audio/dmic.h>
 #include <zephyr/sys/printk.h>
-}
 
-#include <cstdint>
-#include <cmath>
-
-/* ================= CONFIG ================= */
-
-#define SAMPLE_RATE       16000
-#define SAMPLE_BIT_WIDTH  16
-#define BYTES_PER_SAMPLE  sizeof(int16_t)
-#define READ_TIMEOUT      120
-
-#define BLOCK_SIZE(_rate, _ch) \
-	(BYTES_PER_SAMPLE * (_rate / 10) * (_ch))
-
-#define MAX_BLOCK_SIZE  BLOCK_SIZE(SAMPLE_RATE, 1)
-#define BLOCK_COUNT     6
+#include <stdint.h>
+#include <math.h>
+#include <string.h>
 
 K_MEM_SLAB_DEFINE_STATIC(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 4);
 
 /* ================= STATIC STATE ================= */
 
-static const struct device *dmic_dev = nullptr;
+static const struct device *dmic_dev = NULL;
 
 /* ================= RMS (DC REMOVED) ================= */
 
@@ -36,19 +22,20 @@ static int16_t calculate_rms_dc_removed(int16_t *samples, uint32_t count)
 	int64_t mean = 0;
 	uint64_t sum = 0;
 
+	/* Calculate DC offset */
 	for (uint32_t i = 0; i < count; i++) {
 		mean += samples[i];
 	}
-	mean /= static_cast<int64_t>(count);
+	mean /= (int64_t)count;
 
+	/* RMS after DC removal */
 	for (uint32_t i = 0; i < count; i++) {
-		int32_t s = samples[i] - static_cast<int32_t>(mean);
-		sum += static_cast<uint64_t>(s * s);
+		int32_t s = (int32_t)samples[i] - (int32_t)mean;
+		sum += (uint64_t)(s * s);
 	}
 
-	float rms = std::sqrt(static_cast<float>(sum) /
-	                      static_cast<float>(count));
-	return static_cast<int16_t>(rms);
+	float rms = sqrtf((float)sum / (float)count);
+	return (int16_t)rms;
 }
 
 /* ================= PUBLIC API ================= */
@@ -66,9 +53,9 @@ int dmic_rms_init(void)
 	static struct pcm_stream_cfg stream;
 	memset(&stream, 0, sizeof(stream));
 
-	stream.pcm_width = SAMPLE_BIT_WIDTH;
-	stream.mem_slab  = &mem_slab;
-	stream.pcm_rate  = SAMPLE_RATE;
+	stream.pcm_width  = SAMPLE_BIT_WIDTH;
+	stream.mem_slab   = &mem_slab;
+	stream.pcm_rate   = SAMPLE_RATE;
 	stream.block_size = BLOCK_SIZE(SAMPLE_RATE, 1);
 
 	/* -------- DMIC configuration -------- */
@@ -84,7 +71,7 @@ int dmic_rms_init(void)
 	/* Stream config */
 	cfg.streams = &stream;
 
-	/* Channel config (ORDER SAFE) */
+	/* Channel config */
 	cfg.channel.req_num_chan    = 1;
 	cfg.channel.req_num_streams = 1;
 	cfg.channel.req_chan_map_lo =
@@ -94,22 +81,22 @@ int dmic_rms_init(void)
 	return dmic_configure(dmic_dev, &cfg);
 }
 
-
 int dmic_rms_start(void)
 {
-	if (dmic_dev == nullptr) {
+	if (dmic_dev == NULL) {
 		return -ENODEV;
 	}
+
 	return dmic_trigger(dmic_dev, DMIC_TRIGGER_START);
 }
 
 int dmic_rms_read(int16_t *rms_out)
 {
-	if (dmic_dev == nullptr || rms_out == nullptr) {
+	if (dmic_dev == NULL || rms_out == NULL) {
 		return -EINVAL;
 	}
 
-	void *buffer = nullptr;
+	void *buffer = NULL;
 	uint32_t size = 0;
 
 	int ret = dmic_read(dmic_dev, 0, &buffer, &size, READ_TIMEOUT);
@@ -118,10 +105,20 @@ int dmic_rms_read(int16_t *rms_out)
 	}
 
 	*rms_out = calculate_rms_dc_removed(
-		static_cast<int16_t *>(buffer),
+		(int16_t *)buffer,
 		size / BYTES_PER_SAMPLE
 	);
 
 	k_mem_slab_free(&mem_slab, buffer);
 	return 0;
+}
+void dmic_capture_thread(void *a, void *b, void *c)
+{
+	int16_t rms;
+
+    while (1) {
+        if (dmic_rms_read(&rms) == 0) {
+			printk("RMS = %d\n", rms);
+		}
+    }
 }
