@@ -6,11 +6,64 @@
 
 source "Kconfig.zephyr"
 
-menu "Nordic LED-Button BLE GATT service sample"
+menu "Akida Tag Application"
 
+config SRAM_BUFFER_SIZE
+    int "Allocate SRAM for BLE or raw audio sample capture"
+    default 102400
+    help
+      Allocate SRAM for app use.
+config MFCC_METHOD
+    int "MFCC computation method"
+    default 1
+    help
+      MFCC computation method.
+
+config AUDIO_CAPTURE_TEST
+    bool "Raw Audio Capture Test"
+    default n
+    help
+      Raw Audio Capture Test.
+
+config MFCC_SAMPLE_COUNT
+    int "MFCC sample count"
+    default 320
+    help
+      Number of PCM samples used per MFCC frame.
+
+config CHANNELS_PER_SAMPLE
+    int "no of channel per sample"
+    default 2
+    help
+      Number of channel used.
+	
+config SAMPLING_RATE
+    int "Sampling Rate"
+    default 16000
+    help
+      Sampling Rate.
+	  
+config AUDIO
+    bool "Enable AUDIO"
+    default n
+    help
+      This enables AUDIO.
+	  
+config AUDIO_DMIC
+    bool "Enable DMIC"
+    default n
+    help
+      This enables DMIC.
+
+config SYNC_MODE
+    int "Enable Akida Sync"
+    default 0
+    help
+      This enables Akida Sync.	  
+	  
 config BT_LBS_SECURITY_ENABLED
 	bool "Enable security"
-	default y
+	default n
 	select BT_SMP
 	select BT_SETTINGS
 	select FLASH
