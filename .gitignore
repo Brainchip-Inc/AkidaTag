@@ -1,9 +1,6 @@
-# folder
+# ignore folder
 samples/*
 zephyrproject
-.env/*
-
-# ignore foldersgit l
 tools/*
 build*
 source/external/*
@@ -12,6 +9,7 @@ source/external/*
 *JLink_Linux_V888_x86_64.deb
 
 # safety
+.env/*
 *.pem
 *.key
 
