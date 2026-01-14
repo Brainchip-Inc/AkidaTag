@@ -10,7 +10,6 @@ set(CONF_FILE
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/demo_apps/custom_app.conf
 )
 
-
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 if(CONFIG_DEMO_APPS)
@@ -39,9 +38,7 @@ setup_akida_engine(core/cmake/)
 include(core/cmake/cmsis_dsp.cmake)
 
 fetch_cmsis_dsp()
-add_cmsis_dsp(app)
-
-	
+add_cmsis_dsp(app)	
 
 #
 # -------------------------------------------------------------

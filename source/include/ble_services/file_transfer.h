@@ -20,7 +20,6 @@ the application after transfer completes.
  * into SPI-Flash */
 #define WRITE_SRAM_CHUNKS 1
 
-
 #define SRAM_BUFFER_SIZE CONFIG_SRAM_BUFFER_SIZE
 
 /**

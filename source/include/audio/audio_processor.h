@@ -1,9 +1,8 @@
 #ifndef __AUDIO_PROCESSOR_H__
 #define __AUDIO_PROCESSOR_H__
-#include <stdint.h>
-#include <stdbool.h>
 #include "arm_math.h"
-
+#include <stdbool.h>
+#include <stdint.h>
 
 #define MAX_MFCC_LEN 1024
 /**
@@ -20,7 +19,7 @@ int audio_processor(void);
  *
  * @param conf Data structure to hold configuration parameters
  */
-int audio_processor_init( int samplerate);
+int audio_processor_init(int samplerate);
 
 /**
  * @brief Start i2s streaming process
@@ -31,16 +30,15 @@ int audio_processor_init( int samplerate);
  * @param mfcc_len  length of mfcc, which effects audio buffer length
  * @param cb callback function pointer invoked on a valid mfcc
  */
-int audio_processor_start(bool is_stream, q7_t* spectrogram_buff, uint8_t* spectrogram_dims,
-                          int mfcc_len, inference_cb_t cb);
+int audio_processor_start(bool is_stream, q7_t *spectrogram_buff,
+                          uint8_t *spectrogram_dims, int mfcc_len,
+                          inference_cb_t cb);
 
 /**
  * @brief Stop audio stream, Releases allocated memory
  *
  */
 int audio_processor_stop();
-
-
 
 /**
  * @brief Set verbose level
@@ -56,11 +54,10 @@ void audio_processor_set_verbose(int verbose_level);
  */
 int audio_processor_get_proc_time(void);
 
-
 void audio_process_thread(void *a, void *b, void *c);
 
 #define PROCESS_STACK_SIZE 4096
-#define PROCESS_PRIORITY   7
+#define PROCESS_PRIORITY 7
 #define SPECTROGRAM_COUNT 49
 #define SPECTROGRAM_RES 10
 
