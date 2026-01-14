@@ -10,6 +10,7 @@ set(CONF_FILE
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/demo_apps/custom_app.conf
 )
 
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 if(CONFIG_DEMO_APPS)
@@ -63,7 +64,7 @@ target_sources(app PRIVATE
 	core/interface/akd_spi_flash/akd_spi_flash_handler.cpp
 	core/interface/ble_services/file_transfer.c
 	core/interface/ble_services/ble_initialization.c
-	core/interface/audio/pdm_process.c
+	core/interface/audio/pdm_mic.c
 	core/common/audio/mfcc.c
 	core/common/audio/audio_processor.c
 	core/io_objects.cpp
