@@ -5,7 +5,6 @@
 #
 cmake_minimum_required(VERSION 3.20.0)
 # Append to existing CONF_FILE
-#set(CONF_FILE "prj.conf" "custom_app.conf")
 set(CONF_FILE
     ${CMAKE_CURRENT_SOURCE_DIR}/prj.conf
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/demo_apps/custom_app.conf
@@ -55,7 +54,6 @@ target_include_directories(app PRIVATE include
 	include/audio
     ${CMSIS_DSP_DIR}/CMSIS/DSP/Include
     ${ZEPHYR_BASE}/modules/hal/cmsis/CMSIS/Core/Include
-
 )	
 
 target_sources(app PRIVATE
