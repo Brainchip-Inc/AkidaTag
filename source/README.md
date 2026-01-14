@@ -18,7 +18,13 @@ The following updates were made to enable the nRF-provided MCUBoot bootloader:
 - Updated prj.conf to include `CONFIG_BOOTLOADER_MCUBOOT=y` and `CONFIG_NCS_SAMPLE_MCUMGR_BT_OTA_DFU=y`
 - Added a sysbuild/ directory containing mcuboot.conf
 	- In this file, add `CONFIG_SERIAL=n` option to suppress mcuboot log messages
-		
+
+### PDM MIC 
+This application uses the DMIC (PDM microphone) interface with PDM_CLK on P0.26 and PDM_DIN on P0.25.
+The DMIC peripheral is enabled via DeviceTree using the dmic_dev node and pinctrl configuration.
+Required Zephyr flags: CONFIG_AUDIO=y, CONFIG_DMIC=y, CONFIG_MEM_SLAB=y, CONFIG_PRINTK=y.
+Audio is captured at 16 kHz, 16-bit mono and RMS is calculated after DC offset removal.
+
 ### Build the demo_apps Sample.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.

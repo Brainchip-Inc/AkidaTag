@@ -5,11 +5,11 @@
 #
 cmake_minimum_required(VERSION 3.20.0)
 # Append to existing CONF_FILE
+
 set(CONF_FILE
     ${CMAKE_CURRENT_SOURCE_DIR}/prj.conf
-    ${CMAKE_CURRENT_SOURCE_DIR}/apps/demo_apps/custom_app.conf
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/demo_apps/custom_app.conf 
 )
-
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 if(CONFIG_DEMO_APPS)
@@ -57,6 +57,7 @@ target_include_directories(app PRIVATE include
 target_sources(app PRIVATE
 	core/interface/akd_spi_flash/akd_spi_flash.cpp
 	core/interface/akd_nrf_spi/nrf_spi.cpp
+    core/interface/audio/pdm_mic.c
 	core/interface/akd_spi_flash/akd1500_spi_driver.cpp
 	core/interface/akd_spi_flash/akd_spi_flash_handler.cpp
 	core/interface/ble_services/file_transfer.c

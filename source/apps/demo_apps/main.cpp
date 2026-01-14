@@ -47,6 +47,7 @@
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+#include "pdm_mic.h"
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
