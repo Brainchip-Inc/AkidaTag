@@ -4,4 +4,4 @@
 #define SUCCESS 0
 #define EFAILURE 1
 
-#endif //ERROR_H
+#endif // ERROR_H
