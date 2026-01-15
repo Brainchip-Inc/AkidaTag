@@ -9,7 +9,8 @@ from akida_models import fetch_file
 from tensorflow.keras.models import load_model
 from quantizeml import models
 import akida
-from akida import FullyConnected, evaluate_sparsity, AkidaUnsupervised
+from akida import FullyConnected, AkidaUnsupervised
+from akida_models import sparsity
 from cnn2snn import convert, set_akida_version, AkidaVersion
 from akida_models import ds_cnn_kws_pretrained
 from akida.generate.array_to_cpp import array_to_cpp
@@ -57,7 +58,7 @@ def generate_model_files_and_run_on_sw(args):
             # Compute sparsity information for the model using 10% of the training data
             # which is enough for a good estimate
             num_samples = ceil(0.1 * x_train.shape[0])
-            sparsities = evaluate_sparsity(model_akida, x_train[:num_samples])
+            sparsities = sparsity.compute_sparsity(model_akida, samples=x_train[:num_samples])
             # Retrieve the number of output spikes from the feature extractor output
             output_density = 1 - sparsities[model_akida.get_layer('separable_4')]
             avg_spikes = model_akida.get_layer(
