@@ -20,8 +20,7 @@ the application after transfer completes.
  * into SPI-Flash */
 #define WRITE_SRAM_CHUNKS 1
 
-// 244 KB i.e multiples of 244 bytes to ease the BLE operations
-#define SRAM_BUFFER_SIZE 249856
+#define SRAM_BUFFER_SIZE CONFIG_SRAM_BUFFER_SIZE
 
 /**
  * @brief Initialize the File Transfer Service.

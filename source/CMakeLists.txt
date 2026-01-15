@@ -32,27 +32,42 @@ message(STATUS "Top-level FEAT_NAME = ${FEATURE}")
 include(core/cmake/akida_engine_setup.cmake)
 setup_akida_engine(core/cmake/)
 
+# ------------------------------------------------------------------------------
+# External dependencies
+# ------------------------------------------------------------------------------
+include(core/cmake/cmsis_dsp.cmake)
+
+fetch_cmsis_dsp()
+add_cmsis_dsp(app)	
+
 #
 # -------------------------------------------------------------
 #  APP SOURCES
 # -------------------------------------------------------------
 #
 add_subdirectory(apps)
+
+# Make sure the app sees the DSP + Core headers
+target_include_directories(app PRIVATE include 
+	include/audio
+    ${CMSIS_DSP_DIR}/CMSIS/DSP/Include
+    ${ZEPHYR_BASE}/modules/hal/cmsis/CMSIS/Core/Include
+)	
+
 target_sources(app PRIVATE
 	core/interface/akd_spi_flash/akd_spi_flash.cpp
 	core/interface/akd_nrf_spi/nrf_spi.cpp
-    core/interface/audio/pdm_mic.c
 	core/interface/akd_spi_flash/akd1500_spi_driver.cpp
 	core/interface/akd_spi_flash/akd_spi_flash_handler.cpp
 	core/interface/ble_services/file_transfer.c
 	core/interface/ble_services/ble_initialization.c
+	core/interface/audio/pdm_mic.c
+	core/common/audio/mfcc.c
+	core/common/audio/audio_processor.c
 	core/io_objects.cpp
 	core/boot_manager.c
 	core/littlefs_storage.c
 )
-
-target_include_directories(app PRIVATE include)	
-	
 
 set(EXTERNAL_GEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external)
 
