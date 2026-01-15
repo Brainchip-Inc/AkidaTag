@@ -99,7 +99,7 @@ if(NOT EXISTS ${KWS_MODEL_FILE})
     message(STATUS ${KWS_MODEL_FILE} "KWS Model file not found. Generating...")
 
     execute_process(
-        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/utils/kws.py ${EXTERNAL_GEN_DIR}
+        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/utils/kws.py -o ${EXTERNAL_GEN_DIR} -class 3 -model kws_edge_learn -neurons 15 -av v1
         WORKING_DIRECTORY "${EXTERNAL_GEN_DIR}"
         RESULT_VARIABLE KWS_MODEL_FILES_RESULT
     )
