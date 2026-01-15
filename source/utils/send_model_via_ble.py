@@ -24,7 +24,7 @@ APP_CHAR_UUID             = "f000aa05-0451-4000-b000-000000000000"  # control
 APP = 0 # default MNIST
 
 CHUNK_SIZE = 244
-BUFFER_SIZE = 249856
+BUFFER_SIZE = 102236  #419 * 244 chunks
 
 #When readback is enabled this should become BUFFER_SIZE // 2
 ACK_CHUNK_LIMIT = BUFFER_SIZE

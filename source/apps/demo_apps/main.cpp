@@ -47,28 +47,186 @@
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
-#include "pdm_mic.h"
 
+#include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include "audio_processor.h"
 #include "ble_services/ble_initialization.h"
 #include "ble_services/file_transfer.h"
 #include "boot_manager.h"
+#include "error.h"
 #include "littlefs_storage.h"
+#include "pdm_mic.h"
 
 #ifdef __cplusplus
 }
 #endif
-
+void cli_worker_proc_thread(void *a, void *b, void *c);
 /*
 FLash offset indices
 KWS - 1
 MNIST - 0
 */
 
+/** Input batch size, picked an arbitrary value */
+#define INPUT_BATCH_SIZE (CONFIG_BATCH_SIZE)
+
+#define SAMPLING_RATE CONFIG_SAMPLING_RATE
+
+#define NUM_CLASSES 33
+#define NUM_NEURONS_PER_CLASS 1
+#define MFCC_SAMPLE_COUNT CONFIG_MFCC_SAMPLE_COUNT
+
+#define NUM_INA_BUFF (2)
+#define NUM_INA_SAMPLES (50)
+#define INA_BUFF_MESH_OFFSET(idx) (idx)
+#define INA_BUFF_IO_OFFSET(idx) (NUM_INA_SAMPLES + idx)
+
+/** Possible states of the application */
+#define STATE_COUNT (4)
+/** Inference mode */
+#define STATE_INFERENCE (0)
+/** Learning class selection mode */
+#define STATE_LEARN_SELECT (1)
+/** Learning mode */
+#define STATE_LEARNING (2)
+/** No operation mode */
+#define STATE_STOPPED (3)
+
+/** Indexes of novel classes ranges from 33-35 */
+#define KWS_EDGE_NOVEL_CLASS_BASE_ID 33
+#define KWS_EDGE_MAX_NOVEL_CLASS_ID 35
+
+#define LEARN_WEIGHTS_FILE_NAME "/kwswts.bin"
+
+/** Experimentally determined energy_threshold */
+#define DEFAULT_ENERGY_THRESHOLD 666
+/** Experimentally determined first binary of MFCC spectogram */
+#define DEFAULT_BIN0_THRESHOLD -39
+/** Learning delay is set to an arbitrary value */
+#define DEFAULT_LEARNING_DELAY 1000
+/** Macro to set the API to async mode */
+#ifdef CONFIG_SYNC_MODE
+#define DEFAULT_API_SELECTION_ASYNC 0
+#else
+#define DEFAULT_API_SELECTION_ASYNC 1
+#endif
+#ifdef CONFIG_INFERENCE_SAMPLE_THRESHOLD
+#define DEFAULT_INFERENCE_SAMPLE_THRESHOLD CONFIG_INFERENCE_SAMPLE_THRESHOLD
+#else
+#define DEFAULT_INFERENCE_SAMPLE_THRESHOLD 3
+#endif
+static struct kws_demo_params {
+  int energy_threshold;
+  int bin0_threshold;
+  int learning_delay;
+  int sync_api;
+  int infer_threshold;
+} params = {DEFAULT_ENERGY_THRESHOLD, DEFAULT_BIN0_THRESHOLD,
+            DEFAULT_LEARNING_DELAY, DEFAULT_API_SELECTION_ASYNC,
+            DEFAULT_INFERENCE_SAMPLE_THRESHOLD};
+
+static int verbose_on = 0;
+
+static uint8_t cur_kws_edge_state = 0;
+static bool id_dmic_audio_proc_started = false;
+
+/** Spectrogram holding the required spectrogram for inference (prior to
+  normalization) */
+static q7_t __aligned(4) spectrogram[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
+/** spectrogram dimensions */
+static uint8_t __aligned(4) spectrogram_dims[2] = {SPECTROGRAM_COUNT,
+                                                   SPECTROGRAM_RES};
+
+static int32_t get_inferred_class(int32_t *result, int num_classes,
+                                  int num_neurons);
+
+/** Last class detected */
+static int current_class = -1;
+
+/** data structure to represent possible actions in a state */
+typedef struct {
+  /**
+   * @brief Invoked in Inference/learning mode on availability of mfcc output.
+   * if state machine is in Inference mode it performs inference.
+   *
+   * @param input       - input sample data
+   * @param input_shape - shape of input data
+   */
+  int32_t (*on_mfcc_output)(uint8_t *input, uint32_t *input_shape);
+
+  /**
+   * @brief Invoked on user input.
+   * Based on the user input identified corresponding event callback function is
+   * invoked.
+   *
+   * @param input_type  - type of input user input identified
+   */
+  void (*on_user_input)(int input_type);
+} kws_edge_state_processor;
+
+/**
+ * @brief  Callback functions in Inference state
+ * The state machine in Inference mode, performs inference on mfcc output.
+ *
+ * @param input       - input sample data
+ * @param input_shape - shape of input data
+ *
+ * @return returns the inference status
+ */
+static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape);
+
+/**
+ * @brief  Callback functions in Inference state
+ * The state machine in Inference mode, switches the mode to STATE_LEARN_SELECT.
+ *
+ * @param input_type - type of user input identified
+ */
+static void inference_on_user_input(int input_type);
+
+/**
+ * @brief  Callback functions in Learn select state
+ * The state machine in Learn select mode, performs selection of label Id.
+ *
+ * @param input_type - type of user input identified
+ */
+static void learn_select_on_user_input(int input_type);
+
+/**
+ * @brief  Callback functions in Learning state
+ * The state machine in Learning mode, performs edge learning.
+ *
+ * @param input       - input sample data
+ * @param input_shape - shape of input data
+ *
+ * @return int32_t returns SUCCESS
+ */
+static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape);
+
+/**
+ * @brief  Callback functions in Learning state
+ * The state machine in Learning mode, changes the mode depending on passed
+ * input. if the input is long press on B1, then changes mode to STATE_INFERENCE
+ * else if the input is short press on B1 or B2, then changes mode to
+ * STATE_LEARN_SELECT
+ * @param input_type - type of user input identified
+ */
+static void learning_on_user_input(int input_type);
+
+static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
+    [STATE_INFERENCE] = {inference_on_mfcc_output, inference_on_user_input},
+    [STATE_LEARN_SELECT] = {NULL, learn_select_on_user_input},
+    [STATE_LEARNING] = {learning_on_mfcc_output, learning_on_user_input},
+};
+
 #define VALID_PROGRAM_DATA_MNIST 0xD8130700
 #define VALID_PROGRAM_DATA_KWS 0x64d70000
+static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
+
+int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
 
 const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
 uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
@@ -120,6 +278,22 @@ void panic(const char *format, ...) {
   exit(EXIT_FAILURE);
 }
 
+static bool kws_model_present = false;
+
+int32_t get_inferred_class(int32_t *result, int num_classes, int num_neurons) {
+  int32_t max_val = 0, max_index = -1, n_activations = 0;
+  n_activations = num_classes * num_neurons;
+  for (int i = 0; i < n_activations; i++) {
+    if (result[i] > max_val) {
+      max_val = result[i];
+      max_index = i;
+    }
+  }
+  printk("\nClass : %d\n", max_index);
+  printk("Word : %s\n", kws_tags[max_index]);
+  return (max_index / num_neurons);
+}
+
 int post_processing(auto out, const int32_t *bytes_out, int app_index_l) {
   if (app_index_l <= 1) {
     int32_t max_val = bytes_out[0];
@@ -132,44 +306,158 @@ int post_processing(auto out, const int32_t *bytes_out, int app_index_l) {
     }
     return max_index;
   } else {
-    return -1;
+    return EFAILURE;
   }
 }
 
-k_tid_t capture_tid;
-struct k_thread capture_thread;
+int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
+                  int output_size) {
+
+  akida::TensorConstPtr in = akida::Dense::create_view(
+      reinterpret_cast<const char *>(input), akida::TensorType::uint8,
+      {input_dims[0], input_dims[1], input_dims[2]},
+      akida::Dense::Layout::RowMajor);
+
+  /** Execute inference */
+  auto ret = akd_device.forward({in});
+
+  if (ret.size()) {
+    /** Get output buffer */
+    auto out = akida::Tensor::ensure_dense(std::move(ret[0]));
+    if (out && out->size() * sizeof(int) == (size_t)output_size) {
+      const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
+      memcpy(output, bytes_out, output_size);
+      return SUCCESS;
+    }
+  }
+  return -EFAILURE;
+}
+
+void do_inference(int spectrogram_index) {
+  __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
+  q7_t min = 127;
+  q7_t max = -128;
+  int32_t energy = 0;
+  int32_t energies[SPECTROGRAM_COUNT + 1];
+
+  // printk ("do_inference \n");
+
+  for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
+    int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
+    energies[i] = 0;
+    for (int j = 0; j < SPECTROGRAM_RES; j++) {
+      if (spectrogram[idx][j] > max) {
+        max = spectrogram[idx][j];
+      }
+      if (spectrogram[idx][j] < min) {
+        min = spectrogram[idx][j];
+      }
+      if (j > 0)
+        energies[i] += spectrogram[idx][j] > 0 ? spectrogram[idx][j]
+                                               : -spectrogram[idx][j];
+    }
+    energy += energies[i];
+  }
+
+  /* It has been experimentally determined that when we talk on the mic,
+   * the energy goes above 666, and the first bin of the MFCC spectrogram
+   * is above -39. This allows not to send data to akida if we already
+   * know that there is nothing to detect.
+   */
+  // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
+  // energy, spectrogram[(25 + spectrogram_index) % SPECTROGRAM_COUNT][0]);
+  if ((energy > params.energy_threshold) &&
+      (spectrogram[(25 + spectrogram_index) % SPECTROGRAM_COUNT][0] >
+       params.bin0_threshold))
+
+  {
+
+    // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
+    // energy, spectrogram_index);
+    if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
+      /* Generate model input where whole spectrogram is normalized
+         between 0 and 255 */
+      for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
+        int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
+        for (int j = 0; j < SPECTROGRAM_RES; j++) {
+          akida_input[i][j] =
+              (uint8_t)((int)255 * ((int)spectrogram[idx][j] - (int)min) /
+                        ((int)max - (int)min));
+        }
+      }
+
+      // memcpy ((uint8_t*) akida_input, &kws_inputs[0], 490);
+      // printk ("do_inference 123 \n");
+      kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
+                                                        (uint32_t *)dims);
+      if (verbose_on) {
+        printk("Spectrogram params max=%d energy=%d spectrogram_index=%d", max,
+               energy, spectrogram_index);
+      }
+    }
+  }
+  /*else{
+          //printk(" less than energy_threshold \n");
+  }*/
+}
+
 K_THREAD_STACK_DEFINE(capture_stack, CAPTURE_STACK_SIZE);
+K_THREAD_STACK_DEFINE(process_stack, PROCESS_STACK_SIZE);
 
-static int start_dmic_audio_proc (void)
-{
-  
-  if (dmic_rms_init() < 0) {
-		printk("DMIC init failed\n");
-		return -1;
-	}
-  /* -------- MIC PDM Start -------- */
-	if (dmic_rms_start() < 0) {
-		printk("DMIC start failed\n");
-		return -1;
-	}
+K_THREAD_STACK_DEFINE(cli_worker_stack, CONFIG_SHELL_STACK_SIZE);
 
-	capture_tid = k_thread_create(
-	&capture_thread,
-	capture_stack,
-	CAPTURE_STACK_SIZE,
-	dmic_capture_thread,
-	NULL, NULL, NULL,
-	CAPTURE_PRIORITY,
-	K_USER,
-	K_FOREVER   // START SUSPENDED
-	);
+struct k_thread capture_thread;
+struct k_thread process_thread;
+struct k_thread cli_worker_thread;
 
-	k_thread_start(capture_tid);
-	return 0;
+k_tid_t capture_tid;
+k_tid_t process_tid;
+k_tid_t cli_worker_tid;
+#define CLI_WORKER_PRIORITY 4
 
+const struct device *uart;
+
+void uart_init(void) {
+  uart = DEVICE_DT_GET(DT_NODELABEL(uart0));
+  if (!device_is_ready(uart)) {
+    printk("UART not ready\n");
+  } else {
+    printk("UART is ready\n");
+  }
+}
+
+static int start_dmic_audio_proc(void) {
+  dmic_init();
+  audio_processor_init(SAMPLING_RATE);
+
+  int is_audio_started =
+      audio_processor_start(false, (q7_t *)spectrogram, spectrogram_dims,
+                            MFCC_SAMPLE_COUNT, do_inference);
+  if (is_audio_started == EFAILURE) {
+    printk("audio_processor not started\n");
+    return EFAILURE;
+  }
+
+  capture_tid = k_thread_create(&capture_thread, capture_stack,
+                                CAPTURE_STACK_SIZE, dmic_capture_thread, NULL,
+                                NULL, NULL, CAPTURE_PRIORITY, K_USER,
+                                K_FOREVER // START SUSPENDED
+  );
+
+  process_tid = k_thread_create(&process_thread, process_stack,
+                                PROCESS_STACK_SIZE, audio_process_thread, NULL,
+                                NULL, NULL, PROCESS_PRIORITY, K_USER,
+                                K_FOREVER // START SUSPENDED
+  );
+
+  k_thread_start(capture_tid);
+  k_thread_start(process_tid);
+  id_dmic_audio_proc_started = true;
+  return 0;
 }
 
 int main(void) {
+  uart_init();
   printk("Akida TAG Application\n");
   confirm_image_if_needed();
   init_setting_sub_system();
@@ -193,15 +481,97 @@ int main(void) {
 
   init_boot_count();
 
-  /* -------- MIC PDM Init -------- */
-  
-  start_dmic_audio_proc ();
+  akida_config_spi(1);
+  int ret = check_program_data(flash_offsets[1], 4, 1);
+  akida_config_spi(0);
 
-  for (;;) {
-    
-    prcess_led();    
-  
+  if (ret == false) {
+    printk("model data, not present in SPI Flash, upload the model\n");
+    kws_model_present = false;
+  } else {
+    printk("model is already present \n");
+    // program the model info part to AKD1500
+
+    printk("Programming the model\n");
+    akida_program_info((uint8_t *)program_info[1], program_info_len[1],
+                       flash_offsets[1]);
+    akd_device.set_batch_size(1, true);
+    kws_model_present = true;
   }
+
+  if (kws_model_present) {
+    start_dmic_audio_proc();
+  }
+
+  cli_worker_tid = k_thread_create(
+      &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
+      cli_worker_proc_thread, NULL, NULL, NULL, CLI_WORKER_PRIORITY, K_USER,
+      K_FOREVER // START SUSPENDED
+  );
+  k_thread_start(cli_worker_tid);
+
+  return 0;
+  for (;;) {
+    // prcess_led();
+  }
+}
+
+void cli_worker_proc_thread(void *a, void *b, void *c) {
+  printk("CLI Worker: \n\r");
+
+  while (1) {
+    prcess_led();
+  }
+}
+
+static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
+  int ret = 0;
+  static int last_found = 0, same_count = 0;
+  // printk("inference_on_mfcc_output\n");
+  // if (params.sync_api == 0)
+  {
+
+    if (0 == akida_forward(input, input_shape, (uint8_t *)akida_output,
+                           sizeof(akida_output))) {
+      int found =
+          get_inferred_class(akida_output, NUM_CLASSES, NUM_NEURONS_PER_CLASS);
+
+      if (found == -1) {
+        return -1;
+      }
+      if (last_found != found) {
+        last_found = found;
+        same_count = 1;
+      } else {
+        same_count++;
+        if (same_count >= params.infer_threshold) {
+          current_class = found;
+          printk("\nClass : %d\n", found);
+          printk("Word : %s\n", kws_tags[found]);
+        }
+      }
+    } else {
+      printk("akida_forward failure\n");
+    }
+  }
+  return ret;
+}
+
+static void inference_on_user_input(int input_type) {
+  printk("inference_on_user_input\n");
+}
+
+static void learn_select_on_user_input(int input_type) {
+  printk("learn_select_on_user_input\n");
+}
+
+static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
+  printk("learning_on_mfcc_output\n");
+  return 0;
+}
+
+static void learning_on_user_input(int input_type) {
+  printk("learning_on_user_input\n");
 }
 
 /* function to run the inference */
@@ -230,6 +600,7 @@ int infer(int app_index_l) {
     app_index = app_index_l;
   }
 
+  stop_dmic(); // stop dmic to perform static frame inference
   akd_device.toggle_clock_counter(true);
 
   uint32_t inf_complete = 0;
@@ -275,6 +646,9 @@ int infer(int app_index_l) {
   } else if (app_index_l == 1) { // kws
     printk("\nClass : %d\n", class_id);
     printk("Word : %s\n", kws_tags[class_id]);
+    kws_model_present = true;
+    if (!id_dmic_audio_proc_started)
+      start_dmic_audio_proc();
   }
 
   if (inf_complete != 0xAA) {

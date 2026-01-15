@@ -360,6 +360,9 @@ case "$APP" in
 
     # Run on DK Board
     CMAKE_EXTRA_ARGS+=(-DCONFIG_DK_BOARD=y)
+	
+	  CMAKE_EXTRA_ARGS+=(-DCONFIG_AUDIO_CAPTURE_TEST=n)
+	
     ;;
 esac
 
