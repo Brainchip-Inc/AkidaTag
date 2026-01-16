@@ -13,6 +13,13 @@ config SRAM_BUFFER_SIZE
     default 102400
     help
       Allocate SRAM for app use.
+	  
+config BATCH_SIZE
+    int "Batch size"
+    default 4
+    help
+      Batch size.	  
+	  
 config MFCC_METHOD
     int "MFCC computation method"
     default 1
