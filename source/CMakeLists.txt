@@ -64,6 +64,7 @@ target_sources(app PRIVATE
 	core/interface/audio/pdm_mic.c
 	core/common/audio/mfcc.c
 	core/common/audio/audio_processor.c
+	core/common/inference/akida.cpp
 	core/io_objects.cpp
 	core/boot_manager.c
 	core/littlefs_storage.c
