@@ -9,7 +9,8 @@ from akida_models import fetch_file
 from tensorflow.keras.models import load_model
 from quantizeml import models
 import akida
-from akida import FullyConnected, evaluate_sparsity, AkidaUnsupervised
+from akida import FullyConnected, AkidaUnsupervised
+from akida_models import sparsity
 from cnn2snn import convert, set_akida_version, AkidaVersion
 from akida_models import ds_cnn_kws_pretrained
 from akida.generate.array_to_cpp import array_to_cpp
@@ -26,13 +27,13 @@ def generate_model_files_and_run_on_sw(args):
         origin="https://data.brainchip.com/dataset-mirror/kws/kws_preprocessed_all_words_except_backward_follow_forward.pkl",
         cache_subdir='datasets/kws')
     with open(fname, 'rb') as f:
-        [_, _, x_valid, y_valid, _, _, word_to_index, data_transform] = pickle.load(f)
+        [x_train, y_train, x_valid, y_valid, _, _, word_to_index, data_transform] = pickle.load(f)
 
     # Preprocessed dataset parameters
     num_classes = len(word_to_index)
     print("Wanted words and labels:\n", word_to_index)
 
-    x_valid = x_valid[0]
+    #x_valid = x_valid[0]
     print("x_valid shape : ", x_valid.shape)
     array_to_cpp('./model_files/kws/', x_valid, 'kws_inputs')
     print("y_valid[0] : ", y_valid[0])
@@ -41,6 +42,20 @@ def generate_model_files_and_run_on_sw(args):
         model_keras_quantized = ds_cnn_kws_pretrained()
         model_akida = convert(model_keras_quantized)
 
+
+        # For KWS Model, measure the converted Akida model accuracy on validation set
+        if args.model_name in ('kws_edge_learn', 'kws'):
+            batch_size = 1000
+            preds_val_ak = np.zeros(y_valid.shape[0])
+            num_batches_val = ceil(x_valid.shape[0] / batch_size)
+            for i in range(num_batches_val):
+                s = slice(i * batch_size, (i + 1) * batch_size)
+                preds_val_ak[s] = model_akida.predict_classes(x_valid[s])
+            acc_val_ak = np.sum(preds_val_ak == y_valid) / y_valid.shape[0]
+            v_print(
+                f"Akida CNN2SNN validation set accuracy: {100 * acc_val_ak:.2f} %")
+            # For non-regression purpose
+            assert acc_val_ak > 0.88
 
         # Replace the last layer by a classification layer with binary weights
         model_akida.pop_layer()
@@ -57,9 +72,16 @@ def generate_model_files_and_run_on_sw(args):
             # Compute sparsity information for the model using 10% of the training data
             # which is enough for a good estimate
             num_samples = ceil(0.1 * x_train.shape[0])
-            sparsities = evaluate_sparsity(model_akida, x_train[:num_samples])
+            sparsities = sparsity.compute_sparsity(model_akida, samples=x_train[:num_samples])
             # Retrieve the number of output spikes from the feature extractor output
-            output_density = 1 - sparsities[model_akida.get_layer('separable_4')]
+            #output_density = 1 - sparsities[model_akida.get_layer('separable_4')]
+            layer = model_akida.get_layer('separable_4')
+
+            if layer.name not in sparsities:
+                raise KeyError(f"Sparsity missing for layer {layer.name}")
+
+            output_density = 1 - sparsities[layer.name]            
+            
             avg_spikes = model_akida.get_layer(
                 'separable_4').output_dims[-1] * output_density
             v_print(f"Average number of spikes: {avg_spikes}")
@@ -91,7 +113,6 @@ def generate_model_files_and_run_on_sw(args):
             end = time()
             v_print(f"Elapsed time for Akida training: {end-start:.2f} s")
             # Measure Akida accuracy on validation set
-            preds_val_ak = np.zeros(y_valid.shape[0])
             for i in range(num_batches_val):
                 s = slice(i * batch_size, (i + 1) * batch_size)
                 preds_val_ak[s] = model_akida.predict_classes(x_valid[s],
