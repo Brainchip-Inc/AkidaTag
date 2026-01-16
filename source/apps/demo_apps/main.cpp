@@ -28,6 +28,7 @@
 
 #include "akd_spi_flash.h"
 #include "akd_spi_flash_handler.h"
+#include "akida.h"
 #include "akida/hardware_device.h"
 #include "io_objects.h"
 #include "kws/kws_program_info.h"
@@ -43,14 +44,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vector>
+#include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
-
-#include "akida.h"
-#include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
+#include <zephyr/sys/crc.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -108,7 +108,7 @@ MNIST - 0
 /** short button pressed event */
 #define SHORT_PRESS_EVENT 1
 
-#define LEARN_WEIGHTS_FILE_NAME "/kwswts.bin"
+#define LEARN_WEIGHTS_FILE_NAME "/ext/kwswts.bin"
 
 #define USER_INPUT_LP(BUTTON_ID) (LONG_PRESS_EVENT + (BUTTON_ID * 2))
 #define USER_INPUT_SP(BUTTON_ID) (SHORT_PRESS_EVENT + (BUTTON_ID * 2))
@@ -427,13 +427,10 @@ void do_inference(int spectrogram_index) {
     uint32_t last_learn_duration = (uint32_t)(cur_ts - last_learn_ts);
     uint64_t duration_us = k_cyc_to_us_floor64(last_learn_duration);
     // printk("Time: (~%llu us)\n", duration_us);
-    if (duration_us >= GET_SEC_TO_USEC(30)) {
+    if (duration_us >= GET_SEC_TO_USEC(5)) {
       switch_mode(STATE_LEARN_SELECT);
       printk("learning -> learn_select\n\r");
       akida_learn_mode(true);
-      printk(" do_inf: akd wts sz %d akida_learn_mem_size %d \n",
-             saved_learn_weights_ptr->learn_weights_data.learn_weights_size,
-             akida_learn_mem_size());
       if (SUCCESS ==
           save_weights_from_mesh(
               learn_weights_buff_ptr,
@@ -523,8 +520,7 @@ static void init_learn_weights_mem(uint32_t layer_mem_size) {
   /* store the last layer size information */
   saved_learn_weights_ptr->learn_weights_data.learn_weights_size =
       layer_mem_size;
-  printk("learn_weights_size = %d \n",
-         saved_learn_weights_ptr->learn_weights_data.learn_weights_size);
+
   /* initialize learn_weights_buff_ptr to the next location after the
    * structure saved_learn_weights size */
   learn_weights_buff_ptr =
@@ -590,6 +586,82 @@ static void switch_mode(int mode) {
   }
 }
 
+static void reset_saved_weights() {
+  init_learn_weights_mem(mesh_learn_weights_size);
+
+  akida_learn_mode(true);
+  /* save the base weights into base_labels_wts_ptr location  */
+  save_weights_from_mesh(base_labels_wts_ptr, mesh_learn_weights_size);
+
+  akida_learn_mode(false);
+}
+
+/**
+ * @brief Function to update learned weights to mesh.
+ *
+ */
+static void update_weights_to_mesh() {
+
+  /* update the learned weights into the last layer before the inference */
+  saved_learn_weights_ptr->learn_weights_data.learn_weights_size =
+      akida_update_learn_weights(
+          (uint32_t *)learn_weights_buff_ptr,
+          saved_learn_weights_ptr->learn_weights_data.learn_weights_size);
+  if (saved_learn_weights_ptr->learn_weights_data.learn_weights_size !=
+      (int32_t)akida_learn_mem_size()) {
+    printk(" there is an issue for the learned class, as weights are not "
+           "stored properly "
+           "in Akida Neuron Fabric");
+    /* as there is an error, initialize the memory again */
+    init_learn_weights_mem(mesh_learn_weights_size);
+  }
+}
+
+static void read_learn_weights_from_flash(void) {
+
+  struct fs_file_t file;
+  fs_file_t_init(&file);
+
+  int ret = fs_open(&file, LEARN_WEIGHTS_FILE_NAME, FS_O_READ);
+
+  if (ret == 0) {
+    ret = fs_read(&file, (uint8_t *)saved_learn_weights_ptr,
+                  saved_learn_weights_ptr->total_saved_learn_weights_size);
+    printk(" aft fs_read \n");
+    fs_close(&file);
+
+    /* if same number of bytes are read from flash, then check CRC else user to
+     * do re-learning*/
+    if (ret == (int)saved_learn_weights_ptr->total_saved_learn_weights_size) {
+      uint32_t crc32 = crc32_ieee(
+          (uint8_t *)saved_learn_weights_ptr + 4,
+          (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
+      /* if CRC is failed then user to do re-learning*/
+      if (crc32 != saved_learn_weights_ptr->crc) {
+        printk("CRC check failed, %d bytes read from flash and there is an "
+               "error in reading "
+               "learning data, user need to perform learning again \r\n",
+               ret);
+        reset_saved_weights();
+      } else {
+        printk("%d bytes are read from flash (learn weights) to "
+               "saved_learn_weights_ptr "
+               "location \r\n",
+               ret);
+        if (saved_learn_weights_ptr->learn_weights_data.label_learnt_val) {
+          update_weights_to_mesh();
+        }
+      }
+    } else {
+      printk("incorrect number of bytes read from flash, user need to re-learn "
+             "\r\n");
+      reset_saved_weights();
+    }
+  } else {
+    printk("read_learn_weights_from_flash: file open failed \n");
+  }
+}
+
 int main(void) {
   uart_init();
   printk("Akida TAG Application\n");
@@ -652,6 +724,8 @@ int main(void) {
   }
   /* initialize the learn_weights_mem structure */
   init_learn_weights_mem(mesh_learn_weights_size);
+
+  read_learn_weights_from_flash();
 
   cur_kws_edge_state = STATE_INFERENCE;
   if (kws_model_present) {
@@ -726,23 +800,31 @@ static void inference_on_user_input(int input_type) {
 }
 
 /**
- * @brief Function to update learned weights to mesh.
+ * @brief Function to save learned weights to flash.
  *
  */
-static void update_weights_to_mesh() {
+static void save_weights_to_flash() {
+  /* compute the CRC before storing into flash */
+  saved_learn_weights_ptr->crc =
+      crc32_ieee((uint8_t *)saved_learn_weights_ptr + 4,
+                 (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
+  printk(" the computed CRC = %x", saved_learn_weights_ptr->crc);
+  /* save the learned weights into flash */
 
-  /* update the learned weights into the last layer before the inference */
-  saved_learn_weights_ptr->learn_weights_data.learn_weights_size =
-      akida_update_learn_weights(
-          (uint32_t *)learn_weights_buff_ptr,
-          saved_learn_weights_ptr->learn_weights_data.learn_weights_size);
-  if (saved_learn_weights_ptr->learn_weights_data.learn_weights_size !=
-      (int32_t)akida_learn_mem_size()) {
-    printk(" there is an issue for the learned class, as weights are not "
-           "stored properly "
-           "in Akida Neuron Fabric");
-    /* as there is an error, initialize the memory again */
-    init_learn_weights_mem(mesh_learn_weights_size);
+  struct fs_file_t file;
+  fs_file_t_init(&file);
+
+  int rc = fs_open(&file, LEARN_WEIGHTS_FILE_NAME, FS_O_CREATE | FS_O_WRITE);
+  if (rc == 0) {
+    fs_write(&file, (uint8_t *)saved_learn_weights_ptr,
+             saved_learn_weights_ptr->total_saved_learn_weights_size);
+    fs_close(&file);
+
+    printk("%d learned weight bytes are programmed to flash at "
+           "LEARN_WEIGHTS_FILE_NAME",
+           saved_learn_weights_ptr->total_saved_learn_weights_size);
+  } else {
+    printk("save_weights_to_flash: fail open failed \n");
   }
 }
 
@@ -771,6 +853,14 @@ static void reset_learned_weights(uint8_t *lbl_wts) {
    * fail and message will be displayed for the user to relearn the classes */
   // file_save(fs, LEARN_WEIGHTS_FILE_NAME, (uint8_t*)saved_learn_weights_ptr,
   // 4);
+  struct fs_file_t file;
+  fs_file_t_init(&file);
+
+  int rc = fs_open(&file, LEARN_WEIGHTS_FILE_NAME, FS_O_CREATE | FS_O_WRITE);
+  if (rc == 0) {
+    fs_write(&file, (uint8_t *)saved_learn_weights_ptr, 4);
+    fs_close(&file);
+  }
   /* reset weights in model also */
   update_weights_to_mesh();
   printk("learn weights content in Flash have been reset");
@@ -787,7 +877,7 @@ static void learn_select_on_user_input(int input_type) {
      * STATE_INFERENCE */
     if (saved_learn_weights_ptr->learn_weights_data.label_learnt_val) {
       printk("Weights saved from MEM->FLASH");
-      // save_weights_to_flash();
+      save_weights_to_flash();
     }
     break;
   case USER_INPUT_SP(0):
@@ -838,8 +928,8 @@ static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
 
   int ret = 0;
   if (params.sync_api == 0) {
-
     akida_fit(input, input_shape, &label_id);
+    printk("Sync:learning done for class@ %d", cur_kws_edge_novel_class);
 
   } else {
 
@@ -868,7 +958,7 @@ static void learning_on_user_input(int input_type) {
             saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
       saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
           1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
-      // save_weights_to_flash();
+      save_weights_to_flash();
       printk("Save Weights from MEM->FLASH");
     } else {
       printk("Sync:akida_save_learn_weights function has failed for label %d ",
