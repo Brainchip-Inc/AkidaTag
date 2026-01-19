@@ -37,6 +37,8 @@ I2C1 is configured with SCL on P1.03 and SDA on P1.02 using Zephyr pinctrl.
 Accelerometer (CTRL1_XL) and gyroscope (CTRL2_G) registers are configured in code.
 Sensor data is read periodically to obtain linear acceleration and angular rate.
 Changed SPI1 to SPI2 port, since using I2C1 port (need to test).
+Accelerometer and gyroscope parameters such as ODR, full-scale, and filters are configured using lookup tables in imu.h file.
+IMU operation can be controlled at runtime using shell commands (imu_start and imu_stop).
 
 ### Build the demo_apps Sample.
 After compiling the project, MCUBoot is automatically built along with the application.
