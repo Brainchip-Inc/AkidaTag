@@ -174,13 +174,14 @@ static void mfcc_process_input(const q15_t *input, int16_t *mfcc_input) {
 
   // Create a local buffer to stitch the overlap
   // [Old 320 samples] + [New 960 samples] = 1280 samples total
-  static int16_t stream_buffer[MFCC_HOP_SAMPLES + 960];
+  static int16_t stream_buffer[MFCC_HOP_SAMPLES + _state.mfcc_len];
 
   // 1. Move the last 320 samples of previous run to the start
   // (Already done at the end of the previous call)
 
   // 2. Copy NEW 960 samples into the rest of the buffer
-  memcpy(&stream_buffer[MFCC_HOP_SAMPLES], input, 960 * sizeof(int16_t));
+  memcpy(&stream_buffer[MFCC_HOP_SAMPLES], input,
+         _state.mfcc_len * sizeof(int16_t));
 
   // 3. Compute 3 MFCCs
   // Frame 0: 0-640 (Contains 320 old, 320 new)
@@ -193,7 +194,7 @@ static void mfcc_process_input(const q15_t *input, int16_t *mfcc_input) {
   }
 
   // 4. Save the LAST 320 samples of the CURRENT input for the NEXT call
-  memcpy(&stream_buffer[0], &stream_buffer[960],
+  memcpy(&stream_buffer[0], &stream_buffer[_state.mfcc_len],
          MFCC_HOP_SAMPLES * sizeof(int16_t));
 }
 
@@ -247,16 +248,18 @@ int audio_processor_init(int samplerate) {
 }
 
 int audio_processor_start(bool single, q7_t *spectrogram_buff,
-                          uint8_t *spectrogram_dims, int mfcc_len,
+                          uint8_t *spectrogram_dims, int mfcc_hop_len,
                           inference_cb_t cb) {
 
   single_acquisition = single;
   stream = 1;
-  if (mfcc_len > MAX_MFCC_LEN) {
+  if (mfcc_hop_len > MAX_MFCC_LEN) {
     printk(" invalid parameter \n\r ");
     return EFAILURE;
   }
-  _state.mfcc_len = 960;
+  /* for TAG MFCC HOP length is 320 samples and total block size is 960 samples
+  multiply mfcc_hop_len * 3 to get 960 */
+  _state.mfcc_len = mfcc_hop_len * 3;
   _state.spectrogram_index = 0;
 
   _state.spectrogram_len = spectrogram_dims[0];
@@ -264,7 +267,8 @@ int audio_processor_start(bool single, q7_t *spectrogram_buff,
   _state.inference_cb = cb;
   _state.spectrogram_buff = spectrogram_buff;
 
-  int ret = mfcc_init(_state.nmfcc, mfcc_len * 2, 1, (float)_state.samplerate);
+  int ret =
+      mfcc_init(_state.nmfcc, mfcc_hop_len * 2, 1, (float)_state.samplerate);
   if (ret == EFAILURE) {
     printk("mfcc_init failure\n\r ");
     return EFAILURE;
