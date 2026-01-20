@@ -339,7 +339,6 @@ void audio_process_thread(void *a, void *b, void *c) {
     pdm_process(orig_buf, samples);
     audio_processor();
 #endif
-    // prcess_led();
     audio_process_thread_cntr++;
     // printk ("ap %d\n", audio_process_thread_cntr);
   }
