@@ -22,7 +22,7 @@ const struct gpio_dt_spec akd_cs = GPIO_DT_SPEC_GET(AKD_CS_NODE, gpios);
 const struct gpio_dt_spec flash_cs = GPIO_DT_SPEC_GET(FLASH_CS_NODE, gpios);
 
 static struct spi_config spi_cfg = {
-    .frequency = 400000U, // match Python default for stability
+    .frequency = 1400000U, // match Python default for stability
     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
     .cs = NULL,
 };
