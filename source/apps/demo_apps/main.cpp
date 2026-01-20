@@ -148,7 +148,9 @@ static uint32_t cur_kws_edge_state = STATE_STOPPED;
 /** Current novel class id, selected for learning*/
 static uint32_t cur_kws_edge_novel_class = KWS_EDGE_NOVEL_CLASS_BASE_ID;
 
-static bool id_dmic_audio_proc_started = false;
+static bool is_kws_inference_started = false;
+
+static bool kws_threads_suspended = false;
 
 /** learn weights size */
 static uint32_t mesh_learn_weights_size = 0;
@@ -504,7 +506,7 @@ static int start_dmic_audio_proc(void) {
 
   k_thread_start(capture_tid);
   k_thread_start(process_tid);
-  id_dmic_audio_proc_started = true;
+
   return 0;
 }
 
@@ -668,6 +670,37 @@ static void read_learn_weights_from_flash(void) {
   }
 }
 
+static int initiate_kws_inference() {
+  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
+  mesh_learn_weights_size = akida_learn_mem_size();
+
+  printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
+
+  /* allocating memory for structure (this will hold crc, size etc ) + learn
+   * weights data together to place them in contiguous locations */
+  saved_learn_weights_ptr = (saved_learn_weights *)malloc(
+      sizeof(saved_learn_weights) + mesh_learn_weights_size);
+
+  base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
+
+  if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
+    printk("dynamic memory allocation failed for weights data and hence "
+           "application is not "
+           "running ");
+    return -EFAILURE;
+  }
+  /* initialize the learn_weights_mem structure */
+  reset_saved_weights();
+  // init_learn_weights_mem(mesh_learn_weights_size);
+
+  read_learn_weights_from_flash();
+
+  cur_kws_edge_state = STATE_INFERENCE;
+
+  start_dmic_audio_proc();
+  return SUCCESS;
+}
+
 int main(void) {
   uart_init();
   printk("Akida TAG Application\n");
@@ -711,33 +744,15 @@ int main(void) {
     kws_model_present = true;
   }
 
-  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
-  mesh_learn_weights_size = akida_learn_mem_size();
-
-  printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
-
-  /* allocating memory for structure (this will hold crc, size etc ) + learn
-   * weights data together to place them in contiguous locations */
-  saved_learn_weights_ptr = (saved_learn_weights *)malloc(
-      sizeof(saved_learn_weights) + mesh_learn_weights_size);
-
-  base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
-
-  if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
-    printk("dynamic memory allocation failed for weights data and hence "
-           "application is not "
-           "running ");
-    return -1;
-  }
-  /* initialize the learn_weights_mem structure */
-  init_learn_weights_mem(mesh_learn_weights_size);
-
-  read_learn_weights_from_flash();
-
-  cur_kws_edge_state = STATE_INFERENCE;
   if (kws_model_present) {
-    start_dmic_audio_proc();
+    initiate_kws_inference();
+    is_kws_inference_started = true;
   }
+
+  // ... inside a function like main() or a separate initialization function
+  printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
+  // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
+  printk("NRF_CLOCK_S->HFCLKCTRL: %d\n", NRF_CLOCK_S->HFCLKCTRL);
 
   cli_worker_tid = k_thread_create(
       &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
@@ -899,10 +914,8 @@ static void learn_select_on_user_input(int input_type) {
     }
     break;
   case USER_INPUT_SP(0):
-    printk("input_type 1\n");
     if (cur_kws_edge_novel_class <= KWS_EDGE_MAX_NOVEL_CLASS_ID) {
       switch_mode(STATE_LEARNING);
-      printk("aft switch_mode (STATE_LEARNING) \n");
     }
     break;
   case USER_INPUT_SP(1):
@@ -910,6 +923,7 @@ static void learn_select_on_user_input(int input_type) {
     if (cur_kws_edge_novel_class > KWS_EDGE_MAX_NOVEL_CLASS_ID) {
       cur_kws_edge_novel_class = KWS_EDGE_NOVEL_CLASS_BASE_ID;
     }
+    printk("class ID selected is %d\n", cur_kws_edge_novel_class);
     break;
   case USER_INPUT_LP(1):
     reset_learned_weights(base_labels_wts_ptr);
@@ -1046,7 +1060,6 @@ int infer(int app_index_l) {
     app_index = app_index_l;
   }
 
-  stop_dmic(); // stop dmic to perform static frame inference
   akd_device.toggle_clock_counter(true);
 
   uint32_t inf_complete = 0;
@@ -1056,18 +1069,24 @@ int infer(int app_index_l) {
   uint32_t inf_time = 0;
   uint32_t e_dma_cycls = 0;
   uint32_t delta_cycle = 0;
+  int num_classes = 10;
+  int num_neurons_per_class = 1;
 
   auto shape = mnist_inputs_shape;
-
-  if (app_index_l == 1)
+  int output_size = 10 * 4;
+  if (app_index_l == 1) {
     shape = kws_inputs_shape;
+    num_classes = NUM_CLASSES;
+    num_neurons_per_class = NUM_NEURONS_PER_CLASS;
+    output_size = sizeof(akida_output);
+  }
 
   int class_id = -1;
   uint32_t inp_shap[] = {shape[0], shape[1], shape[2]};
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
   ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
-                      (uint8_t *)akida_output, sizeof(akida_output));
+                      (uint8_t *)akida_output, output_size);
   e_tick = time_ms();
   e_dma_cycls = akd_device.read_clock_counter();
   delta_cycle = e_dma_cycls - s_dma_cycls;
@@ -1076,20 +1095,28 @@ int infer(int app_index_l) {
          inf_time);
   if (ret == SUCCESS) {
     class_id =
-        get_inferred_class(akida_output, NUM_CLASSES, NUM_NEURONS_PER_CLASS);
-  }
-
-  if (class_id == -1) {
+        get_inferred_class(akida_output, num_classes, num_neurons_per_class);
+  } else {
+    printk("\n\r inference failed \n\r");
     return -1;
   }
   if (app_index_l == 0) { // mnist
     printk("Predicted Digit : %d\n", class_id);
+
+    k_thread_suspend(capture_tid);
+    k_thread_suspend(process_tid);
+    kws_threads_suspended = true;
   } else if (app_index_l == 1) { // kws
     printk("\nClass : %d\n", class_id);
     printk("Word : %s\n", kws_tags[class_id]);
     kws_model_present = true;
-    if (!id_dmic_audio_proc_started)
-      start_dmic_audio_proc();
+    if (!is_kws_inference_started) {
+      initiate_kws_inference();
+    } else if (kws_threads_suspended) {
+      k_thread_resume(capture_tid);
+      k_thread_resume(process_tid);
+      kws_model_present = false;
+    }
   }
 
   printk("APP Inference Completed\n");
