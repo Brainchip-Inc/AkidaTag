@@ -1,5 +1,6 @@
 #include "akd_spi_flash_handler.h"
 #include "akd_spi_flash.h"
+#include "akida.h"
 #include "akida/hardware_device.h"
 #include "io_objects.h"
 #include <akd1500/akd1500_spi_driver.h>
@@ -131,20 +132,6 @@ void init_akd_1500_spi_flash() {
   printk("Akida1500 SPI Flash initialized on %x %x\n", reg, rw_data.uint_data);
 }
 
-/* function to validate model meta data with the acutal model present at the
- * flash_offsets[app_index] */
-int akida_program_info(uint8_t *program_info, int len, uint32_t offset) {
-
-  auto info = akd_device.program_external_data(program_info, len,
-                                               offset + FLASH_BASE_ADDRESS);
-  if (info.is_valid()) {
-    auto inputsz = info.input_dims();
-    printk("input shape: (%d, %d, %d)\n\r", inputsz[0], inputsz[1], inputsz[2]);
-    return 0;
-  }
-  return -1;
-}
-
 /* helper function to invoke flash erase API calls */
 extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
   if (size == 0 || size > (FLASH_MAX_16_MB_SIZE - offset)) {
@@ -229,8 +216,8 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
 
 extern "C" int akida_program_infer() {
   // program the model info part to AKD1500
-  akida_program_info((uint8_t *)program_info[app_index],
-                     program_info_len[app_index], flash_offsets[app_index]);
+  akida_program_flash((uint8_t *)program_info[app_index],
+                      program_info_len[app_index], flash_offsets[app_index]);
   akd_device.set_batch_size(1, true);
   printk("Start inference\n");
   /* infer function definition should be present in application specific code */

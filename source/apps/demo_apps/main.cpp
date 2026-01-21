@@ -5,20 +5,20 @@
  */
 
 #include <errno.h>
+#include <inttypes.h>
 #include <soc.h>
 #include <stddef.h>
 #include <string.h>
-#include <zephyr/drivers/gpio.h>
-#include <zephyr/kernel.h>
-#include <zephyr/sys/byteorder.h>
-#include <zephyr/sys/printk.h>
-#include <zephyr/types.h>
-
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/types.h>
 
 #include <bluetooth/services/lbs.h>
 
@@ -28,6 +28,7 @@
 
 #include "akd_spi_flash.h"
 #include "akd_spi_flash_handler.h"
+#include "akida.h"
 #include "akida/hardware_device.h"
 #include "io_objects.h"
 #include "kws/kws_program_info.h"
@@ -43,13 +44,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vector>
+#include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
-
-#include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
+#include <zephyr/sys/crc.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -73,11 +74,12 @@ MNIST - 0
 
 /** Input batch size, picked an arbitrary value */
 #define INPUT_BATCH_SIZE (CONFIG_BATCH_SIZE)
+#define GET_SEC_TO_USEC(x) (x * 1000000)
 
 #define SAMPLING_RATE CONFIG_SAMPLING_RATE
 
-#define NUM_CLASSES 33
-#define NUM_NEURONS_PER_CLASS 1
+#define NUM_CLASSES 36
+#define NUM_NEURONS_PER_CLASS 15
 #define MFCC_SAMPLE_COUNT CONFIG_MFCC_SAMPLE_COUNT
 
 #define NUM_INA_BUFF (2)
@@ -100,7 +102,18 @@ MNIST - 0
 #define KWS_EDGE_NOVEL_CLASS_BASE_ID 33
 #define KWS_EDGE_MAX_NOVEL_CLASS_ID 35
 
-#define LEARN_WEIGHTS_FILE_NAME "/kwswts.bin"
+/** long button pressed event */
+#define LONG_PRESS_EVENT 0
+
+/** short button pressed event */
+#define SHORT_PRESS_EVENT 1
+
+#define LEARN_WEIGHTS_FILE_NAME "/ext/kwswts.bin"
+
+#define USER_INPUT_LP(BUTTON_ID) (LONG_PRESS_EVENT + (BUTTON_ID * 2))
+#define USER_INPUT_SP(BUTTON_ID) (SHORT_PRESS_EVENT + (BUTTON_ID * 2))
+
+#define CONFIG_USER_BUTTON_COUNT 2
 
 /** Experimentally determined energy_threshold */
 #define DEFAULT_ENERGY_THRESHOLD 666
@@ -130,9 +143,68 @@ static struct kws_demo_params {
             DEFAULT_INFERENCE_SAMPLE_THRESHOLD};
 
 static int verbose_on = 0;
+/** Current state of the application */
+static uint32_t cur_kws_edge_state = STATE_STOPPED;
+/** Current novel class id, selected for learning*/
+static uint32_t cur_kws_edge_novel_class = KWS_EDGE_NOVEL_CLASS_BASE_ID;
 
-static uint8_t cur_kws_edge_state = 0;
-static bool id_dmic_audio_proc_started = false;
+static bool is_kws_inference_started = false;
+
+static bool kws_threads_suspended = false;
+
+/** learn weights size */
+static uint32_t mesh_learn_weights_size = 0;
+
+/** Timestamp of last sample enqueued for learning */
+static uint32_t last_learn_ts = 0;
+
+/**
+ *  Pointer to individual novel class learn weights data.
+ */
+uint8_t *learn_weights_buff_ptr;
+
+/**
+ * Learn Weights structure declaration.
+ */
+typedef struct _learn_weights {
+  /** this will hold the size of the learn weights data */
+  int32_t learn_weights_size;
+  /** this will tell if the present data pointed by learn_weights_buff_ptr
+   * a valid learned data
+   */
+  uint32_t label_learnt_val;
+} learn_weights;
+
+/**
+ * Saved learn Weights structure declaration.
+ *
+ */
+typedef struct _saved_learn_weights {
+  /** this will hold the CRC of the complete structure */
+  uint32_t crc;
+  /** this will hold the size of the data (learned weights) along with CRC to be
+   * stored in flash
+   */
+  uint32_t total_saved_learn_weights_size;
+  /** this will hold the size learn_weights data information */
+  learn_weights learn_weights_data;
+} saved_learn_weights;
+
+/**
+ * This pointer points saved_learn_weights structure data. The learned weights
+ * are stored right after the size of saved_learn_weights structure data.
+ * learn_weights_buff_ptr points to the learned weights
+ * address.
+ */
+
+static saved_learn_weights *saved_learn_weights_ptr = NULL;
+
+static int32_t save_weights_from_mesh(uint8_t *lbl_wts_ptr, uint32_t size);
+
+/**
+ * This pointer points base label weights data.
+ */
+static uint8_t *base_labels_wts_ptr = NULL;
 
 /** Spectrogram holding the required spectrogram for inference (prior to
   normalization) */
@@ -140,9 +212,6 @@ static q7_t __aligned(4) spectrogram[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
 /** spectrogram dimensions */
 static uint8_t __aligned(4) spectrogram_dims[2] = {SPECTROGRAM_COUNT,
                                                    SPECTROGRAM_RES};
-
-static int32_t get_inferred_class(int32_t *result, int num_classes,
-                                  int num_neurons);
 
 /** Last class detected */
 static int current_class = -1;
@@ -216,6 +285,8 @@ static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape);
  */
 static void learning_on_user_input(int input_type);
 
+static void switch_learning_delayed(struct k_work *work);
+
 static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
     [STATE_INFERENCE] = {inference_on_mfcc_output, inference_on_user_input},
     [STATE_LEARN_SELECT] = {NULL, learn_select_on_user_input},
@@ -223,7 +294,7 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 };
 
 #define VALID_PROGRAM_DATA_MNIST 0xD8130700
-#define VALID_PROGRAM_DATA_KWS 0x64d70000
+#define VALID_PROGRAM_DATA_KWS 0xF4020100 // 0x64d70000
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
 int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
@@ -280,58 +351,12 @@ void panic(const char *format, ...) {
 
 static bool kws_model_present = false;
 
-int32_t get_inferred_class(int32_t *result, int num_classes, int num_neurons) {
-  int32_t max_val = 0, max_index = -1, n_activations = 0;
-  n_activations = num_classes * num_neurons;
-  for (int i = 0; i < n_activations; i++) {
-    if (result[i] > max_val) {
-      max_val = result[i];
-      max_index = i;
-    }
-  }
-  printk("\nClass : %d\n", max_index);
-  printk("Word : %s\n", kws_tags[max_index]);
-  return (max_index / num_neurons);
-}
-
-int post_processing(auto out, const int32_t *bytes_out, int app_index_l) {
-  if (app_index_l <= 1) {
-    int32_t max_val = bytes_out[0];
-    int max_index = -1;
-    for (int i = 0; i < (int)out->size(); i++) {
-      if (bytes_out[i] > max_val) {
-        max_val = bytes_out[i];
-        max_index = i;
-      }
-    }
-    return max_index;
-  } else {
-    return EFAILURE;
-  }
-}
-
-int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
-                  int output_size) {
-
-  akida::TensorConstPtr in = akida::Dense::create_view(
-      reinterpret_cast<const char *>(input), akida::TensorType::uint8,
-      {input_dims[0], input_dims[1], input_dims[2]},
-      akida::Dense::Layout::RowMajor);
-
-  /** Execute inference */
-  auto ret = akd_device.forward({in});
-
-  if (ret.size()) {
-    /** Get output buffer */
-    auto out = akida::Tensor::ensure_dense(std::move(ret[0]));
-    if (out && out->size() * sizeof(int) == (size_t)output_size) {
-      const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
-      memcpy(output, bytes_out, output_size);
-      return SUCCESS;
-    }
-  }
-  return -EFAILURE;
-}
+/**
+ * @brief Function to switch operation mode of application.
+ *
+ * @param mode  - mode to be switched to.
+ */
+static void switch_mode(int mode);
 
 void do_inference(int spectrogram_index) {
   __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
@@ -387,7 +412,7 @@ void do_inference(int spectrogram_index) {
       }
 
       // memcpy ((uint8_t*) akida_input, &kws_inputs[0], 490);
-      // printk ("do_inference 123 \n");
+      // printk ("do_inference cur_kws_edge_state %d \n", cur_kws_edge_state);
       kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
                                                         (uint32_t *)dims);
       if (verbose_on) {
@@ -395,10 +420,39 @@ void do_inference(int spectrogram_index) {
                energy, spectrogram_index);
       }
     }
+
+    else {
+      // printk ("on_mfcc_output is NULL on cur_kws_edge_state = %d\n",
+      // cur_kws_edge_state);
+    }
+
+  } else if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
+    uint32_t cur_ts = k_cycle_get_32();
+    uint32_t last_learn_duration = (uint32_t)(cur_ts - last_learn_ts);
+    uint64_t duration_us = k_cyc_to_us_floor64(last_learn_duration);
+    if (duration_us >= GET_SEC_TO_USEC(5)) {
+      switch_mode(STATE_LEARN_SELECT);
+      printk("learning -> learn_select\n\r");
+      akida_learn_mode(true);
+      if (SUCCESS ==
+          save_weights_from_mesh(
+              learn_weights_buff_ptr,
+              saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
+        saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
+            1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
+        printk("Save Weights from MESH->MEM \n\r");
+      } else {
+        printk(
+            "Sync:akida_save_learn_weights function has failed for label %d ",
+            cur_kws_edge_novel_class);
+      }
+      akida_learn_mode(false);
+      uint64_t duration_us = k_cyc_to_us_floor64(k_cycle_get_32() - cur_ts);
+      if (verbose_on) {
+        printk("mesh_mem = %" PRIu64 " us\n", duration_us);
+      }
+    }
   }
-  /*else{
-          //printk(" less than energy_threshold \n");
-  }*/
 }
 
 K_THREAD_STACK_DEFINE(capture_stack, CAPTURE_STACK_SIZE);
@@ -452,8 +506,199 @@ static int start_dmic_audio_proc(void) {
 
   k_thread_start(capture_tid);
   k_thread_start(process_tid);
-  id_dmic_audio_proc_started = true;
+
   return 0;
+}
+
+/**
+ * @brief Initialize the learn weights memory
+ *
+ * This function initializes the saved_learn_weights structure pointer to valid
+ * data and data pointers.
+ * @param layer_mem_size size of the layer in terms of bytes
+ */
+static void init_learn_weights_mem(uint32_t layer_mem_size) {
+  saved_learn_weights_ptr->total_saved_learn_weights_size =
+      sizeof(saved_learn_weights);
+
+  /* store the last layer size information */
+  saved_learn_weights_ptr->learn_weights_data.learn_weights_size =
+      layer_mem_size;
+
+  /* initialize learn_weights_buff_ptr to the next location after the
+   * structure saved_learn_weights size */
+  learn_weights_buff_ptr =
+      (uint8_t *)((uint8_t *)saved_learn_weights_ptr +
+                  saved_learn_weights_ptr->total_saved_learn_weights_size);
+
+  saved_learn_weights_ptr->learn_weights_data.label_learnt_val = 0;
+  for (int i = 0;
+       i < saved_learn_weights_ptr->learn_weights_data.learn_weights_size;
+       i++) {
+    learn_weights_buff_ptr[i] = 0;
+  }
+  saved_learn_weights_ptr->total_saved_learn_weights_size +=
+      saved_learn_weights_ptr->learn_weights_data.learn_weights_size;
+}
+
+static struct k_work_delayable switch_delayed_work;
+
+static void switch_learning_delayed(struct k_work *work) {
+  ARG_UNUSED(work);
+  memset(spectrogram, -127, SPECTROGRAM_COUNT * SPECTROGRAM_RES);
+  cur_kws_edge_state = STATE_LEARNING;
+  printk("learn_select -> learning");
+  last_learn_ts = k_cycle_get_32();
+}
+
+static void switch_mode(int mode) {
+  switch (cur_kws_edge_state) {
+  case STATE_INFERENCE:
+    if (STATE_LEARN_SELECT == mode) {
+
+      akida_learn_mode(true);
+
+      cur_kws_edge_state = mode;
+    }
+    break;
+  case STATE_LEARN_SELECT:
+    if (STATE_INFERENCE == mode) {
+
+      akida_learn_mode(false);
+
+      cur_kws_edge_state = mode;
+    } else if (STATE_LEARNING == mode) {
+
+      akida_learn_mode(true);
+      k_work_schedule(&switch_delayed_work, K_SECONDS(1));
+      //  switch_learning_delayed();
+    }
+    break;
+  case STATE_LEARNING:
+
+    akida_learn_mode(false);
+    // printk(" STATE_LEARNING mode %d, cur_kws_edge_state %d \n\r", mode,
+    // cur_kws_edge_state);
+    if (STATE_LEARN_SELECT == mode) {
+      cur_kws_edge_state = mode;
+    } else if (STATE_INFERENCE == mode) {
+
+      akida_learn_mode(false);
+
+      cur_kws_edge_state = mode;
+    }
+
+    break;
+  default:
+    break;
+  }
+}
+
+static void reset_saved_weights() {
+  init_learn_weights_mem(mesh_learn_weights_size);
+
+  akida_learn_mode(true);
+  /* save the base weights into base_labels_wts_ptr location  */
+  save_weights_from_mesh(base_labels_wts_ptr, mesh_learn_weights_size);
+
+  akida_learn_mode(false);
+}
+
+/**
+ * @brief Function to update learned weights to mesh.
+ *
+ */
+static void update_weights_to_mesh() {
+
+  /* update the learned weights into the last layer before the inference */
+  saved_learn_weights_ptr->learn_weights_data.learn_weights_size =
+      akida_update_learn_weights(
+          (uint32_t *)learn_weights_buff_ptr,
+          saved_learn_weights_ptr->learn_weights_data.learn_weights_size);
+  if (saved_learn_weights_ptr->learn_weights_data.learn_weights_size !=
+      (int32_t)akida_learn_mem_size()) {
+    printk(" there is an issue for the learned class, as weights are not "
+           "stored properly "
+           "in Akida Neuron Fabric");
+    /* as there is an error, initialize the memory again */
+    init_learn_weights_mem(mesh_learn_weights_size);
+  }
+}
+
+static void read_learn_weights_from_flash(void) {
+
+  struct fs_file_t file;
+  fs_file_t_init(&file);
+
+  int ret = fs_open(&file, LEARN_WEIGHTS_FILE_NAME, FS_O_READ);
+
+  if (ret == 0) {
+    ret = fs_read(&file, (uint8_t *)saved_learn_weights_ptr,
+                  saved_learn_weights_ptr->total_saved_learn_weights_size);
+
+    fs_close(&file);
+
+    /* if same number of bytes are read from flash, then check CRC else user to
+     * do re-learning*/
+    if (ret == (int)saved_learn_weights_ptr->total_saved_learn_weights_size) {
+      uint32_t crc32 = crc32_ieee(
+          (uint8_t *)saved_learn_weights_ptr + 4,
+          (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
+      /* if CRC is failed then user to do re-learning*/
+      if (crc32 != saved_learn_weights_ptr->crc) {
+        printk("CRC check failed, %d bytes read from flash and there is an "
+               "error in reading "
+               "learning data, user need to perform learning again \r\n",
+               ret);
+        reset_saved_weights();
+      } else {
+        printk("%d bytes are read from flash (learn weights) to "
+               "saved_learn_weights_ptr "
+               "location \r\n",
+               ret);
+        if (saved_learn_weights_ptr->learn_weights_data.label_learnt_val) {
+          update_weights_to_mesh();
+        }
+      }
+    } else {
+      printk("incorrect number of bytes read from flash, user need to re-learn "
+             "\r\n");
+      reset_saved_weights();
+    }
+  } else {
+    printk("read_learn_weights_from_flash: file open failed \n");
+  }
+}
+
+static int initiate_kws_inference() {
+  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
+  mesh_learn_weights_size = akida_learn_mem_size();
+
+  printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
+
+  /* allocating memory for structure (this will hold crc, size etc ) + learn
+   * weights data together to place them in contiguous locations */
+  saved_learn_weights_ptr = (saved_learn_weights *)malloc(
+      sizeof(saved_learn_weights) + mesh_learn_weights_size);
+
+  base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
+
+  if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
+    printk("dynamic memory allocation failed for weights data and hence "
+           "application is not "
+           "running ");
+    return -EFAILURE;
+  }
+  /* initialize the learn_weights_mem structure */
+  reset_saved_weights();
+  // init_learn_weights_mem(mesh_learn_weights_size);
+
+  read_learn_weights_from_flash();
+
+  cur_kws_edge_state = STATE_INFERENCE;
+
+  start_dmic_audio_proc();
+  return SUCCESS;
 }
 
 int main(void) {
@@ -493,15 +738,21 @@ int main(void) {
     // program the model info part to AKD1500
 
     printk("Programming the model\n");
-    akida_program_info((uint8_t *)program_info[1], program_info_len[1],
-                       flash_offsets[1]);
+    akida_program_flash((uint8_t *)program_info[1], program_info_len[1],
+                        flash_offsets[1]);
     akd_device.set_batch_size(1, true);
     kws_model_present = true;
   }
 
   if (kws_model_present) {
-    start_dmic_audio_proc();
+    initiate_kws_inference();
+    is_kws_inference_started = true;
   }
+
+  // ... inside a function like main() or a separate initialization function
+  printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
+  // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
+  printk("NRF_CLOCK_S->HFCLKCTRL: %d\n", NRF_CLOCK_S->HFCLKCTRL);
 
   cli_worker_tid = k_thread_create(
       &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
@@ -511,9 +762,6 @@ int main(void) {
   k_thread_start(cli_worker_tid);
 
   return 0;
-  for (;;) {
-    // prcess_led();
-  }
 }
 
 void cli_worker_proc_thread(void *a, void *b, void *c) {
@@ -526,17 +774,24 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
 
 static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   int ret = 0;
-  static int last_found = 0, same_count = 0;
-  // printk("inference_on_mfcc_output\n");
-  // if (params.sync_api == 0)
-  {
+  static int last_found = -1, same_count = 0;
 
-    if (0 == akida_forward(input, input_shape, (uint8_t *)akida_output,
-                           sizeof(akida_output))) {
+  if (params.sync_api == 0) {
+
+    uint32_t cur_ts = k_cycle_get_32();
+
+    if (SUCCESS == akida_forward(input, input_shape, (uint8_t *)akida_output,
+                                 sizeof(akida_output))) {
+
+      uint64_t inf_time = k_cyc_to_us_floor64((k_cycle_get_32() - cur_ts));
+      if (verbose_on)
+        printk("inf_time = %" PRIu64 " us\n", inf_time);
+
       int found =
           get_inferred_class(akida_output, NUM_CLASSES, NUM_NEURONS_PER_CLASS);
 
       if (found == -1) {
+        printk("get_inferred_class failure\n");
         return -1;
       }
       if (last_found != found) {
@@ -548,6 +803,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
           current_class = found;
           printk("\nClass : %d\n", found);
           printk("Word : %s\n", kws_tags[found]);
+          same_count = 0;
         }
       }
     } else {
@@ -558,20 +814,224 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
 }
 
 static void inference_on_user_input(int input_type) {
-  printk("inference_on_user_input\n");
+  switch (input_type) {
+  case USER_INPUT_LP(0):
+    switch_mode(STATE_LEARN_SELECT);
+    printk("inference -> learn_select");
+    break;
+  default:
+    printk(" wrong input");
+    break;
+  }
+}
+
+/**
+ * @brief Function to save learned weights to flash.
+ *
+ */
+static void save_weights_to_flash() {
+  /* compute the CRC before storing into flash */
+  uint32_t cur_ts = k_cycle_get_32();
+
+  saved_learn_weights_ptr->crc =
+      crc32_ieee((uint8_t *)saved_learn_weights_ptr + 4,
+                 (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
+  if (verbose_on) {
+    printk(" the computed CRC = %x", saved_learn_weights_ptr->crc);
+  }
+  /* save the learned weights into flash */
+
+  struct fs_file_t file;
+  fs_file_t_init(&file);
+
+  int rc = fs_open(&file, LEARN_WEIGHTS_FILE_NAME, FS_O_CREATE | FS_O_WRITE);
+  if (rc == 0) {
+    fs_write(&file, (uint8_t *)saved_learn_weights_ptr,
+             saved_learn_weights_ptr->total_saved_learn_weights_size);
+    fs_close(&file);
+
+    printk("%d learned weight bytes are programmed to flash at "
+           "LEARN_WEIGHTS_FILE_NAME",
+           saved_learn_weights_ptr->total_saved_learn_weights_size);
+  } else {
+    printk("save_weights_to_flash: fail open failed \n");
+  }
+  uint32_t flash_ts = (uint32_t)(k_cycle_get_32() - cur_ts);
+  uint64_t duration_us = k_cyc_to_us_floor64(flash_ts);
+  if (verbose_on) {
+    printk("Duration = %" PRIu64 " us\n", duration_us);
+  }
+}
+
+/**
+ * @brief Resets the learn weights memory
+ *
+ * This function update the saved_learn_weights with base_labels_wts_ptr and
+ * corrupts the learn weights file in flash
+ * @param lbl_wts - holds the base class weights
+ */
+
+static void reset_learned_weights(uint8_t *lbl_wts) {
+  /* reset learn_weights_size and label_learnt_val and CRC to 0 */
+  /* once the contents are reset, then stay in the same state, so that user can
+   * do the learning */
+  saved_learn_weights_ptr->learn_weights_data.label_learnt_val = 0;
+  for (int i = 0;
+       i < saved_learn_weights_ptr->learn_weights_data.learn_weights_size;
+       i++) {
+    learn_weights_buff_ptr[i] = lbl_wts[i];
+  }
+  saved_learn_weights_ptr->crc = 0;
+
+  /* storing only 4 bytes without computing CRC, upon next reboot, the CRC check
+   * will
+   * fail and message will be displayed for the user to relearn the classes */
+  struct fs_file_t file;
+  fs_file_t_init(&file);
+
+  int rc = fs_open(&file, LEARN_WEIGHTS_FILE_NAME, FS_O_CREATE | FS_O_WRITE);
+  if (rc == 0) {
+    fs_write(&file, (uint8_t *)saved_learn_weights_ptr, 4);
+    fs_close(&file);
+  }
+  /* reset weights in model also */
+  update_weights_to_mesh();
+  printk("learn weights content in Flash have been reset");
 }
 
 static void learn_select_on_user_input(int input_type) {
   printk("learn_select_on_user_input\n");
+  switch (input_type) {
+  case USER_INPUT_LP(0):
+    /*  change the state to inference */
+    switch_mode(STATE_INFERENCE);
+    printk("learn_select -> inference");
+    /* save the weights to flash only when labels are learnt and state chages to
+     * STATE_INFERENCE */
+    if (saved_learn_weights_ptr->learn_weights_data.label_learnt_val) {
+      printk("Weights saved from MEM->FLASH");
+      save_weights_to_flash();
+    }
+    break;
+  case USER_INPUT_SP(0):
+    if (cur_kws_edge_novel_class <= KWS_EDGE_MAX_NOVEL_CLASS_ID) {
+      switch_mode(STATE_LEARNING);
+    }
+    break;
+  case USER_INPUT_SP(1):
+    cur_kws_edge_novel_class++;
+    if (cur_kws_edge_novel_class > KWS_EDGE_MAX_NOVEL_CLASS_ID) {
+      cur_kws_edge_novel_class = KWS_EDGE_NOVEL_CLASS_BASE_ID;
+    }
+    printk("class ID selected is %d\n", cur_kws_edge_novel_class);
+    break;
+  case USER_INPUT_LP(1):
+    reset_learned_weights(base_labels_wts_ptr);
+    break;
+  default:
+    printk("input_type default\n");
+    break;
+  }
+}
+
+/**
+ * @brief Function to save learned weights from mesh into location pointed by
+ * passed argument.
+ * @param lbl_wts_ptr  - Weights to be saved.
+ * @param size - number of bytes to be saved.
+ */
+static int32_t save_weights_from_mesh(uint8_t *lbl_wts_ptr, uint32_t size) {
+  int32_t ret_val = -EFAILURE;
+  /* save the learned weights from last layer and update them after programming
+   * the model again */
+  saved_learn_weights_ptr->learn_weights_data.learn_weights_size =
+      akida_save_learn_weights((uint32_t *)lbl_wts_ptr, size);
+
+  if (saved_learn_weights_ptr->learn_weights_data.learn_weights_size ==
+      (int32_t)akida_learn_mem_size()) {
+    ret_val = SUCCESS;
+  }
+  return ret_val;
 }
 
 static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
-  printk("learning_on_mfcc_output\n");
-  return 0;
+
+  int32_t label_id = cur_kws_edge_novel_class;
+
+  int ret = 0;
+  if (params.sync_api == 0) {
+    akida_fit(input, input_shape, &label_id);
+    printk("Sync:learning done for class@ %d", cur_kws_edge_novel_class);
+
+  } else {
+
+    do {
+      ret = akida_enqueue(input, input_shape, &label_id);
+    } while (ret);
+  }
+
+  last_learn_ts = k_cycle_get_32();
+  return ret;
 }
 
 static void learning_on_user_input(int input_type) {
-  printk("learning_on_user_input\n");
+  uint32_t cur_ts;
+  uint32_t mesh_mem;
+  uint64_t duration_us;
+  switch (input_type) {
+  case USER_INPUT_LP(0):
+    switch_mode(STATE_INFERENCE);
+    printk("learning->inference");
+    akida_learn_mode(true);
+
+    /* save the weights to flash only when labels are learnt and state changes
+     * to STATE_INFERENCE */
+    if (SUCCESS ==
+        save_weights_from_mesh(
+            learn_weights_buff_ptr,
+            saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
+      saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
+          1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
+      save_weights_to_flash();
+      printk("Save Weights from MEM->FLASH");
+    } else {
+      printk("Sync:akida_save_learn_weights function has failed for label %d ",
+             cur_kws_edge_novel_class);
+    }
+
+    akida_learn_mode(false);
+
+    break;
+  case USER_INPUT_SP(0):
+  case USER_INPUT_SP(1):
+    cur_ts = k_cycle_get_32();
+
+    switch_mode(STATE_LEARN_SELECT);
+    printk("learning-> learnselect");
+
+    akida_learn_mode(true);
+
+    if (SUCCESS ==
+        save_weights_from_mesh(
+            learn_weights_buff_ptr,
+            saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
+      saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
+          1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
+      printk("Save Weights from MESH->MEM\n\r");
+    } else {
+      printk("Sync:akida_save_learn_weights function has failed for label %d ",
+             cur_kws_edge_novel_class);
+    }
+
+    akida_learn_mode(false);
+    mesh_mem = (k_cycle_get_32() - cur_ts);
+    duration_us = k_cyc_to_us_floor64(mesh_mem);
+    printk("mesh_mem = %" PRIu64 " us\n", duration_us);
+
+    break;
+  default:
+    break;
+  }
 }
 
 /* function to run the inference */
@@ -593,14 +1053,13 @@ int infer(int app_index_l) {
     // program the model info part to AKD1500
 
     printk("Programming the model\n");
-    akida_program_info((uint8_t *)program_info[app_index_l],
-                       program_info_len[app_index_l],
-                       flash_offsets[app_index_l]);
+    akida_program_flash((uint8_t *)program_info[app_index_l],
+                        program_info_len[app_index_l],
+                        flash_offsets[app_index_l]);
     akd_device.set_batch_size(1, true);
     app_index = app_index_l;
   }
 
-  stop_dmic(); // stop dmic to perform static frame inference
   akd_device.toggle_clock_counter(true);
 
   uint32_t inf_complete = 0;
@@ -610,52 +1069,58 @@ int infer(int app_index_l) {
   uint32_t inf_time = 0;
   uint32_t e_dma_cycls = 0;
   uint32_t delta_cycle = 0;
+  int num_classes = 10;
+  int num_neurons_per_class = 1;
 
   auto shape = mnist_inputs_shape;
-
-  if (app_index_l == 1)
+  int output_size = 10 * 4;
+  if (app_index_l == 1) {
     shape = kws_inputs_shape;
+    num_classes = NUM_CLASSES;
+    num_neurons_per_class = NUM_NEURONS_PER_CLASS;
+    output_size = sizeof(akida_output);
+  }
 
-  akida::TensorConstPtr in = akida::Dense::create_view(
-      reinterpret_cast<const char *>(inputs[app_index_l]),
-      akida::TensorType::uint8, {shape}, akida::Dense::Layout::RowMajor);
-
+  int class_id = -1;
+  uint32_t inp_shap[] = {shape[0], shape[1], shape[2]};
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
-  auto inference_op = akd_device.forward({in});
+  ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
+                      (uint8_t *)akida_output, output_size);
   e_tick = time_ms();
   e_dma_cycls = akd_device.read_clock_counter();
   delta_cycle = e_dma_cycls - s_dma_cycls;
   inf_time = e_tick - s_tick;
   printk("\n\rinference time= %u dma cycles, time = %u ms\n\r", delta_cycle,
          inf_time);
-  /** Get output buffer */
-  auto out = akida::Tensor::ensure_dense(std::move(inference_op[0]));
-  const int32_t *bytes_out = (int32_t *)out->buffer()->data();
-  for (int i = 0; i < (int)out->size(); i++) {
-    printk("Output-%d = %d\n", i, bytes_out[i]);
-    inf_complete = 0xAA;
-  }
-  int class_id = post_processing(out, bytes_out, app_index_l);
-
-  if (class_id == -1) {
+  if (ret == SUCCESS) {
+    class_id =
+        get_inferred_class(akida_output, num_classes, num_neurons_per_class);
+  } else {
+    printk("\n\r inference failed \n\r");
     return -1;
   }
   if (app_index_l == 0) { // mnist
     printk("Predicted Digit : %d\n", class_id);
+
+    k_thread_suspend(capture_tid);
+    k_thread_suspend(process_tid);
+    kws_threads_suspended = true;
   } else if (app_index_l == 1) { // kws
     printk("\nClass : %d\n", class_id);
     printk("Word : %s\n", kws_tags[class_id]);
     kws_model_present = true;
-    if (!id_dmic_audio_proc_started)
-      start_dmic_audio_proc();
+    if (!is_kws_inference_started) {
+      initiate_kws_inference();
+    } else if (kws_threads_suspended) {
+      k_thread_resume(capture_tid);
+      k_thread_resume(process_tid);
+      kws_model_present = false;
+    }
   }
 
-  if (inf_complete != 0xAA) {
-    printk("Inference did not happen\n");
-  } else {
-    printk("APP Inference Completed\n");
-  }
+  printk("APP Inference Completed\n");
+
   return 0;
 }
 
@@ -713,6 +1178,31 @@ static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
 
   return 0;
 }
+
+/* shell cli function to invoke erase function */
+static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
+  printk("cmd exec argc %d\n", argc);
+  if (argc > 1) {
+    if (argc > 2 && !strcmp(argv[1], "verbose")) {
+      verbose_on = atoi(argv[2]);
+      audio_processor_set_verbose(verbose_on);
+    } else if (!strcmp(argv[1], "stop")) {
+      cur_kws_edge_state = STATE_STOPPED;
+      audio_processor_stop();
+    } else if (!strcmp(argv[1], "evt")) {
+      if (argc > 2) {
+        printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
+        kws_edge_state[cur_kws_edge_state].on_user_input(atoi(argv[2]));
+      }
+    } else {
+      printk("incorrect command \n\r");
+    }
+  }
+
+  return 0;
+}
+
+SHELL_CMD_REGISTER(kws_el, NULL, "KWS Edge Learn Support", cmd_kws_el);
 
 SHELL_CMD_REGISTER(full_erase, NULL, "Erase flash: erase <size>",
                    cmd_full_erase);

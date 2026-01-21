@@ -104,12 +104,48 @@ Use the following commands on the console:
 | Command | Description |
 | --- | --- |
 | `full_erase` | Erase full serial flash memory. This erases 16,773,120 bytes out of the total 16 MB serial flash. |
-| `infer mnist` | Run MNIST inference. |
+| `infer mnist` | Run MNIST inference. The DMIC must be stopped before running this inference by issuing `dmic_stop`. After the MNIST inference completes, issue `dmic_start` to restart DMIC and resume KWS inference |
 | `infer kws` | Run KWS inference. |
 | `dir` | List all the files in file system. |
 | `mkfs` | Clear the file system. |
 | `test_file` | Create a test file in file system. |
 | `print_file <file_name>` | Print a file content present in file system. |
+| `dmic_stop` | Stops the dmic. |
+| `dmic_start` | Starts the dmic. |
+
+
+__Inference mode__
+ -  Default mode, in this mode it captures live audio data and shows the inferred class id.
+ -  Below CLI command changes mode from __Inference ---> Learn_select__.
+```
+>> kws_el evt 0
+```
+__Learn Select mode__
+ - In this mode it allows user to select the novel class to be learned.
+ - Below CLI command changes mode the application mode from __Learn_select ---> Learning__
+```
+>> kws_el evt 1
+```
+ - Below CLI command cycles between novel class selection which are to be learned. class_33 **-->** class_34 **-->** class_35 **-->** class_33.
+```
+>> kws_el evt 3
+```
+ - Below CLI command changes application mode from __Learn_select ---> Inference__ and the learned weights will be written to flash
+```
+>> kws_el evt 0
+```
+ - Below CLI command resets the learned weights. After this, restart the controller.
+```
+>> kws_el evt 2
+```
+ - The previously learned weights will be lost if a reboot of the controller occur in __Learn_select mode
+
+__Learning mode__
+ - Switching to learning mode is preceded with a forced delay to avoid learning button push sounds (incase learning happens through buttons)
+ - In this mode it captures live audio data and use it for training the selected class.
+ - Application continues to stay in **__Learning** mode until user switches the mode or if no valid samples are available for last 5 sec. In the later case, application switches from **__Learning ---> __Learn_select** after waiting for 5 sec.
+
+
 
 
 

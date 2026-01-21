@@ -1,5 +1,5 @@
-#ifndef __PDM_PROCESS_H__
-#define __PDM_PROCESS_H__
+#ifndef __PDM_MIC_H__
+#define __PDM_MIC_H__
 #include <stdint.h>
 #include <zephyr/kernel.h>
 // int pdm_read(uint32_t *buffer, uint32_t * size);
@@ -44,4 +44,4 @@ struct audio_block {
 extern struct k_msgq audio_msgq;
 extern struct k_mem_slab mem_slab;
 
-#endif //__PDM_PROCESS_H__
+#endif //__PDM_MIC_H__
