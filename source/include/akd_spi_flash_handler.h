@@ -8,7 +8,6 @@
 #include <string.h>
 #include <zephyr/types.h>
 
-#define FLASH_BASE_ADDRESS 0x80000000
 #define FLASH_READ_BACK_CHECK 0
 
 #define AKD_FLASH_OFFSET 0x1000
@@ -40,7 +39,7 @@ extern const int64_t program_info_len[];
 void akida_config_spi(bool is_mcu_master);
 void init_akd_1500_spi_flash();
 void akida_spiflash_init();
-int akida_program_info(uint8_t *program_info, int len, uint32_t offset);
+
 #ifdef __cplusplus
 extern "C" {
 #endif

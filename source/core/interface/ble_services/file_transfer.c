@@ -185,6 +185,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
 
       total_received = 0;
       app_flash_offset = 0;
+      ble_pgm_offset = 0;
     }
   } else if (ble_pgm_offset > BUFFER_SIZE) {
     ble_pgm_offset = 0;
