@@ -9,6 +9,7 @@
 #define ISM_WHOAMI           0x0F
 #define ISM_CTRL1_XL         0x10
 #define ISM_CTRL2_G          0x11
+#define ISM_CTRL3_C          0x12
 #define ISM_OUTX_L_G         0x22
 #define ISM_OUTX_L_XL        0x28
 #define ISM_WHOAMI_EXPECTED  0x6B
@@ -89,11 +90,9 @@ struct ism330_data {
 };
 
 /* Public APIs */
-int32_t imu_init(const struct i2c_dt_spec *dev_i2c);
+int32_t imu_init();
 void imu_read_all(const struct i2c_dt_spec *dev_i2c,
 		       struct ism330_data *data);
 void imu_data_thread(void *a, void *b, void *c);
-int32_t cmd_imu_start(const struct i2c_dt_spec *dev_i2c);
-int32_t cmd_imu_stop(const struct i2c_dt_spec *dev_i2c);
 
 #endif /* ACC_GYRO_H_ */

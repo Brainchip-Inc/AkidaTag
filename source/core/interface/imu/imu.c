@@ -8,15 +8,16 @@
 #define I2C_NODE DT_NODELABEL(mysensor)
 #define SLEEP_TIME_MS 1000
 atomic_t is_imu_start;
+static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C_NODE);
 
 /* ---------- Internal helpers ---------- */
 
-static int ism330_verify_id(const struct i2c_dt_spec *spec)
+static int ism330_verify_id()
 {
 	uint8_t id;
 	uint8_t reg = ISM_WHOAMI;
 
-	int ret = i2c_write_read_dt(spec, &reg, 1, &id, 1);
+	int ret = i2c_write_read_dt(&dev_i2c, &reg, 1, &id, 1);
 	if (ret) {
 		printk("WHO_AM_I read failed\n");
 		return -EIO;
@@ -31,7 +32,7 @@ static int ism330_verify_id(const struct i2c_dt_spec *spec)
 	return 0;
 }
 
-static int ism330_configure(const struct i2c_dt_spec *spec)
+static int ism330_configure()
 {
 	uint8_t accel_val = (ISM_XL_ODR_208HZ << 4) |
     (ISM_XL_FS_8G     << 2) |
@@ -40,19 +41,24 @@ static int ism330_configure(const struct i2c_dt_spec *spec)
 	
 	uint8_t gyro_val =
     (ISM_G_ODR_208HZ << 4) |
-    (ISM_G_FS_1000DPS << 2) |
+    (ISM_G_FS_500DPS << 2) |
     (ISM_G_FS_125_DISABLE << 1);
 
 	uint8_t accel_cfg[] = { ISM_CTRL1_XL, accel_val };
 	uint8_t gyro_cfg[]  = { ISM_CTRL2_G,  gyro_val };
+	uint8_t en_bdu[] = {ISM_CTRL3_C,(1 << 6)};
 
-	if (i2c_write_dt(spec, accel_cfg, sizeof(accel_cfg))) {
+	if (i2c_write_dt(&dev_i2c, accel_cfg, sizeof(accel_cfg))) {
 		printk("Accel config failed\n");
 		return -EIO;
 	}
 
-	if (i2c_write_dt(spec, gyro_cfg, sizeof(gyro_cfg))) {
+	if (i2c_write_dt(&dev_i2c, gyro_cfg, sizeof(gyro_cfg))) {
 		printk("Gyro config failed\n");
+		return -EIO;
+	}
+	if (i2c_write_dt(&dev_i2c, en_bdu, sizeof(en_bdu))) {
+		printk("BDU config failed\n");
 		return -EIO;
 	}
 
@@ -61,14 +67,14 @@ static int ism330_configure(const struct i2c_dt_spec *spec)
 
 /* ---------- Public APIs ---------- */
 
-int32_t imu_init(const struct i2c_dt_spec *dev_i2c)
+int32_t imu_init()
 {
-	if (!device_is_ready(dev_i2c->bus)) {
+	if (!device_is_ready(dev_i2c.bus)) {
 		printk("I2C bus not ready\n");
 		return -ENODEV;
 	}
 
-	if (ism330_verify_id(dev_i2c)) {
+	if (ism330_verify_id()) {
 		return -1;
 	}
 
@@ -76,9 +82,9 @@ int32_t imu_init(const struct i2c_dt_spec *dev_i2c)
 	return 0;
 }
 
-int32_t cmd_imu_start(const struct i2c_dt_spec *dev_i2c)
+int32_t cmd_imu_start(const struct shell *shell, size_t argc, char **argv)
 {
-	if (ism330_configure(dev_i2c)) {
+	if (ism330_configure()) {
 		return -1;
 	}
 	atomic_set(&is_imu_start, 1);
@@ -103,18 +109,18 @@ void imu_read_all(const struct i2c_dt_spec *spec,
 	}
 }
 
-int32_t cmd_imu_stop(const struct i2c_dt_spec *dev_i2c)
+int32_t cmd_imu_stop(const struct shell *shell, size_t argc, char **argv)
 {
 	atomic_set(&is_imu_start, 0);
     uint8_t ctrl1_xl[] = { ISM_CTRL1_XL, 0x00 }; // Accel power-down
     uint8_t ctrl2_g[]  = { ISM_CTRL2_G,  0x00 }; // Gyro power-down
 
-    if (i2c_write_dt(dev_i2c, ctrl1_xl, sizeof(ctrl1_xl))) {
+    if (i2c_write_dt(&dev_i2c, ctrl1_xl, sizeof(ctrl1_xl))) {
         printk("Failed to stop accelerometer\n");
         return -EIO;
     }
 
-    if (i2c_write_dt(dev_i2c, ctrl2_g, sizeof(ctrl2_g))) {
+    if (i2c_write_dt(&dev_i2c, ctrl2_g, sizeof(ctrl2_g))) {
         printk("Failed to stop gyroscope\n");
         return -EIO;
     }
@@ -124,12 +130,10 @@ int32_t cmd_imu_stop(const struct i2c_dt_spec *dev_i2c)
 
 void imu_data_thread(void *a, void *b, void *c)
 {
-	static const struct i2c_dt_spec dev_i2c =
-		I2C_DT_SPEC_GET(I2C_NODE);
 
 	  struct ism330_data data = {0};
 
-	if (imu_init(&dev_i2c) < 0) {
+	if (imu_init() < 0) {
 		printk("ISM330 init failed\n");
 		return 0;
 	}
