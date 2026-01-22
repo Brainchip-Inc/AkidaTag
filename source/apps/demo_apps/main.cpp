@@ -898,10 +898,6 @@ int main(void) {
   watchdog_init(&wdt, &wdt_channel_id);
 #endif
 
-#if IS_ENABLED(CONFIG_WDT_ENABLE)
-  watchdog_init(&wdt, &wdt_channel_id);
-#endif
-
   initialize_spi_camera_interface();
   // ... inside a function like main() or a separate initialization function
   printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
