@@ -16,10 +16,6 @@ the application after transfer completes.
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/types.h>
 
-/* Flag to write BLE transferred data into SRAM buffer first or write directly
- * into SPI-Flash */
-#define WRITE_SRAM_CHUNKS 1
-
 #define SRAM_BUFFER_SIZE CONFIG_SRAM_BUFFER_SIZE
 
 /**

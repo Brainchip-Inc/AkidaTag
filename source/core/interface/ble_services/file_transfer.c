@@ -140,17 +140,15 @@ int file_transfer_init(void) {
 }
 
 /* function to set the allocated buffer data to zero */
-#if WRITE_SRAM_CHUNKS
 static void reset_buffer(void) {
   ble_pgm_offset = 0;
   memset(sram_upload_buffer, 0, sizeof(sram_upload_buffer));
 }
-#endif
 
 /* CRC Init and verification utils */
 typedef struct {
   uint32_t crc; // CRC computed value
-  bool crc_ok;   // CRC status flag
+  bool crc_ok;  // CRC status flag
 } crc32_ctx_t;
 
 crc32_ctx_t crc_ctx;
@@ -204,15 +202,14 @@ ssize_t get_app_index(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 }
 
 /* This function is a BLE service that receives data and its length from the BLE
- * client host application. If the flag "WRITE_SRAM_CHUNKS" is set, the data is
- * first stored in an SRAM buffer in chunks of size BUFFER_SIZE (or the
- * remaining bytes), and later written to the SPI flash. If the flag is not set,
- * the data is written directly to the SPI flash. */
+ * client host application. The data is first stored in an SRAM buffer in chunks
+ * of size BUFFER_SIZE (or the remaining bytes), and later written to the SPI
+ * flash.
+ */
 
 ssize_t file_transfer_write(struct bt_conn *conn,
                             const struct bt_gatt_attr *attr, const void *buf,
                             uint16_t len, uint16_t offset, uint8_t flags) {
-#if WRITE_SRAM_CHUNKS
   memcpy(&sram_upload_buffer[ble_pgm_offset], buf, len);
 
   ble_pgm_offset += len;
@@ -271,27 +268,6 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     ble_pgm_offset = 0;
     LOG_ERR("Data exceeds buffer size %d\n", BUFFER_SIZE);
   }
-#else
-  if ((ble_pgm_offset + len) <= total_pgm_size) {
-    spi_flash_write_helper_func((uint8_t *)buf, ble_pgm_offset, len);
-    ble_pgm_offset += len;
-    LOG_INF("Received chunk (%d bytes), total: %d bytes\n", len,
-            ble_pgm_offset);
-    if ((ble_pgm_offset) == total_pgm_size) {
-      if (akida_program_infer() != 0) {
-        /*there is an error here*/
-        LOG_ERR("akida model program/inference failed\n");
-        return 1;
-      }
-      ble_pgm_offset = 0;
-
-      send_ack_to_host(ACK_FLASH_WRITE_DONE);
-    }
-  } else {
-    ble_pgm_offset = 0;
-    LOG_ERR("Data exceeds given model size %d\n", total_pgm_size);
-  }
-#endif
   return len;
 }
 
