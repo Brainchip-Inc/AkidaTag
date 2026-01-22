@@ -70,6 +70,7 @@ extern "C" {
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 #include "watchdog_h/watchdog.h"
 #endif
+#include "camera/spi_camera.h"
 #ifdef __cplusplus
 }
 #endif
@@ -496,6 +497,7 @@ void do_inference(int spectrogram_index) {
 
 K_THREAD_STACK_DEFINE(capture_stack, CAPTURE_STACK_SIZE);
 K_THREAD_STACK_DEFINE(process_stack, PROCESS_STACK_SIZE);
+K_THREAD_STACK_DEFINE(camera_stack, PROCESS_STACK_SIZE);
 
 K_THREAD_STACK_DEFINE(cli_worker_stack, CONFIG_SHELL_STACK_SIZE);
 K_THREAD_STACK_DEFINE(led_stack, LED_STACK_SIZE);
@@ -503,11 +505,13 @@ K_THREAD_STACK_DEFINE(led_stack, LED_STACK_SIZE);
 struct k_thread capture_thread;
 struct k_thread process_thread;
 struct k_thread cli_worker_thread;
+struct k_thread camera_thread;
 struct k_thread led_thread;
 
 k_tid_t capture_tid;
 k_tid_t process_tid;
 k_tid_t cli_worker_tid;
+k_tid_t camera_thread_id;
 k_tid_t led_tid;
 #define CLI_WORKER_PRIORITY 4
 
@@ -548,6 +552,20 @@ static int start_dmic_audio_proc(void) {
 
   k_thread_start(capture_tid);
   k_thread_start(process_tid);
+
+  return 0;
+}
+
+static int initialize_spi_camera_interface(void) {
+  camera_init();
+
+  camera_thread_id = k_thread_create(&camera_thread, camera_stack,
+                                CAPTURE_STACK_SIZE, camera_capture_thread, NULL,
+                                NULL, NULL, CAPTURE_PRIORITY, K_USER,
+                                K_FOREVER // START SUSPENDED
+  );
+
+  k_thread_start(camera_thread_id);
 
   return 0;
 }
@@ -880,6 +898,11 @@ int main(void) {
   watchdog_init(&wdt, &wdt_channel_id);
 #endif
 
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+  watchdog_init(&wdt, &wdt_channel_id);
+#endif
+
+  initialize_spi_camera_interface();
   // ... inside a function like main() or a separate initialization function
   printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value

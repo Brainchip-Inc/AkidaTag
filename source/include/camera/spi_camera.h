@@ -73,5 +73,5 @@
 int camera_init(void);
 int camera_start(void);
 void camera_stop(void);
-
+void camera_capture_thread(void *a, void *b, void *c);
 #endif /*SPI_CAMERA_H*/

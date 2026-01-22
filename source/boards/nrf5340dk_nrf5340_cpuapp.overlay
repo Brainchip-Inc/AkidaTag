@@ -78,6 +78,24 @@
 		};
 	};
 	
+    
+    spi3_default: spi3_default {
+		group1 {
+				psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
+						<NRF_PSEL(SPIM_MOSI, 0, 13)>,
+						<NRF_PSEL(SPIM_MISO, 0, 14)>;
+		};
+	};
+
+	spi3_sleep: spi3_sleep {
+		group1 {
+				psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
+						<NRF_PSEL(SPIM_MOSI, 0, 13)>,
+						<NRF_PSEL(SPIM_MISO, 0, 14)>;
+				low-power-enable;
+		};
+	}; 
+	
 };
 
 /* PDM mic configurations */
@@ -163,6 +181,32 @@ dmic_dev: &pdm0 {
    pinctrl-0 = <&uart0_default_alt>;
    pinctrl-1 = <&uart0_sleep_alt>;
    pinctrl-names = "default", "sleep";
+};
+
+&spi3 {
+    compatible = "nordic,nrf-spim";
+    status = "okay";
+    pinctrl-0 = <&spi3_default>;
+    pinctrl-1 = <&spi3_sleep>;
+    pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio0 25 GPIO_ACTIVE_LOW>,  /* CS for CAMERA */
+               <&gpio0 18 GPIO_ACTIVE_LOW>;  /* CS for W25Q128 flash */
+
+    /* camera device at index 0 */
+    camera: camera@0 {
+        compatible = "spi-device";
+        reg = <0>;  /* Uses first CS pin (P0.11) */
+        spi-max-frequency = <8000000>;
+        label = "CAMERA";
+    };
+
+    /* W25Q128 Flash device at index 1 */
+    ext_flash: flash@1 {
+        compatible = "spi-device";  /* Use spi-device for manual control */
+        reg = <1>;  /* Uses second CS pin (P0.12) */
+        spi-max-frequency = <8000000>;
+        label = "FLASH_EXT";
+    };
 };
 
 / {

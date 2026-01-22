@@ -201,6 +201,12 @@ Close the serial monitor and run utils/imu_data_screening.py.
 The script plots accelerometer and gyroscope data in real time.
 Ensure matplotlib and pyserial are installed before running.
 
+### SPI CAMERA
+The SPI Camera module enables continuous image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with dedicated CS pin) to communicate with the camera, performs initialization and sensor reset, configures ISP settings (brightness, contrast, saturation, sharpness, white balance), and sets manual exposure and gain. Frames are captured in 96×96 RGB resolution (legacy mode) using the camera FIFO buffer. Captured frames are read from the FIFO, validated, and optionally converted to Base64 format for safe logging or transmission, marked with --- RGB_START_X --- and --- RGB_END_X ---. A continuous capture thread handles multi-frame capture sequences, while shell commands camera_start and camera_stop allow starting and stopping the camera via Zephyr shell.
+
+### SPI CAMERA
+The SPI Camera module enables continuous image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with dedicated CS pin) to communicate with the camera, performs initialization and sensor reset, configures ISP settings (brightness, contrast, saturation, sharpness, white balance), and sets manual exposure and gain. Frames are captured in 96×96 RGB resolution (legacy mode) using the camera FIFO buffer. Captured frames are read from the FIFO, validated, and optionally converted to Base64 format for safe logging or transmission, marked with --- RGB_START_X --- and --- RGB_END_X ---. A continuous capture thread handles multi-frame capture sequences, while shell commands camera_start and camera_stop allow starting and stopping the camera via Zephyr shell.
+
 ### BLE Service Implementation
 This firmware implements Bluetooth Low Energy (BLE) services for the AKIDA device platform on the Nordic Semiconductor nRF5340. It enables mobile applications to communicate with the device through the Nordic UART Service (NUS).
 NUS provides:

@@ -1,9 +1,17 @@
 /*
- * CAMERA Continuous Frame Capture
+ * SPI Camera Control
  * Zephyr RTOS
+ *
+ * This module provides functions to interface with an SPI-based camera.
+ * Features include:
+ *   - SPI initialization and register access
+ *   - Continuous frame capture
+ *   - FIFO management
+ *   - Base64 encoding of captured frames
+ *   - Shell commands for camera start/stop
  */
 
-#include "spi_camera.h"
+#include "camera/spi_camera.h"
 #include "error.h"
 
 #include <zephyr/kernel.h>
@@ -14,27 +22,48 @@
 #include <string.h>
 #include <stdint.h>
 
+uint8_t frame[FRAME_SIZE] = {0};
 
-/* ==================== SPI ==================== */
-const struct device *spi4_dev = DEVICE_DT_GET(DT_NODELABEL(spi4));
+/* ==================== SPI Device & Configuration ==================== */
+
+/* SPI device used to communicate with the camera */
+
+const struct device *spi3_dev = DEVICE_DT_GET(DT_NODELABEL(spi3));
+
+/* SPI configuration for the camera */
+
 static struct spi_config spi_cfg_camera = {
-    .frequency = 8000000,
-    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
+    .frequency = 8000000,       // SPI frequency: 8 MHz
+    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB,    // 8-bit MSB first
     .slave = 0,
     .cs = {
-        .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(camera)),
+        .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(camera)), // Camera CS pin
         .delay = 0,
     },
 };
 
 /* ==================== SPI HELPERS ==================== */
+/**
+ * @brief Write a value to a camera register over SPI
+ * 
+ * @param addr Camera register address
+ * @param val Value to write
+ */
+
 static void camera_write_reg(uint8_t addr, uint8_t val)
 {
     uint8_t tx[2] = { addr | 0x80, val };
     struct spi_buf buf = { .buf = tx, .len = 2 };
     struct spi_buf_set set = { .buffers = &buf, .count = 1 };
-    spi_write(spi4_dev, &spi_cfg_camera, &set);
+    spi_write(spi3_dev, &spi_cfg_camera, &set);
 }
+
+/**
+ * @brief Read a value from a camera register over SPI
+ * 
+ * @param addr Camera register address
+ * @return uint8_t Value read from register
+ */
 
 static uint8_t camera_read_reg(uint8_t addr)
 {
@@ -44,9 +73,16 @@ static uint8_t camera_read_reg(uint8_t addr)
     struct spi_buf rxb = { .buf = rx, .len = 3 };
     struct spi_buf_set txs = { .buffers = &txb, .count = 1 };
     struct spi_buf_set rxs = { .buffers = &rxb, .count = 1 };
-    spi_transceive(spi4_dev, &spi_cfg_camera, &txs, &rxs);
+    spi_transceive(spi3_dev, &spi_cfg_camera, &txs, &rxs);
     return rx[2];
 }
+
+/**
+ * @brief Wait until camera sensor is idle
+ *
+ * Polls the camera's status register until the sensor is idle
+ * or timeout occurs.
+ */
 
 static void wait_i2c_idle(void)
 {
@@ -57,12 +93,26 @@ static void wait_i2c_idle(void)
     }
 }
 
+
+/**
+ * @brief Get the length of data in the camera FIFO
+ *
+ * @return uint32_t Number of bytes currently in FIFO
+ */
+
 static uint32_t fifo_length(void)
 {
     return (camera_read_reg(FIFO_SIZE3) << 16) |
            (camera_read_reg(FIFO_SIZE2) << 8)  |
             camera_read_reg(FIFO_SIZE1);
 }
+
+/**
+ * @brief Read data from the camera FIFO
+ *
+ * @param buf Pointer to buffer to store data
+ * @param len Number of bytes to read
+ */
 
 static void fifo_read(uint8_t *buf, uint32_t len)
 {
@@ -80,13 +130,24 @@ static void fifo_read(uint8_t *buf, uint32_t len)
     };
     struct spi_buf_set tx = { .buffers = txb, .count = 3 };
     struct spi_buf_set rx = { .buffers = rxb, .count = 3 };
-    spi_transceive(spi4_dev, &spi_cfg_camera, &tx, &rx);
+    spi_transceive(spi3_dev, &spi_cfg_camera, &tx, &rx);
 }
 
-/* ==================== CAMERA ==================== */
-static int camera_init(void)
+/* ==================== Camera Initialization & Capture ==================== */
+
+/**
+ * @brief Initialize the camera hardware
+ *
+ * Performs SPI communication tests, resets the camera, reads ID,
+ * configures ISP settings (brightness, contrast, saturation, etc.),
+ * and sets manual exposure and gain.
+ *
+ * @return int 0 if successful, negative on error
+ */
+
+int camera_init(void)
 {
-    if (!device_is_ready(spi4_dev)) {
+    if (!device_is_ready(spi3_dev)) {
         printk("ERROR: SPI not ready\n");
         return -ENODEV;
     }
@@ -132,6 +193,17 @@ static int camera_init(void)
 
     return (id == 0 || id == 0xFF) ? -1 : 0;
 }
+
+/**
+ * @brief Capture a single RGB frame from the camera
+ *
+ * Sets RGB format, resolution, clears FIFO, triggers capture,
+ * waits for capture to complete, reads FIFO data.
+ *
+ * @param buf Buffer to store captured frame
+ * @param max_len Maximum length of buffer
+ * @return int Number of bytes read or negative on error
+ */
 
 static int capture_rgb(uint8_t *buf, uint32_t max_len)
 {
@@ -186,7 +258,16 @@ static int capture_rgb(uint8_t *buf, uint32_t max_len)
     return len;
 }
 
-/* ==================== BASE64 ==================== */
+/* ==================== Base64 Encoding ==================== */
+
+/**
+ * @brief Encode a buffer to base64 and print over console
+ *
+ * @param buf Pointer to buffer
+ * @param len Length of buffer
+ * @param capture_num Sequence number of capture
+ */
+
 static const char b64[] =
 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -206,9 +287,17 @@ static void send_base64(uint8_t *buf, uint32_t len, int capture_num)
     printk("\n--- RGB_END_%d ---\n", capture_num);
 }
 
+/* ==================== Camera Control API ==================== */
+
+/**
+ * @brief Start camera capture
+ *
+ * Clears FIFO and sets camera to start mode
+ */
+
 int camera_start(void)
 {
-    if (spi4_dev == NULL) {
+    if (spi3_dev == NULL) {
         return -ENODEV;
     }
     /* Clear and start */
@@ -218,15 +307,24 @@ int camera_start(void)
 
 }
 
+/**
+ * @brief Stop camera capture
+ */
+
 void camera_stop(void)
 {
     printk("camera stopped\n");
 }
 
+/**
+ * @brief Continuous capture thread
+ *
+ * Performs a warm-up capture and then continuously
+ * captures frames, sending them as base64 to console.
+ */
 
 void camera_capture_thread(void *a, void *b, void *c)
 {
-
     /* Warm-up */
     printk("Warming up (5 frames)...\n");
     for (int i = 0; i < 5; i++) {
@@ -259,7 +357,11 @@ void camera_capture_thread(void *a, void *b, void *c)
     }
 }
 
+/* ==================== Shell Commands ==================== */
 
+/**
+ * @brief Shell command to start camera
+ */
 
 static int cmd_camera_start(const struct shell *shell,
                             size_t argc, char **argv)
@@ -278,6 +380,10 @@ static int cmd_camera_start(const struct shell *shell,
     return 0;
 }
 
+/**
+ * @brief Shell command to stop camera
+ */
+
 static int cmd_camera_stop(const struct shell *shell,
                            size_t argc, char **argv)
 {
@@ -288,6 +394,8 @@ static int cmd_camera_stop(const struct shell *shell,
     camera_stop();
     return 0;
 }
+
+/* Register shell commands */
 
 SHELL_CMD_REGISTER(camera_start, NULL, "camera_start", cmd_camera_start);
 SHELL_CMD_REGISTER(camera_stop, NULL, "camera_stop", cmd_camera_stop);
