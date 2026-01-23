@@ -25,6 +25,11 @@ The DMIC peripheral is enabled via DeviceTree using the dmic_dev node and pinctr
 Required Zephyr flags: CONFIG_AUDIO=y, CONFIG_DMIC=y, CONFIG_MEM_SLAB=y, CONFIG_PRINTK=y.
 Audio is captured at 16 kHz, 16-bit mono and RMS is calculated after DC offset removal.
 
+### Toggle Chip Select
+Chip Select (CS) handling is managed automatically by Zephyr’s SPI driver via DeviceTree.
+Each SPI device has its own CS GPIO defined, and CS is asserted and released automatically
+during `spi_write()` and `spi_transceive()` calls. No manual GPIO toggling is required.
+
 ### Build the demo_apps Sample.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
