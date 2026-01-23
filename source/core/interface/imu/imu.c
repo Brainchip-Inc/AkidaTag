@@ -6,7 +6,7 @@
 
 /*I2C - ACC/GYRO*/
 #define I2C_NODE DT_NODELABEL(mysensor)
-#define SLEEP_TIME_MS 1000
+#define SLEEP_TIME_MS 5
 atomic_t is_imu_start;
 static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C_NODE);
 
@@ -44,9 +44,11 @@ static int ism330_configure()
     (ISM_G_FS_500DPS << 2) |
     (ISM_G_FS_125_DISABLE << 1);
 
+	uint8_t bdu_val = ISM_IF_INC_ENABLE | ISM_BDU_ENABLE;
+
 	uint8_t accel_cfg[] = { ISM_CTRL1_XL, accel_val };
 	uint8_t gyro_cfg[]  = { ISM_CTRL2_G,  gyro_val };
-	uint8_t en_bdu[] = {ISM_CTRL3_C,(1 << 6)};
+	uint8_t en_bdu[] = {ISM_CTRL3_C, bdu_val };
 
 	if (i2c_write_dt(&dev_i2c, accel_cfg, sizeof(accel_cfg))) {
 		printk("Accel config failed\n");
@@ -78,7 +80,7 @@ int32_t imu_init()
 		return -1;
 	}
 
-	printk("ISM330 initialized\n");
+	printk("ISM330_initialized\n");
 	return 0;
 }
 
@@ -88,7 +90,7 @@ int32_t cmd_imu_start(const struct shell *shell, size_t argc, char **argv)
 		return -1;
 	}
 	atomic_set(&is_imu_start, 1);
-	printk("ISM330 started\n");
+	printk("ISM330_started\n");
 	return 0;
 }
 void imu_read_all(const struct i2c_dt_spec *spec,
@@ -143,10 +145,19 @@ void imu_data_thread(void *a, void *b, void *c)
 		if (atomic_get(&is_imu_start)) {
 
 			imu_read_all(&dev_i2c, &data);
-	
-			printk("ACC X:%d Y:%d Z:%d | GYR X:%d Y:%d Z:%d\n",
-				   data.accel[0], data.accel[1], data.accel[2],
-				   data.gyro[0],  data.gyro[1],  data.gyro[2]);
+
+			float ax = data.accel[0] / ACC_SENS_8G;
+			float ay = data.accel[1] / ACC_SENS_8G;
+			float az = data.accel[2] / ACC_SENS_8G;
+
+			float gx = data.gyro[0] / GYR_SENS_500DPS;
+			float gy = data.gyro[1] / GYR_SENS_500DPS;
+			float gz = data.gyro[2] / GYR_SENS_500DPS;
+
+			printk("%f,%f,%f,%f,%f,%f\n",
+           	ax, ay, az,
+           	gx, gy, gz);
+		
 		}
 
 		k_msleep(SLEEP_TIME_MS);

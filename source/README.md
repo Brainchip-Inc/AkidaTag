@@ -40,6 +40,13 @@ Changed SPI1 to SPI2 port, since using I2C1 port (need to test).
 Accelerometer and gyroscope parameters such as ODR, full-scale, and filters are configured using lookup tables in imu.h file.
 IMU operation can be controlled at runtime using shell commands (imu_start and imu_stop).
 
+### To check IMU data 
+For testing IMU data, a Python script is provided.
+Run the imu_start command from the serial monitor.
+Close the serial monitor and run utils/imu_data_screening.py.
+The script plots accelerometer and gyroscope data in real time.
+Ensure matplotlib and pyserial are installed before running.
+
 ### Build the demo_apps Sample.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.

@@ -5,6 +5,10 @@
 #include <zephyr/drivers/i2c.h>
 #include <stdint.h>
 
+/* ISM330 Sensitivity */
+#define ACC_SENS_8G       4096.0f
+#define GYR_SENS_500DPS   65.536f
+
 /* ISM330 Registers */
 #define ISM_WHOAMI           0x0F
 #define ISM_CTRL1_XL         0x10
@@ -76,7 +80,9 @@ typedef enum {
 #define ISM_G_FS_125_DISABLE 0
 #define ISM_G_FS_125_ENABLE  1
 
-
+/*BDU*/
+#define ISM_BDU_ENABLE      (1 << 6)
+#define ISM_IF_INC_ENABLE   (1 << 2)
 /* BIT 0 must be 0 */
 #define ISM_G_BIT0_ZERO     (0x0)
 
