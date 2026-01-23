@@ -12,6 +12,15 @@ static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C_NODE);
 
 /* ---------- Internal helpers ---------- */
 
+/**
+ * @brief Verify ISM330 sensor identity using WHO_AM_I register
+ *
+ * Reads the WHO_AM_I register over I2C and checks whether the
+ * returned value matches the expected ISM330 device ID.
+ *
+ * @return 0 on success, negative error code on failure
+ */
+
 static int ism330_verify_id()
 {
 	uint8_t id;
@@ -31,6 +40,17 @@ static int ism330_verify_id()
 	printk("ISM330 ID verified: 0x%x\n", id);
 	return 0;
 }
+
+/**
+ * @brief Configure ISM330 accelerometer and gyroscope
+ *
+ * Configures:
+ *   Accelerometer: 208 Hz ODR, ±8g full scale, LPF enabled
+ *   Gyroscope: 208 Hz ODR, ±500 dps full scale
+ *   Enables BDU (Block Data Update) and IF_INC (auto address increment)
+ *
+ * @return 0 on success, negative error code on failure
+ */
 
 static int ism330_configure()
 {
@@ -68,7 +88,14 @@ static int ism330_configure()
 }
 
 /* ---------- Public APIs ---------- */
-
+/**
+ * @brief Initialize IMU device
+ *
+ * Checks I2C bus readiness and verifies the ISM330 device ID.
+ * Does not start data streaming; configuration is done separately.
+ *
+ * @return 0 on success, negative error code on failure
+ */
 int32_t imu_init()
 {
 	if (!device_is_ready(dev_i2c.bus)) {
@@ -84,6 +111,14 @@ int32_t imu_init()
 	return 0;
 }
 
+/**
+ * @brief Shell command to start IMU data streaming
+ *
+ * Configures the ISM330 sensor and sets the atomic flag
+ * to enable periodic IMU data reading in the data thread.
+ * @return 0 on success, negative error code on failure
+ */
+
 int32_t cmd_imu_start(const struct shell *shell, size_t argc, char **argv)
 {
 	if (ism330_configure()) {
@@ -93,6 +128,16 @@ int32_t cmd_imu_start(const struct shell *shell, size_t argc, char **argv)
 	printk("ISM330_started\n");
 	return 0;
 }
+
+/**
+ * @brief Read raw accelerometer and gyroscope data
+ *
+ * Reads 3-axis gyroscope and accelerometer raw data
+ * using I2C burst read and stores it in the provided structure.
+ *
+ * @param spec I2C device specification
+ * @param data Pointer to structure holding IMU raw data
+ */
 void imu_read_all(const struct i2c_dt_spec *spec,
 		       struct ism330_data *data)
 {
@@ -110,6 +155,14 @@ void imu_read_all(const struct i2c_dt_spec *spec,
 		data->accel[2] = (int16_t)(raw[5] << 8 | raw[4]);
 	}
 }
+
+/**
+ * @brief Shell command to stop IMU data streaming
+ *
+ * Clears the IMU start flag and powers down both
+ * accelerometer and gyroscope to save power.
+ * @return 0 on success, negative error code on failure
+ */
 
 int32_t cmd_imu_stop(const struct shell *shell, size_t argc, char **argv)
 {
@@ -129,6 +182,19 @@ int32_t cmd_imu_stop(const struct shell *shell, size_t argc, char **argv)
     printk("ISM330 stopped (power-down)\n");
     return 0;
 }
+
+/**
+ * @brief IMU data acquisition thread
+ *
+ * Initializes the IMU and continuously reads accelerometer
+ * and gyroscope data when imu_start flag is set.
+ *
+ * Converts raw data into physical units:
+ *  - Accelerometer: g
+ *  - Gyroscope: dps
+ *
+ * Outputs data over UART in CSV format for Python plotting.
+ */
 
 void imu_data_thread(void *a, void *b, void *c)
 {

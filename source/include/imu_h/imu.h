@@ -80,7 +80,7 @@ typedef enum {
 #define ISM_G_FS_125_DISABLE 0
 #define ISM_G_FS_125_ENABLE  1
 
-/*BDU*/
+/*  BDU/IF_INC */
 #define ISM_BDU_ENABLE      (1 << 6)
 #define ISM_IF_INC_ENABLE   (1 << 2)
 /* BIT 0 must be 0 */
