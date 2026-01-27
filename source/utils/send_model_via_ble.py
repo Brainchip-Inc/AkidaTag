@@ -9,7 +9,14 @@ from pathlib import Path
 from bleak import BleakClient, BleakScanner
 import os
 import sys
+import zlib
 
+def compute_crc32(path):
+    crc = 0xFFFFFFFF
+    with open(path, "rb") as f:
+        while chunk := f.read(1024):
+            crc = zlib.crc32(chunk, crc)
+    return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF
 
 # UUIDs
 FILE_TRANSFER_SERVICE_UUID = "f000aa00-0451-4000-b000-000000000000"
@@ -18,6 +25,7 @@ FILE_TRANSFER_CHAR_UUID    = "f000aa01-0451-4000-b000-000000000000"  # write
 ACK_CHAR_UUID              = "f000aa02-0451-4000-b000-000000000000"  # notify
 CTRL_CHAR_UUID             = "f000aa03-0451-4000-b000-000000000000"  # control
 APP_CHAR_UUID             = "f000aa05-0451-4000-b000-000000000000"  # control
+FILE_CRC_CHAR_UUID = "f000aa06-0451-4000-b000-000000000000"
 
 #KWS = 1
 #MNIST = 0
@@ -84,6 +92,13 @@ async def send_file(address, filepath, write_to_sram):
         
         await client.write_gatt_char(FILE_SIZE_CHAR_UUID, file_size_bytes, response=True)
         print(f"Sent file size ({file_size} bytes)")
+
+        crc32 = compute_crc32(filepath)
+
+        crc_bytes = crc32.to_bytes(4, byteorder="little")
+        await client.write_gatt_char(FILE_CRC_CHAR_UUID, crc_bytes, response=True)
+        print(f"Sent CRC32: 0x{crc32:08X}")
+
         print(f"Sending '{file.name}' ({file_size} bytes)...")
         start_time = time.time()  # total timing start
 
