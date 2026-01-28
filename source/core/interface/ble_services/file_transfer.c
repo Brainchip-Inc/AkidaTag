@@ -186,7 +186,7 @@ ssize_t get_app_index(struct bt_conn *conn, const struct bt_gatt_attr *attr,
   }
 
   uint8_t app_index_local = *(uint8_t *)app;
-  if (app_index_local > 1) {
+  if (app_index_local > 2) {
     LOG_ERR("illegal app request: %d\n", app_index_local);
     return -1;
   }

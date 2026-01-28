@@ -78,9 +78,13 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
   auto ret = akd_device.forward({in});
 
   if (ret.size()) {
+    printk(" ret.size() %d inp shape %d %d %d\n", ret.size(), input_dims[0],
+           input_dims[1], input_dims[2]);
     /** Get output buffer */
     auto out = akida::Tensor::ensure_dense(std::move(ret[0]));
-    if (out && out->size() * sizeof(int) == (size_t)output_size) {
+    printk(" out->size() * sizeof(int) %d, output_size %d \n",
+           (out->size() * sizeof(int)), output_size);
+    if (out && (out->size() * sizeof(int)) == (size_t)output_size) {
       const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
       memcpy(output, bytes_out, output_size);
       return SUCCESS;
@@ -183,6 +187,7 @@ int32_t get_inferred_class(int32_t *result, int num_classes, int num_neurons) {
         max_val = result[i];
         max_index = i;
       }
+      printk("value at index %d is %d\n", i, result[i]);
     }
     return (max_index / num_neurons);
   }

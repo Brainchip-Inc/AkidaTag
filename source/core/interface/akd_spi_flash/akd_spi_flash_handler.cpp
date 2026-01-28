@@ -17,7 +17,8 @@ union _data {
 };
 
 uint32_t flash_offsets[] = {AKD_FLASH_OFFSET,
-                            AKD_FLASH_OFFSET + AKD_MODEL_OFFSET};
+                            AKD_FLASH_OFFSET + AKD_MODEL_OFFSET,
+                            AKD_FLASH_OFFSET + (AKD_MODEL_OFFSET * 2)};
 int app_index = -1;
 
 void akida_spiflash_init(void) {

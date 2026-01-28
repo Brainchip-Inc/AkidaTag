@@ -119,6 +119,8 @@ target_include_directories(app PRIVATE
 target_sources(app PRIVATE
     ${EXTERNAL_GEN_DIR}/model_files/mnist/mnist_program_info.cpp
     ${EXTERNAL_GEN_DIR}/model_files/kws/kws_program_info.cpp
+	${EXTERNAL_GEN_DIR}/model_files/har/har_program_info.cpp
+	${EXTERNAL_GEN_DIR}/model_files/har/har_outputs.cpp
 )
 
 #

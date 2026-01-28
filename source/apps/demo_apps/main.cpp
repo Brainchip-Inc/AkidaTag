@@ -30,10 +30,13 @@
 #include "akd_spi_flash_handler.h"
 #include "akida.h"
 #include "akida/hardware_device.h"
+#include "har/har_outputs.h"
+#include "har/har_program_info.h"
 #include "io_objects.h"
 #include "kws/kws_program_info.h"
 #include "mnist/mnist_program_info.h"
 #include "nrf_spi.h"
+#include "sample_input/har/har_inputs.h"
 #include "sample_input/kws/kws_inputs.h"
 #include "sample_input/mnist/mnist_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
@@ -294,17 +297,20 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 };
 
 #define VALID_PROGRAM_DATA_MNIST 0xD8130700
-#define VALID_PROGRAM_DATA_KWS 0xF4020100 // 0x64d70000
+#define VALID_PROGRAM_DATA_KWS 0xF4020100
+#define VALID_PROGRAM_DATA_HAR 0x489C0600
+
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
 int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
 
-const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
-uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
-                                 VALID_PROGRAM_DATA_KWS};
-const unsigned char *program_info[] = {mnist_program_info, kws_program_info};
+const unsigned char *inputs[] = {mnist_inputs, kws_inputs, har_inputs};
+uint32_t valid_program_data[] = {
+    VALID_PROGRAM_DATA_MNIST, VALID_PROGRAM_DATA_KWS, VALID_PROGRAM_DATA_HAR};
+const unsigned char *program_info[] = {mnist_program_info, kws_program_info,
+                                       har_program_info};
 const int64_t program_info_len[] = {mnist_program_info_len,
-                                    kws_program_info_len};
+                                    kws_program_info_len, har_program_info_len};
 
 const struct device *wdt_dev; // Global watchdog device
 void kick_watchdog(void) {
@@ -1036,7 +1042,7 @@ static void learning_on_user_input(int input_type) {
 
 /* function to run the inference */
 int infer(int app_index_l) {
-  if (app_index_l > 1) {
+  if (app_index_l > 2) {
     printk("Illegal model index %d\n", app_index_l);
     return -1;
   }
@@ -1052,7 +1058,7 @@ int infer(int app_index_l) {
     printk("model is already present \n");
     // program the model info part to AKD1500
 
-    printk("Programming the model\n");
+    printk("Programming the model %d\n", app_index_l);
     akida_program_flash((uint8_t *)program_info[app_index_l],
                         program_info_len[app_index_l],
                         flash_offsets[app_index_l]);
@@ -1073,12 +1079,16 @@ int infer(int app_index_l) {
   int num_neurons_per_class = 1;
 
   auto shape = mnist_inputs_shape;
-  int output_size = 10 * 4;
+  int output_size = num_classes * 4;
   if (app_index_l == 1) {
     shape = kws_inputs_shape;
     num_classes = NUM_CLASSES;
     num_neurons_per_class = NUM_NEURONS_PER_CLASS;
     output_size = sizeof(akida_output);
+  } else if (app_index_l == 2) {
+    shape = har_inputs_shape;
+    num_classes = 8;
+    output_size = num_classes * 4;
   }
 
   int class_id = -1;
@@ -1117,6 +1127,13 @@ int infer(int app_index_l) {
       k_thread_resume(process_tid);
       kws_model_present = false;
     }
+  } else if (app_index_l == 2) { // har
+    printk("Predicted index : %d\n", class_id);
+    printk("Predicted movement : %s\n", har_tags[class_id]);
+
+    k_thread_suspend(capture_tid);
+    k_thread_suspend(process_tid);
+    kws_threads_suspended = true;
   }
 
   printk("APP Inference Completed\n");
@@ -1134,12 +1151,15 @@ static int cmd_infer(const struct shell *shell, size_t argc, char **argv) {
   char *string = argv[1];
   if (!strcmp(string, "kws")) {
     app_index = 1;
-    printk("inference kws requested, app index %d", app_index);
+    printk("inference kws requested, app index %d\n\r", app_index);
   } else if (!strcmp(string, "mnist")) {
     app_index = 0;
-    printk("inference mnist requested, app index %d", app_index);
+    printk("inference mnist requested, app index %d\n\r", app_index);
+  } else if (!strcmp(string, "har")) {
+    app_index = 2;
+    printk("inference har requested, app index %d\n\r", app_index);
   } else {
-    printk("Illegal model inference request");
+    printk("Illegal model inference request\n\r");
     return -EINVAL;
   }
 

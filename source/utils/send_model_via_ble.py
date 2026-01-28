@@ -27,6 +27,7 @@ CTRL_CHAR_UUID             = "f000aa03-0451-4000-b000-000000000000"  # control
 APP_CHAR_UUID             = "f000aa05-0451-4000-b000-000000000000"  # control
 FILE_CRC_CHAR_UUID = "f000aa06-0451-4000-b000-000000000000"
 
+#HAR = 2
 #KWS = 1
 #MNIST = 0
 APP = 0 # default MNIST
@@ -49,6 +50,8 @@ def detect_app_index(bin_path):
         return 0
     elif "kws" in filename:
         return 1
+    elif "har" in filename:
+        return 2
     else:
         raise ValueError(
             f"Unknown model type in file '{filename}'. "
@@ -85,7 +88,7 @@ async def send_file(address, filepath, write_to_sram):
             print(e)
             sys.exit(1)
 
-        print("Selected app :", "MNIST" if APP==0 else "KWS")
+        print("Selected app :", "MNIST" if APP == 0 else "KWS" if APP == 1 else "har" if APP == 2 else "Unknown")
         app_bytes = APP.to_bytes(1, byteorder="little")
         await client.write_gatt_char(APP_CHAR_UUID, app_bytes, response=True)
         print(f"Sent APP Byte ({APP})")        
