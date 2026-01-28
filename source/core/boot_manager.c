@@ -82,3 +82,15 @@ int init_boot_count(void) {
 
   return rc;
 }
+
+void print_image_version(uint8_t area_id, const char *name) {
+  struct mcuboot_img_header header;
+
+  if (boot_read_bank_header(area_id, &header, sizeof(header)) == 0) {
+    LOG_INF("%s Version: %d.%d.%d+%d\n", name, header.h.v1.sem_ver.major,
+            header.h.v1.sem_ver.minor, header.h.v1.sem_ver.revision,
+            header.h.v1.sem_ver.build_num);
+  } else {
+    LOG_ERR("Failed to read %s image header\n", name);
+  }
+}

@@ -19,22 +19,25 @@ LOG_MODULE_REGISTER(NRF_SPI, LOG_LEVEL_DBG);
 
 static struct spi_config spi_cfg_akida = {
     .frequency = 1400000U, // match Python default for stability
-     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
+    .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
     .slave = 0,
-    .cs = {
-        .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(akd)), // akida CS pin
-        .delay = 0,
-    },
+    .cs =
+        {
+            .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(akd)), // akida CS pin
+            .delay = 0,
+        },
 };
 
 static struct spi_config spi_cfg_akida_flash = {
     .frequency = 1400000U, // match Python default for stability
-     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
+    .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
     .slave = 1,
-    .cs = {
-        .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(akd_flash)), // akida falsh CS pin
-        .delay = 0,
-    },
+    .cs =
+        {
+            .gpio = SPI_CS_GPIOS_DT_SPEC_GET(
+                DT_NODELABEL(akd_flash)), // akida falsh CS pin
+            .delay = 0,
+        },
 };
 
 namespace akida {
@@ -111,7 +114,8 @@ void ZephyrSpiDriver::spiflashread(uint32_t address, uint8_t *cmd,
 
   struct spi_buf_set tx_set = {.buffers = &tx, .count = 1};
   struct spi_buf_set rx_set = {.buffers = &rx, .count = 1};
-  int err = spi_transceive(this->spi_dev, &spi_cfg_akida_flash, &tx_set, &rx_set);
+  int err =
+      spi_transceive(this->spi_dev, &spi_cfg_akida_flash, &tx_set, &rx_set);
   if (err != 0) {
     LOG_ERR("NRF_SPI: SPI transfer failed: %d\n", err);
     return;
