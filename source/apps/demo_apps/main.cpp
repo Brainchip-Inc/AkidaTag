@@ -3,7 +3,6 @@
  *
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
-
 #include <errno.h>
 #include <inttypes.h>
 #include <soc.h>
@@ -50,6 +49,7 @@
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/storage/flash_map.h>
 #include <zephyr/sys/crc.h>
 #ifdef __cplusplus
 extern "C" {
@@ -702,6 +702,13 @@ static int initiate_kws_inference() {
 }
 
 int main(void) {
+
+  /* printk("App Core Version: %s\n", CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION); */
+  /* Image IDs defined by MCUboot */
+  print_image_version(FLASH_AREA_ID(image_0), "App Core");
+
+  /*print_image_version(FLASH_AREA_ID(image_1), "Net Core");*/
+
   uart_init();
   printk("Akida TAG Application\n");
   confirm_image_if_needed();
