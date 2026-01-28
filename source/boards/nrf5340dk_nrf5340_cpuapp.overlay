@@ -83,8 +83,26 @@ dmic_dev: &pdm0 {
     pinctrl-0 = <&spi1_default>;
     pinctrl-1 = <&spi1_sleep>;
     pinctrl-names = "default", "sleep";
-    max-frequency = <8000000>;
+    cs-gpios = <&gpio1 7 GPIO_ACTIVE_LOW>,  /* CS for AKIDA */
+               <&gpio0 27 GPIO_ACTIVE_LOW>;  /* CS for AKIDA flash */
+
+    /* camera device at index 0 */
+    akd: akd@0 {
+        compatible = "spi-device";
+        reg = <0>;  /* Uses first CS pin (P0.11) */
+        spi-max-frequency = <8000000>;
+        label = "AKD";
+    };
+
+    /* W25Q128 Flash device at index 1 */
+    akd_flash: akd_flash@1 {
+        compatible = "spi-device";  /* Use spi-device for manual control */
+        reg = <1>;  /* Uses second CS pin (P0.12) */
+        spi-max-frequency = <8000000>;
+        label = "AKD_FLASH";
+    };
 };
+
 &uart0 {
    status = "okay";
    compatible = "nordic,nrf-uarte";
@@ -103,14 +121,6 @@ dmic_dev: &pdm0 {
 
         akdreset: akdreset {
 			gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
-		};
-
-        flashcs: flashcs {
-            gpios = <&gpio0 27 GPIO_ACTIVE_HIGH>;
-        };
-		
-		akdcs: akdcs {
-			gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;///ca.  was 23
 		};			
 		
 	};
@@ -118,8 +128,6 @@ dmic_dev: &pdm0 {
     aliases {
         akdsleep = &akdsleep;
         akdreset = &akdreset;
-        flashcs = &flashcs;
-		akdcs = &akdcs;
         spi1 = &spi1;
     };
 };
