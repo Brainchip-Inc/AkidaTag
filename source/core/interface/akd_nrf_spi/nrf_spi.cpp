@@ -15,16 +15,26 @@
 
 LOG_MODULE_REGISTER(NRF_SPI, LOG_LEVEL_DBG);
 
-#define AKD_CS_NODE DT_ALIAS(akdcs)
-#define FLASH_CS_NODE DT_ALIAS(flashcs)
+/* SPI configuration for the camera */
 
-const struct gpio_dt_spec akd_cs = GPIO_DT_SPEC_GET(AKD_CS_NODE, gpios);
-const struct gpio_dt_spec flash_cs = GPIO_DT_SPEC_GET(FLASH_CS_NODE, gpios);
-
-static struct spi_config spi_cfg = {
+static struct spi_config spi_cfg_akida = {
     .frequency = 1400000U, // match Python default for stability
-    .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
-    .cs = NULL,
+     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
+    .slave = 0,
+    .cs = {
+        .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(akd)), // akida CS pin
+        .delay = 0,
+    },
+};
+
+static struct spi_config spi_cfg_akida_flash = {
+    .frequency = 1400000U, // match Python default for stability
+     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
+    .slave = 1,
+    .cs = {
+        .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(akd_flash)), // akida falsh CS pin
+        .delay = 0,
+    },
 };
 
 namespace akida {
@@ -35,26 +45,6 @@ int ZephyrSpiDriver::init_spi() {
     LOG_ERR("NRF_SPI: SPI device not ready\n");
     return -ENODEV;
   }
-
-  if (!device_is_ready(akd_cs.port)) {
-    LOG_ERR("NRF_SPI: Akida CS GPIO not ready.\n");
-    return 0;
-  }
-  if (gpio_pin_configure_dt(&akd_cs, GPIO_OUTPUT_ACTIVE) != 0) {
-    LOG_ERR("NRF_SPI: Failed to configure Akida CS pin.\n");
-    return 0;
-  }
-  gpio_pin_set_dt(&akd_cs, 1); // CS high (not selected)
-
-  if (!device_is_ready(flash_cs.port)) {
-    LOG_ERR("NRF_SPI: Flash CS GPIO not ready.\n");
-    return 0;
-  }
-  if (gpio_pin_configure_dt(&flash_cs, GPIO_OUTPUT_ACTIVE) != 0) {
-    LOG_ERR("NRF_SPI: Failed to configure Flash CS pin.\n");
-    return 0;
-  }
-  gpio_pin_set_dt(&flash_cs, 1); // CS high (not selected)
 
   return 0;
 }
@@ -72,9 +62,7 @@ void ZephyrSpiDriver::read_api(uint32_t header_size, uint8_t *data,
 
   struct spi_buf_set tx_set = {.buffers = &tx, .count = 1};
   struct spi_buf_set rx_set = {.buffers = &rx, .count = 1};
-  gpio_pin_set_dt(&akd_cs, 0); // CS LOW
-  int err = spi_transceive(this->spi_dev, &spi_cfg, &tx_set, &rx_set);
-  gpio_pin_set_dt(&akd_cs, 1); // CS HIGH
+  int err = spi_transceive(this->spi_dev, &spi_cfg_akida, &tx_set, &rx_set);
   if (err != 0) {
     LOG_ERR("NRF_SPI: SPI transfer failed: %d\n", err);
     return;
@@ -89,9 +77,7 @@ void ZephyrSpiDriver::write_api(uint32_t header_size, const uint8_t *data,
 
   struct spi_buf tx = {.buf = (uint8_t *)data, .len = size};
   struct spi_buf_set tx_set = {.buffers = &tx, .count = 1};
-  gpio_pin_set_dt(&akd_cs, 0); // CS LOW
-  int err = spi_write(this->spi_dev, &spi_cfg, &tx_set);
-  gpio_pin_set_dt(&akd_cs, 1); // CS HIGH
+  int err = spi_write(this->spi_dev, &spi_cfg_akida, &tx_set);
   if (err != 0) {
     LOG_ERR("NRF_SPI: SPI write failed: %d", err);
     return;
@@ -106,9 +92,7 @@ void ZephyrSpiDriver::spiflashwrite(uint32_t address, const uint8_t *data,
 
   struct spi_buf tx = {.buf = (uint8_t *)data, .len = size};
   struct spi_buf_set tx_set = {.buffers = &tx, .count = 1};
-  gpio_pin_set_dt(&flash_cs, 0); // CS LOW
-  int err = spi_write(this->spi_dev, &spi_cfg, &tx_set);
-  gpio_pin_set_dt(&flash_cs, 1); // CS HIGH
+  int err = spi_write(this->spi_dev, &spi_cfg_akida_flash, &tx_set);
   if (err != 0) {
     LOG_ERR("NRF_SPI: SPI write failed: %d", err);
   }
@@ -127,9 +111,7 @@ void ZephyrSpiDriver::spiflashread(uint32_t address, uint8_t *cmd,
 
   struct spi_buf_set tx_set = {.buffers = &tx, .count = 1};
   struct spi_buf_set rx_set = {.buffers = &rx, .count = 1};
-  gpio_pin_set_dt(&flash_cs, 0); // CS LOW
-  int err = spi_transceive(this->spi_dev, &spi_cfg, &tx_set, &rx_set);
-  gpio_pin_set_dt(&flash_cs, 1); // CS HIGH
+  int err = spi_transceive(this->spi_dev, &spi_cfg_akida_flash, &tx_set, &rx_set);
   if (err != 0) {
     LOG_ERR("NRF_SPI: SPI transfer failed: %d\n", err);
     return;
