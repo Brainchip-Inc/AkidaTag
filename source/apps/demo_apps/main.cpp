@@ -60,9 +60,9 @@ extern "C" {
 #include "ble_services/file_transfer.h"
 #include "boot_manager.h"
 #include "error.h"
+#include "imu_h/imu.h"
 #include "littlefs_storage.h"
 #include "pdm_mic.h"
-#include "imu_h/imu.h"
 #ifdef __cplusplus
 }
 #endif
@@ -298,22 +298,19 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 #define VALID_PROGRAM_DATA_KWS 0xF4020100 // 0x64d70000
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
-int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
-#define VALID_PROGRAM_DATA_KWS 0x64d70000
-
-
-K_THREAD_STACK_DEFINE(imu_stack, IMU_STACK_SIZE);
-
-struct k_thread imu_thread;
-
-k_tid_t imu_tid;
-
 const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
 uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
                                  VALID_PROGRAM_DATA_KWS};
 const unsigned char *program_info[] = {mnist_program_info, kws_program_info};
 const int64_t program_info_len[] = {mnist_program_info_len,
                                     kws_program_info_len};
+
+int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
+
+/* IMU thread variables*/
+K_THREAD_STACK_DEFINE(imu_stack, IMU_STACK_SIZE);
+struct k_thread imu_thread;
+k_tid_t imu_tid;
 
 const struct device *wdt_dev; // Global watchdog device
 void kick_watchdog(void) {
@@ -710,18 +707,12 @@ static int initiate_kws_inference() {
   return SUCCESS;
 }
 
-static int start_imu_proc (void)
-{
-  imu_tid = k_thread_create(
-	&imu_thread,
-	imu_stack,
-	IMU_STACK_SIZE,
-	imu_data_thread,
-	NULL, NULL, NULL,
-	IMU_PRIORITY,
-	K_USER,
-	K_FOREVER   // START SUSPENDED
-	);
+static int start_imu_proc(void) {
+  imu_tid =
+      k_thread_create(&imu_thread, imu_stack, IMU_STACK_SIZE, imu_data_thread,
+                      NULL, NULL, NULL, IMU_PRIORITY, K_USER,
+                      K_FOREVER // START SUSPENDED
+      );
 
   k_thread_start(imu_tid);
   return 0;
@@ -782,6 +773,10 @@ int main(void) {
     is_kws_inference_started = true;
   }
 
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+  start_imu_proc();
+#endif
+
   // ... inside a function like main() or a separate initialization function
   printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
@@ -799,8 +794,6 @@ int main(void) {
 
 void cli_worker_proc_thread(void *a, void *b, void *c) {
   printk("CLI Worker: \n\r");
-
-  start_imu_proc ();
 
   while (1) {
     prcess_led();

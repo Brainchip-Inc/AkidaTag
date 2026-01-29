@@ -87,6 +87,7 @@ dmic_dev: &pdm0 {
 
 &i2c1 {
     status = "okay";
+    clock-frequency = <I2C_BITRATE_FAST>;   // 400 kHz
     pinctrl-0 = <&i2c1_default>;
 	pinctrl-1 = <&i2c1_sleep>;
     pinctrl-names = "default", "sleep";
@@ -147,7 +148,11 @@ dmic_dev: &pdm0 {
 
         akdreset: akdreset {
 			gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
-		};			
+		};
+	
+        imui: imui {
+			gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
+		};		
 		
 	};
 
@@ -155,5 +160,6 @@ dmic_dev: &pdm0 {
         akdsleep = &akdsleep;
         akdreset = &akdreset;
         spi2 = &spi2;
+        imui = &imui;
     };
 };
