@@ -166,5 +166,20 @@ config IMU_FIFO_WATERMARK
     help
       FIFO watermark level (number of FIFO entries before interrupt).
       Allowed values: 8, 16, 32
+config WDT_ENABLE
+    bool "Enable watchdog"
+    default n
+    help
+      Enables the application watchdog (WDT).
+      When enabled, the watchdog will be initialized during system
+      startup and periodically fed by the application threads.
+      When disabled, watchdog initialization and feeding will be
+      skipped.
+config APP_WDT_TIMEOUT_MS
+    int "Application watchdog timeout in milliseconds"
+    default 8000
+    help
+      Watchdog timeout value used by the application.
+
 
 endmenu

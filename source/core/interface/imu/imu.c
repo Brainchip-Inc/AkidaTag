@@ -1,4 +1,7 @@
 #include "imu_h/imu.h"
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+#include "watchdog_h/watchdog.h"
+#endif
 #include <math.h>
 #include <string.h>
 #include <zephyr/device.h>
@@ -8,7 +11,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/atomic.h>
-
 /* ================= CONFIG ================= */
 
 #define I2C_NODE DT_NODELABEL(mysensor)
@@ -61,15 +63,15 @@ static const float gyr_sens_mdps_per_lsb[] = {
 static struct gpio_callback imu_gpio_cb;
 K_SEM_DEFINE(fifo_sem, 0, 1);
 
-/* 
+/*
  * Values can also be updated at runtime using the imu_start shell command.
  * Encoding for ODR and FS is defined in Kconfig.
  */
-static uint8_t imu_acc_odr  = CONFIG_IMU_ACC_ODR;
-static uint8_t imu_acc_fs   = CONFIG_IMU_ACC_FS;
+static uint8_t imu_acc_odr = CONFIG_IMU_ACC_ODR;
+static uint8_t imu_acc_fs = CONFIG_IMU_ACC_FS;
 static uint8_t imu_gyro_odr = CONFIG_IMU_GYRO_ODR;
-static uint8_t imu_gyro_fs  = CONFIG_IMU_GYRO_FS;
-static uint8_t imu_fifo_acc_odr  = CONFIG_IMU_FIFO_ACC_ODR;
+static uint8_t imu_gyro_fs = CONFIG_IMU_GYRO_FS;
+static uint8_t imu_fifo_acc_odr = CONFIG_IMU_FIFO_ACC_ODR;
 static uint8_t imu_fifo_gyro_odr = CONFIG_IMU_FIFO_GYRO_ODR;
 static uint8_t imu_fifo_watermark = CONFIG_IMU_FIFO_WATERMARK;
 
@@ -89,7 +91,7 @@ static void imu_int_cb(const struct device *dev, struct gpio_callback *cb,
   ARG_UNUSED(dev);
   ARG_UNUSED(cb);
   ARG_UNUSED(pins);
-          
+
   interrupt_count++;
   k_sem_give(&fifo_sem);
 }
@@ -145,14 +147,13 @@ static int ism330_configure(void) {
   int ret;
 
   /* Configure Accelerometer: 208 Hz, ±8g */
-  uint8_t accel_val = ((imu_acc_odr & 0x0F) << 4) |
-                      ((imu_acc_fs & 0x03) << 2) |
+  uint8_t accel_val = ((imu_acc_odr & 0x0F) << 4) | ((imu_acc_fs & 0x03) << 2) |
                       (ISM_XL_LPF2_ENABLE << 1);
 
   /* Configure Gyroscope: 208 Hz, ±500 dps */
   uint8_t gyro_val = ((imu_gyro_odr & 0x0F) << 4) |
-                     ((imu_gyro_fs & 0x03) << 2) |
-                     (ISM_G_FS_125_DISABLE << 1) | (ISM_G_FS_4000_DISABLE << 0);
+                     ((imu_gyro_fs & 0x03) << 2) | (ISM_G_FS_125_DISABLE << 1) |
+                     (ISM_G_FS_4000_DISABLE << 0);
 
   buf[0] = ISM_CTRL1_XL;
   buf[1] = accel_val;
@@ -365,7 +366,6 @@ static void imu_fifo_read(void) {
   /* Read all available samples */
   int batch_limit = current_level;
 
-
   for (int i = 0; i < batch_limit; i++) {
     /* Read TAG + DATA (7 bytes) */
     ret = i2c_burst_read_dt(&dev_i2c, ISM_FIFO_DATA_OUT_TAG, raw,
@@ -422,33 +422,33 @@ static void imu_fifo_read(void) {
  */
 int32_t imu_init(void) {
   int ret;
-  
+
   if (!device_is_ready(dev_i2c.bus)) {
     printk("I2C not ready\n");
     return -ENODEV;
   }
-  
+
   if (ism330_verify_id()) {
     printk("ISM330 verify failed\n");
     return -EIO;
   }
-  #if CONFIG_IMU_USE_INTERRUPT
+#if CONFIG_IMU_USE_INTERRUPT
   /* Setup GPIO interrupt */
   if (!device_is_ready(imu_int.port)) {
     printk("GPIO not ready\n");
     return -ENODEV;
   }
-  
+
   ret = gpio_pin_configure_dt(&imu_int, GPIO_INPUT);
   if (ret) {
     return ret;
   }
-  
+
   ret = gpio_pin_interrupt_configure_dt(&imu_int, GPIO_INT_EDGE_TO_ACTIVE);
   if (ret) {
     return ret;
   }
-  
+
   gpio_init_callback(&imu_gpio_cb, imu_int_cb, BIT(imu_int.pin));
   ret = gpio_add_callback(imu_int.port, &imu_gpio_cb);
   if (ret) {
@@ -519,44 +519,42 @@ static void imu_calibrate(void) {
   printk("Calibration complete\n");
 }
 
-static bool imu_validate_config(void)
-{
-    /* ODR range check */
-    if (imu_acc_odr < IMU_ODR_MIN || imu_acc_odr > IMU_ODR_MAX)
-        return false;
-
-    if (imu_gyro_odr < IMU_ODR_MIN || imu_gyro_odr > IMU_ODR_MAX)
-        return false;
-
-    /* FS range check */
-    if (imu_acc_fs < IMU_ACC_FS_MIN || imu_acc_fs > IMU_ACC_FS_MAX)
+static bool imu_validate_config(void) {
+  /* ODR range check */
+  if (imu_acc_odr < IMU_ODR_MIN || imu_acc_odr > IMU_ODR_MAX)
     return false;
-    
-    if (imu_gyro_fs < IMU_GYRO_FS_MIN || imu_gyro_fs > IMU_GYRO_FS_MAX)
-        
-        return false;
-    #if CONFIG_IMU_USE_INTERRUPT
 
-    if (imu_fifo_acc_odr < IMU_ODR_MIN || imu_fifo_acc_odr > IMU_ODR_MAX)
-        return false;
-
-    if (imu_fifo_gyro_odr < IMU_ODR_MIN || imu_fifo_gyro_odr > IMU_ODR_MAX)
-        return false;
-    /* Logical constraint: FIFO ODR ≤ Sensor ODR */
-    if (imu_fifo_acc_odr > imu_acc_odr)
-        return false;
-
-    if (imu_fifo_gyro_odr > imu_gyro_odr)
-        return false;
-
-    if (imu_fifo_watermark != 8 &&
-    imu_fifo_watermark != 16 &&
-    imu_fifo_watermark != 32) {
+  if (imu_gyro_odr < IMU_ODR_MIN || imu_gyro_odr > IMU_ODR_MAX)
     return false;
-    }
-    #endif
 
-    return true;
+  /* FS range check */
+  if (imu_acc_fs < IMU_ACC_FS_MIN || imu_acc_fs > IMU_ACC_FS_MAX)
+    return false;
+
+  if (imu_gyro_fs < IMU_GYRO_FS_MIN || imu_gyro_fs > IMU_GYRO_FS_MAX)
+
+    return false;
+#if CONFIG_IMU_USE_INTERRUPT
+
+  if (imu_fifo_acc_odr < IMU_ODR_MIN || imu_fifo_acc_odr > IMU_ODR_MAX)
+    return false;
+
+  if (imu_fifo_gyro_odr < IMU_ODR_MIN || imu_fifo_gyro_odr > IMU_ODR_MAX)
+    return false;
+  /* Logical constraint: FIFO ODR ≤ Sensor ODR */
+  if (imu_fifo_acc_odr > imu_acc_odr)
+    return false;
+
+  if (imu_fifo_gyro_odr > imu_gyro_odr)
+    return false;
+
+  if (imu_fifo_watermark != 8 && imu_fifo_watermark != 16 &&
+      imu_fifo_watermark != 32) {
+    return false;
+  }
+#endif
+
+  return true;
 }
 
 /**
@@ -575,39 +573,38 @@ static bool imu_validate_config(void)
 static int32_t cmd_imu_start(const struct shell *shell, size_t argc,
                              char **argv) {
   if (argc != 8) {
-    shell_print(shell,
-        "Usage:\n"
-        "imu_set <acc_odr> <acc_fs> "
-        "<gyro_odr> <gyro_fs> "
-        "<fifo_acc_odr> <fifo_gyro_odr> "
-        "<watermark>");
+    shell_print(shell, "Usage:\n"
+                       "imu_set <acc_odr> <acc_fs> "
+                       "<gyro_odr> <gyro_fs> "
+                       "<fifo_acc_odr> <fifo_gyro_odr> "
+                       "<watermark>");
     return -EINVAL;
-}
+  }
 
-    /* Parse arguments */
-    imu_acc_odr        = (uint8_t)strtol(argv[1], NULL, 10);
-    imu_acc_fs         = (uint8_t)strtol(argv[2], NULL, 10);
-    imu_gyro_odr       = (uint8_t)strtol(argv[3], NULL, 10);
-    imu_gyro_fs        = (uint8_t)strtol(argv[4], NULL, 10);
-    #if CONFIG_IMU_USE_INTERRUPT
-    imu_fifo_acc_odr   = (uint8_t)strtol(argv[5], NULL, 10);
-    imu_fifo_gyro_odr  = (uint8_t)strtol(argv[6], NULL, 10);
-    imu_fifo_watermark = (uint8_t)strtol(argv[7], NULL, 10);
-    #endif
-    if (!imu_validate_config()) {
+  /* Parse arguments */
+  imu_acc_odr = (uint8_t)strtol(argv[1], NULL, 10);
+  imu_acc_fs = (uint8_t)strtol(argv[2], NULL, 10);
+  imu_gyro_odr = (uint8_t)strtol(argv[3], NULL, 10);
+  imu_gyro_fs = (uint8_t)strtol(argv[4], NULL, 10);
+#if CONFIG_IMU_USE_INTERRUPT
+  imu_fifo_acc_odr = (uint8_t)strtol(argv[5], NULL, 10);
+  imu_fifo_gyro_odr = (uint8_t)strtol(argv[6], NULL, 10);
+  imu_fifo_watermark = (uint8_t)strtol(argv[7], NULL, 10);
+#endif
+  if (!imu_validate_config()) {
     shell_print(shell, "ERROR: Invalid IMU configuration");
     return -EINVAL;
-    }
+  }
 
-    shell_print(shell, "Updated IMU configuration:");
-    shell_print(shell, " ACC_ODR        = %d", imu_acc_odr);
-    shell_print(shell, " ACC_FS         = %d", imu_acc_fs);
-    shell_print(shell, " GYRO_ODR       = %d", imu_gyro_odr);
-    shell_print(shell, " GYRO_FS        = %d", imu_gyro_fs);
-    shell_print(shell, " FIFO_ACC_ODR   = %d", imu_fifo_acc_odr);
-    shell_print(shell, " FIFO_GYRO_ODR  = %d", imu_fifo_gyro_odr);
-    shell_print(shell, " IMU_FIFO_WATERMARK  = %d", imu_fifo_watermark);
-  
+  shell_print(shell, "Updated IMU configuration:");
+  shell_print(shell, " ACC_ODR        = %d", imu_acc_odr);
+  shell_print(shell, " ACC_FS         = %d", imu_acc_fs);
+  shell_print(shell, " GYRO_ODR       = %d", imu_gyro_odr);
+  shell_print(shell, " GYRO_FS        = %d", imu_gyro_fs);
+  shell_print(shell, " FIFO_ACC_ODR   = %d", imu_fifo_acc_odr);
+  shell_print(shell, " FIFO_GYRO_ODR  = %d", imu_fifo_gyro_odr);
+  shell_print(shell, " IMU_FIFO_WATERMARK  = %d", imu_fifo_watermark);
+
   int ret;
 
   ret = ism330_configure();
@@ -695,7 +692,9 @@ static int32_t cmd_imu_stop(const struct shell *shell, size_t argc,
  */
 
 void imu_data_thread(void *a, void *b, void *c) {
-
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+  wdt_enable_thread(IMU);
+#endif
   int ret;
   ret = imu_init();
   if (ret < 0) {
@@ -737,12 +736,20 @@ void imu_data_thread(void *a, void *b, void *c) {
 
     k_msleep(SAMPLE_DELAY_MS);
 #endif
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+    /* Mark thread as healthy */
+    atomic_set(&thread_health[IMU], 1);
+#endif
   }
 }
 
-SHELL_CMD_REGISTER(imu_start, NULL, "Set IMU configuration\n"
+SHELL_CMD_REGISTER(
+    imu_start, NULL,
+    "Set IMU configuration\n"
     "Usage:\n"
-    "imu_start <acc_odr> <acc_fs> <gyro_odr> <gyro_fs> <fifo_acc_odr> <fifo_gyro_odr>\n"
+    "imu_start <acc_odr> <acc_fs> <gyro_odr> <gyro_fs> <fifo_acc_odr> "
+    "<fifo_gyro_odr>\n"
     "Order:\n"
-    "1.ACC ODR 2.ACC FS 3.GYRO ODR 4.GYRO FS 5.FIFO ACC ODR 6.FIFO GYRO ODR", cmd_imu_start);
+    "1.ACC ODR 2.ACC FS 3.GYRO ODR 4.GYRO FS 5.FIFO ACC ODR 6.FIFO GYRO ODR",
+    cmd_imu_start);
 SHELL_CMD_REGISTER(imu_stop, NULL, "imu_stop", cmd_imu_stop);

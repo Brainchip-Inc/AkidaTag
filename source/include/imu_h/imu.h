@@ -8,15 +8,15 @@
 /* IMU configuration limits
  * These macros define the valid encoding ranges for IMU configuration
  * parameters. The values correspond to the Kconfig encoding.
-*/
-#define IMU_ODR_MIN        0
-#define IMU_ODR_MAX        8
+ */
+#define IMU_ODR_MIN 0
+#define IMU_ODR_MAX 8
 
-#define IMU_ACC_FS_MIN     0
-#define IMU_ACC_FS_MAX     3
+#define IMU_ACC_FS_MIN 0
+#define IMU_ACC_FS_MAX 3
 
-#define IMU_GYRO_FS_MIN    0
-#define IMU_GYRO_FS_MAX    3
+#define IMU_GYRO_FS_MIN 0
+#define IMU_GYRO_FS_MAX 3
 
 /* ISM330 Registers */
 #define ISM_WHOAMI 0x0F
