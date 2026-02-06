@@ -41,6 +41,21 @@
             low-power-enable;
         };
     };
+    spi3_default: spi3_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 10)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 9)>;
+        };
+    };
+    spi3_sleep: spi3_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 10)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 9)>;
+            low-power-enable;
+        };
+    };
 	uart0_default_alt: uart0_default_alt {
       group1 {
          psels = <NRF_PSEL(UART_TX, 0, 6)>,
@@ -58,8 +73,8 @@
 
    pdm0_default_alt: pdm0_default_alt {
 		group1 {
-			psels = <NRF_PSEL(PDM_CLK, 0, 26)>,
-				<NRF_PSEL(PDM_DIN, 0, 25)>;
+			psels = <NRF_PSEL(PDM_CLK, 1, 9)>,
+				<NRF_PSEL(PDM_DIN, 1, 10)>;
 		};
 	};
 
@@ -77,24 +92,6 @@
 			low-power-enable;
 		};
 	};
-	
-    
-    spi3_default: spi3_default {
-		group1 {
-				psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
-						<NRF_PSEL(SPIM_MOSI, 0, 13)>,
-						<NRF_PSEL(SPIM_MISO, 0, 14)>;
-		};
-	};
-
-	spi3_sleep: spi3_sleep {
-		group1 {
-				psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
-						<NRF_PSEL(SPIM_MOSI, 0, 13)>,
-						<NRF_PSEL(SPIM_MISO, 0, 14)>;
-				low-power-enable;
-		};
-	}; 
 	
 };
 
@@ -196,7 +193,7 @@ dmic_dev: &pdm0 {
     camera: camera@0 {
         compatible = "spi-device";
         reg = <0>;  /* Uses first CS pin (P0.11) */
-        spi-max-frequency = <8000000>;
+        spi-max-frequency = <16000000>;
         label = "CAMERA";
     };
 
@@ -204,7 +201,7 @@ dmic_dev: &pdm0 {
     ext_flash: flash@1 {
         compatible = "spi-device";  /* Use spi-device for manual control */
         reg = <1>;  /* Uses second CS pin (P0.12) */
-        spi-max-frequency = <8000000>;
+        spi-max-frequency = <16000000>;
         label = "FLASH_EXT";
     };
 };

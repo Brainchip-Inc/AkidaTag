@@ -56,8 +56,14 @@
 /* ==================== CONFIG ==================== */
 #define FRAME_WIDTH   96
 #define FRAME_HEIGHT  96
-#define FRAME_SIZE    (FRAME_WIDTH * FRAME_HEIGHT * 3)
-#define NUM_CAPTURES  3
+#define FRAME_SIZE    (FRAME_WIDTH * FRAME_HEIGHT)
+
+/* RGB565 format: 2 bytes per pixel */
+#define RGB565_FRAME_SIZE   (FRAME_SIZE * 2)
+
+/* RGB888 format: 3 bytes per pixel */
+#define RGB888_FRAME_SIZE   (FRAME_SIZE * 3)
+
 
 /* Enhanced ISP tuning */
 #define ISP_BRIGHTNESS      0x0C
@@ -74,4 +80,5 @@ int camera_init(void);
 int camera_start(void);
 void camera_stop(void);
 void camera_capture_thread(void *a, void *b, void *c);
+
 #endif /*SPI_CAMERA_H*/

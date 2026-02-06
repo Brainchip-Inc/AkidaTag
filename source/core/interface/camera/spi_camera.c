@@ -22,7 +22,10 @@
 #include <string.h>
 #include <stdint.h>
 
-uint8_t frame[FRAME_SIZE] = {0};
+/* ==================== BUFFERS ==================== */
+static uint8_t rgb565_frame[RGB565_FRAME_SIZE];  /* Camera output buffer */
+static uint8_t rgb888_frame[RGB888_FRAME_SIZE];  /* Converted RGB888 buffer */
+
 
 /* ==================== SPI Device & Configuration ==================== */
 
@@ -86,10 +89,10 @@ static uint8_t camera_read_reg(uint8_t addr)
 
 static void wait_i2c_idle(void)
 {
-    for (int i = 0; i < 200; i++) {
+    for (int i = 0; i < 100; i++) {
         if ((camera_read_reg(CAM_REG_SENSOR_STATE) & 0x03) == CAM_SENSOR_STATE_IDLE)
             return;
-        k_msleep(2);
+        k_msleep(1);
     }
 }
 
@@ -151,6 +154,7 @@ int camera_init(void)
         printk("ERROR: SPI not ready\n");
         return -ENODEV;
     }
+    k_msleep(100);
     camera_write_reg(ARDUCHIP_TEST1, 0x55);
     if (camera_read_reg(ARDUCHIP_TEST1) != 0x55) {
         printk("ERROR: SPI test failed\n");
@@ -160,7 +164,7 @@ int camera_init(void)
     /* Full reset */
     camera_write_reg(CAM_REG_SENSOR_RESET, CAM_SENSOR_RESET_ALL);
     wait_i2c_idle();
-    k_msleep(250);
+    k_msleep(100);
 
     uint8_t id = camera_read_reg(CAM_REG_SENSOR_ID);
     printk("Camera ID: 0x%02X\n", id);
@@ -210,11 +214,9 @@ static int capture_rgb(uint8_t *buf, uint32_t max_len)
     /* Set RGB format */
     camera_write_reg(CAM_REG_FORMAT, CAM_IMAGE_PIX_FMT_RGB);
     wait_i2c_idle();
-    k_msleep(100);
 
     camera_write_reg(CAM_REG_CAPTURE_RESOLUTION, CAM_SET_CAPTURE_MODE | CAM_IMAGE_MODE_96X96_LEGACY);
     wait_i2c_idle();
-    k_msleep(100);
 
     /* Verify */
     uint8_t res_check = camera_read_reg(CAM_REG_CAPTURE_RESOLUTION);
@@ -223,17 +225,17 @@ static int capture_rgb(uint8_t *buf, uint32_t max_len)
 
     /* Clear and start */
     camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
-    k_msleep(150);
+    k_msleep(50);
     camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
 
     /* Wait for capture */
     bool done = false;
-    for (int i = 0; i < 2000; i++) {
+    for (int i = 0; i < 100; i++) {
         if (camera_read_reg(ARDUCHIP_TRIG) & CAP_DONE_MASK) {
             done = true;
             break;
         }
-        k_msleep(5);
+        k_msleep(1);
     }
 
     if (!done) {
@@ -242,7 +244,7 @@ static int capture_rgb(uint8_t *buf, uint32_t max_len)
     }
 
     uint32_t len = fifo_length();
-    printk("FIFO: %u bytes (expected: %u)\n", len, FRAME_SIZE);
+    printk("FIFO: %u bytes (expected: %u)\n", len, RGB565_FRAME_SIZE);
 
     if (len == 153600) {
         printk("\nwrong Resolution\n");
@@ -258,6 +260,30 @@ static int capture_rgb(uint8_t *buf, uint32_t max_len)
     return len;
 }
 
+void convert_rgb565_to_rgb888(const uint8_t *rgb565, uint8_t *rgb888, uint32_t pixel_count)
+{
+    for (uint32_t i = 0; i < pixel_count; i++) {
+        /* Read RGB565 pixel (big-endian: high byte first) */
+        uint16_t rgb565_pixel = (rgb565[i * 2] << 8) | rgb565[i * 2 + 1];
+        
+        /* Extract RGB components */
+        uint8_t r5 = (rgb565_pixel >> 11) & 0x1F;  /* 5 bits red */
+        uint8_t g6 = (rgb565_pixel >> 5) & 0x3F;   /* 6 bits green */
+        uint8_t b5 = rgb565_pixel & 0x1F;          /* 5 bits blue */
+        
+        /* Convert to 8-bit with improved precision */
+        uint8_t r8 = (r5 << 3) | (r5 >> 2);
+        uint8_t g8 = (g6 << 2) | (g6 >> 4);
+        uint8_t b8 = (b5 << 3) | (b5 >> 2);
+        
+        /* Store RGB888 pixel */
+        uint32_t idx = i * 3;
+        rgb888[idx] = r8;
+        rgb888[idx + 1] = g8;
+        rgb888[idx + 2] = b8;
+    }
+}
+
 /* ==================== Base64 Encoding ==================== */
 
 /**
@@ -265,26 +291,28 @@ static int capture_rgb(uint8_t *buf, uint32_t max_len)
  *
  * @param buf Pointer to buffer
  * @param len Length of buffer
- * @param capture_num Sequence number of capture
  */
 
 static const char b64[] =
 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-static void send_base64(uint8_t *buf, uint32_t len, int capture_num)
+static void send_base64_rgb888(const uint8_t *buf, uint32_t len)
 {
-    printk("\n--- RGB_START_%d ---\n", capture_num);
+    printk("\n--- RGB888_START_ ---\n");
+    /* Base64 encode RGB888 data */
     for (uint32_t i = 0; i < len; i += 3) {
         uint32_t n = buf[i] << 16;
         if (i + 1 < len) n |= buf[i + 1] << 8;
         if (i + 2 < len) n |= buf[i + 2];
+        
         printk("%c%c%c%c",
             b64[(n >> 18) & 63],
             b64[(n >> 12) & 63],
             (i + 1 < len) ? b64[(n >> 6) & 63] : '=',
             (i + 2 < len) ? b64[n & 63] : '=');
     }
-    printk("\n--- RGB_END_%d ---\n", capture_num);
+    
+    printk("\n--- RGB888_END_ ---\n");
 }
 
 /* ==================== Camera Control API ==================== */
@@ -328,7 +356,7 @@ void camera_capture_thread(void *a, void *b, void *c)
     /* Warm-up */
     printk("Warming up (5 frames)...\n");
     for (int i = 0; i < 5; i++) {
-        int len = capture_rgb(frame, sizeof(frame));
+        int len = capture_rgb(rgb565_frame, sizeof(rgb565_frame));
         if (len > 0) {
             printk(" Warm-up %d: %d bytes\n", i + 1, len);
         } else {
@@ -341,19 +369,14 @@ void camera_capture_thread(void *a, void *b, void *c)
     /* Main loop */
     while (1) {
         printk("--- Sequence start ---\n");
-        for (int i = 0; i < NUM_CAPTURES; i++) {
-            int len = capture_rgb(frame, sizeof(frame));
-            if (len > 0) {
-                printk(" Image %d/%d: %d bytes\n", i + 1, NUM_CAPTURES, len);
-                send_base64(frame, len, i + 1);
-            } else {
-                printk(" Image %d/%d: FAILED\n", i + 1, NUM_CAPTURES);
-            }
-            if (i < NUM_CAPTURES - 1)
-                k_msleep(200);
+        int len = capture_rgb(rgb565_frame, sizeof(rgb565_frame));
+        if (len > 0) {
+            convert_rgb565_to_rgb888(rgb565_frame, rgb888_frame, FRAME_SIZE);
+            send_base64_rgb888(rgb888_frame, RGB888_FRAME_SIZE);
+        } else {
+            printk("Image FAILED\n");
         }
         printk("--- Sequence complete ---\n\n");
-        k_msleep(10);
     }
 }
 

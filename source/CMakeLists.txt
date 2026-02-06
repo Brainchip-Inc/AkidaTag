@@ -51,6 +51,7 @@ add_subdirectory(apps)
 # Make sure the app sees the DSP + Core headers
 target_include_directories(app PRIVATE include 
 	include/audio
+    include/camera
     include/led
     ${CMSIS_DSP_DIR}/CMSIS/DSP/Include
     ${ZEPHYR_BASE}/modules/hal/cmsis/CMSIS/Core/Include
