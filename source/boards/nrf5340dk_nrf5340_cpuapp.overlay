@@ -24,6 +24,18 @@
     };
 };
 
+&button2 {
+    status = "disabled";
+};
+ 
+&button3 {
+    status = "disabled";
+};
+
+&gpio_fwd {
+    status = "disabled";
+};
+
 &pinctrl {
     spi2_default: spi2_default {
         group1 {

@@ -17,7 +17,7 @@ the application after transfer completes.
 #include <zephyr/types.h>
 
 #define SRAM_BUFFER_SIZE CONFIG_SRAM_BUFFER_SIZE
-
+extern uint8_t sram_upload_buffer[];
 /**
  * @brief Initialize the File Transfer Service.
  *

@@ -202,7 +202,83 @@ The script plots accelerometer and gyroscope data in real time.
 Ensure matplotlib and pyserial are installed before running.
 
 ### SPI CAMERA
-The SPI Camera module enables continuous image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with dedicated CS pin) to communicate with the camera, performs initialization and sensor reset, configures ISP settings (brightness, contrast, saturation, sharpness, white balance), and sets manual exposure and gain. Frames are captured in 96×96 RGB resolution (legacy mode) using the camera FIFO buffer. Captured frames are read from the FIFO, validated, and optionally converted to Base64 format for safe logging or transmission, marked with --- RGB_START_X --- and --- RGB_END_X ---. A continuous capture thread handles multi-frame capture sequences, while shell commands camera_start and camera_stop allow starting and stopping the camera via Zephyr shell.
+The SPI Camera module enables continuous image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (16 MHz, MSB-first, with a dedicated CS pin) to communicate with the camera. On startup, it performs full sensor initialization and reset, then configures ISP settings (brightness, contrast, saturation, sharpness, white balance, EV) and applies manual exposure and gain values.
+
+## Supported Resolutions
+
+Frames are captured based on a CLI command. Due to RAM constraints, only two resolutions are supported:
+
+| Index | Resolution | RGB888 Size |
+|-------|------------|-------------|
+| 1     | 96 × 96    | 27,648 B    |
+| 2     | 128 × 128  | 49,152 B    |
+
+> **WARNING:** 320×240, 320×320, and higher resolutions exceed available RAM and are **not supported**.
+
+## Frame Timing
+
+| Event 				  				  | Time 	       	   |
+|-----------------------------------------|--------------------|
+| First frame ready (from `camera_start`) | ~1116 ms (average) |
+| Each frame — 96×96 resolution 	  	  | ~64 ms	           |
+| Each frame — 128×128 resolution 	  	  | ~100 ms            |
+
+The first-frame timer starts when the `camera_start` shell command is issued. This includes the warm-up sequence (3 discarded frames) before the first valid frame is delivered.
+
+## Frame Output
+
+Captured frames are read from the camera FIFO and validated. The raw RGB565 data is converted to RGB888 format. Frames are then Base64-encoded and printed to the console, delimited by:
+
+```
+--- RGB888_START_ ---
+<base64 data>
+--- RGB888_END_ ---
+```
+
+## Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `camera_set_pixel 1` | Set resolution to 96×96 (must be run before `camera_start`) |
+| `camera_set_pixel 2` | Set resolution to 128×128 (must be run before `camera_start`) |
+| `camera_start` | Initialize camera, run warm-up, and begin continuous capture |
+| `camera_stop` | Stop capture and reset the sensor |
+
+`camera_set_pixel` **must** be called before `camera_start`. If resolution is not set, `camera_start` will return an error.
+
+## Configuration
+
+- **`CONFIG_DK_BOARD`** — Set to `N`. If enabled (`Y`), the DK board pins overlap with the SPI pins used by the camera, causing incorrect image capture.
+- **`CONFIG_CAMERA_ENABLE_THREAD`** — Enables or disables the dedicated camera processing thread. When disabled, no camera thread or stack is allocated.
+- A separate Kconfig file **`camera_app.conf`** is provided for all camera-related configuration options.
+
+
+### To check camera image
+A Python script `utils/image_display.py` is provided to receive frames over serial, decode them, and save them as PNG images.
+
+## Prerequisites
+
+```bash
+pip install pyserial numpy pillow
+```
+
+## Usage
+
+1. Close any active serial monitor (e.g. in your IDE or terminal).
+2. Run the script:
+
+```bash
+python utils/image_display.py
+```
+
+The script will prompt for serial port, baud rate, frame dimensions, and output folder. Frames are saved as `frame_00001.png`, `frame_00002.png`, etc. under the specified folder (default: `./frames/`), upscaled 4× for easier viewing.
+
+## Notes
+
+- The script buffers serial data and only processes a frame once both `--- RGB888_START_ ---` and `--- RGB888_END_ ---` markers are found.
+- Frames with incorrect byte counts (not equal to `width × height × 3`) are skipped with a warning.
+- Each saved PNG is upscaled 4× using nearest-neighbour interpolation for easy visual inspection.
+- Press **Ctrl+C** to stop; the script prints a final frame count summary.
 
 ### SPI CAMERA
 The SPI Camera module enables continuous image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with dedicated CS pin) to communicate with the camera, performs initialization and sensor reset, configures ISP settings (brightness, contrast, saturation, sharpness, white balance), and sets manual exposure and gain. Frames are captured in 96×96 RGB resolution (legacy mode) using the camera FIFO buffer. Captured frames are read from the FIFO, validated, and optionally converted to Base64 format for safe logging or transmission, marked with --- RGB_START_X --- and --- RGB_END_X ---. A continuous capture thread handles multi-frame capture sequences, while shell commands camera_start and camera_stop allow starting and stopping the camera via Zephyr shell.
