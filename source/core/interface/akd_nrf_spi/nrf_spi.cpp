@@ -43,7 +43,7 @@ static struct spi_config spi_cfg_akida_flash = {
 namespace akida {
 
 int ZephyrSpiDriver::init_spi() {
-  this->spi_dev = DEVICE_DT_GET(DT_ALIAS(spi1));
+  this->spi_dev = DEVICE_DT_GET(DT_ALIAS(spi2));
   if (!device_is_ready(this->spi_dev)) {
     LOG_ERR("NRF_SPI: SPI device not ready\n");
     return -ENODEV;
