@@ -109,7 +109,62 @@ config FEAT_D
     bool "Enable Feature D"
     default n
 
+config IMU_USE_INTERRUPT
+	bool "Use IMU interrupt mode"
+	default y
+	help
+	  Enable interrupt-driven IMU data acquisition.
+	  Disable to use polling mode.
 
+config IMU_ACC_ODR
+	int "Accelerometer ODR"
+	default 5
+	help
+	  0=OFF, 1=12.5Hz, 2=26Hz, 3=52Hz, 4=104Hz,
+	  5=208Hz, 6=416Hz, 7=833Hz, 8=1660Hz
 
+config IMU_ACC_FS
+	int "Accelerometer Full Scale"
+	default 3
+	help
+	  0=±2g, 1=±16g, 2=±4g, 3=±8g
+
+config IMU_GYRO_ODR
+	int "Gyroscope ODR"
+	default 5
+	help
+	  Same encoding as accel ODR
+
+config IMU_GYRO_FS
+	int "Gyroscope Full Scale"
+	default 1
+	help
+	  0=250dps, 1=500dps, 2=1000dps, 3=2000dps
+
+config IMU_FIFO_ACC_ODR
+	int "FIFO Accel Batch Data Rate"
+	default 5
+	help
+	  Same encoding as ODR
+
+config IMU_FIFO_GYRO_ODR
+	int "FIFO Gyro Batch Data Rate"
+	default 5
+	help
+	  Same encoding as ODR
+
+config IMU_ENABLE_THREAD
+    bool "Enable IMU processing thread"
+    default y
+    help
+      Enables creation of the IMU processing thread.
+      When disabled, no IMU thread or stack is created.
+
+config IMU_FIFO_WATERMARK
+    int "IMU FIFO Watermark Level"
+    default 32
+    help
+      FIFO watermark level (number of FIFO entries before interrupt).
+      Allowed values: 8, 16, 32
 
 endmenu
