@@ -30,6 +30,108 @@ Chip Select (CS) handling is managed automatically by Zephyr’s SPI driver via 
 Each SPI device has its own CS GPIO defined, and CS is asserted and released automatically
 during `spi_write()` and `spi_transceive()` calls. No manual GPIO toggling is required.
 
+
+### I2C ISM330 accelerometer and gyroscope
+- This application interfaces with the ISM330 accelerometer and gyroscope over I2C1.
+- I2C1 is configured with SCL on P1.03 and SDA on P1.02 using Zephyr pinctrl.
+- The IMU INT1 interrupt pin is connected to GPIO P0.31, configured via devicetree alias.
+- Accelerometer (CTRL1_XL) and gyroscope (CTRL2_G) registers are configured in firmware.
+- Sensor data can be acquired using FIFO interrupt-driven mode or polling mode.
+- The selection between interrupt mode and polling mode is controlled using a Kconfig flag (CONFIG_IMU_USE_INTERRUPT) defined in prj.conf.
+- Accelerometer and gyroscope ODR and full-scale (FS) values are configurable via Kconfig options and set at build time.
+- Lookup tables defined are used to convert raw sensor data to physical units.
+- SPI1 was changed to SPI2 to avoid conflicts while using the I2C1 peripheral.
+- reason: SPI was moved to SPI2 because I2C is actively used on I2C1. Moving I2C to I2C2 caused configuration issues, so SPI was relocated instead to preserve stable I2C operation.
+- IMU operation can be started or stopped at runtime using shell commands: imu_start and imu_stop.
+- CONFIG_IMU_ENABLE_THREAD enables or disables the dedicated IMU processing thread. When disabled, no IMU thread or stack is created.
+- A separate configuration file imu_app.conf is added for the imu_la application.This file contains all IMU-related Kconfig options.
+- Accelerometer ODR Configuration : CONFIG_IMU_ACC_ODR
+	Encoding	Output Data Rate (ODR)
+	0			OFF
+	1			12.5 Hz
+	2			26 Hz
+	3			52 Hz
+	4			104 Hz
+	5			208 Hz
+	6			416 Hz
+	7			833 Hz
+	8			1660 Hz
+- Accelerometer Full Scale Configuration: CONFIG_IMU_ACC_FS
+	Encoding	Full Scale Range
+	0			±2g
+	1			±16g
+	2			±4g
+	3			±8g
+- Gyroscope Configuration: CONFIG_IMU_GYRO_ODR (Same encoding as Accelerometer ODR)
+- Gyroscope Full Scale Configuration: CONFIG_IMU_GYRO_FS
+	Encoding	Full Scale Range
+	0			250 dps
+	1			500 dps
+	2			1000 dps
+	3			2000 dps
+- FIFO Configuration
+	CONFIG_IMU_FIFO_ACC_ODR (Same encoding as ODR.)
+	CONFIG_IMU_FIFO_GYRO_ODR (Same encoding as ODR.)
+    Must be less than or equal to the corresponding sensor ODR.
+
+	CONFIG_IMU_FIFO_WATERMARK
+	Allowed values:8 / 16 /32
+	This defines the number of FIFO entries required before the interrupt is triggered.
+- Runtime Configuration via Shell
+	The IMU parameters can also be configured at runtime using the shell command:
+	imu_start <acc_odr> <acc_fs> <gyro_odr> <gyro_fs> <fifo_acc_odr> <fifo_gyro_odr> <watermark>
+	Example:
+			imu_set 5 3 5 1 5 5 8
+			This means:
+					ACC ODR = 208 Hz
+					ACC FS = ±8g
+					GYRO ODR = 208 Hz
+					GYRO FS = 500 dps
+					FIFO ACC ODR = 208 Hz
+					FIFO GYRO ODR = 208 Hz
+					Watermark = 8
+- The IMU can be configured up to 416 Hz (validated configuration).
+- Interrupt Periodicity
+	The interrupt interval depends on: Selected ODR
+	FIFO watermark level: Interrupt Period ≈ Watermark / (ACC ODR + GYRO ODR)
+	1) 26 Hz (ODR = 2)
+		Total FIFO rate = 2 × 26 = 52 samples/sec
+		Watermark	Interrupt Period
+		8			8 / 52 ≈ 154 ms
+		16			16 / 52 ≈ 308 ms
+		32			32 / 52 ≈ 615 ms
+	2) 52 Hz (ODR = 3)
+		Total FIFO rate = 2 × 52 = 104 samples/sec
+		Watermark	Interrupt Period
+		8			8 / 104 ≈ 77 ms
+		16			16 / 104 ≈ 154 ms
+		32			32 / 104 ≈ 308 ms
+	3) 104 Hz (ODR = 4)
+		Total FIFO rate = 2 × 104 = 208 samples/sec
+		Watermark	Interrupt Period
+		8			8 / 208 ≈ 38 ms
+		16			16 / 208 ≈ 77 ms
+		32			32 / 208 ≈ 154 ms
+	4) At 208 Hz (ACC = 208 Hz, GYRO = 208 Hz)
+		Combined FIFO write rate = 416 entries/sec
+		Watermark	Interrupt Interval (Approx.)
+		8			~19 ms
+		16			~38 ms
+		32			~77 ms
+	5) At 416 Hz (ACC = 416 Hz, GYRO = 416 Hz)
+		Combined FIFO write rate = 832 entries/sec
+		Watermark	Interrupt Interval (Approx.)
+		8			~9.6 ms
+		16			~19 ms
+		32			~38 ms
+
+### To check IMU data 
+For testing IMU data, a Python script is provided.
+Run the imu_start command from the serial monitor.
+Close the serial monitor and run utils/imu_data_screening.py.
+The script plots accelerometer and gyroscope data in real time.
+Ensure matplotlib and pyserial are installed before running.
+
 ### Build the demo_apps Sample.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.

@@ -8,6 +8,7 @@ cmake_minimum_required(VERSION 3.20.0)
 
 set(CONF_FILE
     ${CMAKE_CURRENT_SOURCE_DIR}/prj.conf
+    ${CMAKE_CURRENT_SOURCE_DIR}/imu_app.conf
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/demo_apps/custom_app.conf 
 )
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
@@ -55,6 +56,7 @@ target_include_directories(app PRIVATE include
 )	
 
 target_sources(app PRIVATE
+	core/interface/imu/imu.c
 	core/interface/akd_spi_flash/akd_spi_flash.cpp
 	core/interface/akd_nrf_spi/nrf_spi.cpp
 	core/interface/akd_spi_flash/akd1500_spi_driver.cpp
