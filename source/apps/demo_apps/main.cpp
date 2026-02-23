@@ -63,6 +63,7 @@ extern "C" {
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 #include "imu_h/imu.h"
 #endif
+#include "led_init.h"
 #include "littlefs_storage.h"
 #include "pdm_mic.h"
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
@@ -495,14 +496,17 @@ K_THREAD_STACK_DEFINE(capture_stack, CAPTURE_STACK_SIZE);
 K_THREAD_STACK_DEFINE(process_stack, PROCESS_STACK_SIZE);
 
 K_THREAD_STACK_DEFINE(cli_worker_stack, CONFIG_SHELL_STACK_SIZE);
+K_THREAD_STACK_DEFINE(led_stack, LED_STACK_SIZE);
 
 struct k_thread capture_thread;
 struct k_thread process_thread;
 struct k_thread cli_worker_thread;
+struct k_thread led_thread;
 
 k_tid_t capture_tid;
 k_tid_t process_tid;
 k_tid_t cli_worker_tid;
+k_tid_t led_tid;
 #define CLI_WORKER_PRIORITY 4
 
 const struct device *uart;
@@ -777,6 +781,16 @@ void check_reset_reason(void) {
   /* Clear reset reason flags */
   NRF_RESET->RESETREAS = reason;
 }
+static int start_led_ind(void) {
+  led_tid =
+      k_thread_create(&led_thread, led_stack, LED_STACK_SIZE, led_ind_thread,
+                      NULL, NULL, NULL, LED_PRIORITY, K_USER,
+                      K_FOREVER // START SUSPENDED
+      );
+
+  k_thread_start(led_tid);
+  return 0;
+}
 
 int main(void) {
 
@@ -788,6 +802,8 @@ int main(void) {
   /*print_image_version(FLASH_AREA_ID(image_1), "Net Core");*/
 
   uart_init();
+  start_led_ind();
+  led_set_state(LED_STATE_NORMAL_APP);
   printk("Akida TAG Application\n");
   confirm_image_if_needed();
   init_setting_sub_system();
@@ -795,13 +811,13 @@ int main(void) {
   ble_init();
   akida_spiflash_init();
 
-  const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
+  // const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
 
-  if (!device_is_ready(qspi)) {
-    printk("QSPI not ready\n");
-  } else {
-    printk("QSPI device ready: %s \n", qspi->name);
-  }
+  // if (!device_is_ready(qspi)) {
+  //   printk("QSPI not ready\n");
+  // } else {
+  //   printk("QSPI device ready: %s \n", qspi->name);
+  // }
   int err = storage_init();
   if (err != 0) {
     printk("LittleFS mount failed %d", err);

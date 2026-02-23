@@ -1,5 +1,6 @@
 #include "ble_services/file_transfer.h"
 #include "akd_spi_flash_handler.h"
+#include "led_init.h"
 #include <string.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
@@ -10,7 +11,6 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
 #include <zephyr/sys/printk.h>
-
 LOG_MODULE_REGISTER(file_transfer, CONFIG_LOG_DEFAULT_LEVEL);
 
 static ssize_t get_app_index(struct bt_conn *conn,
@@ -215,7 +215,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
   ble_pgm_offset += len;
 
   total_received += len;
-
+  led_set_state(LED_STATE_FOTA_RECEIVING);
   LOG_INF("Rx B %d, len %d\n", total_received, len);
 
   if (ble_pgm_offset == BUFFER_SIZE || total_received == total_pgm_size) {
@@ -233,12 +233,12 @@ ssize_t file_transfer_write(struct bt_conn *conn,
       if (computed_crc != expected_crc) {
         /* Abort flash write, erase the flash and return the error */
         crc_ctx.crc_ok = false;
+        led_set_state(LED_STATE_UPDATE_FAILED);
         LOG_ERR("CRC check failed, Computed = 0x%x, Expected = 0x%x\n",
                 computed_crc, expected_crc);
 
         spi_flash_erase_helper_func(flash_offsets[app_index], total_pgm_size);
         LOG_ERR("Erasing the flash at index 0x%x\n", flash_offsets[app_index]);
-
         total_received = 0;
         app_flash_offset = 0;
         ble_pgm_offset = 0;
@@ -247,19 +247,22 @@ ssize_t file_transfer_write(struct bt_conn *conn,
       } else
         LOG_INF("CRC check passed\n");
     }
+    led_set_state(LED_STATE_FLASH_WRITE);
     spi_flash_write_helper_func((uint8_t *)sram_upload_buffer, app_flash_offset,
                                 ble_pgm_offset);
     app_flash_offset += ble_pgm_offset;
     reset_buffer();
     send_ack_to_host(ACK_FLASH_WRITE_DONE);
+
     if (total_received == total_pgm_size && crc_ctx.crc_ok) {
 
       if (akida_program_infer() != 0) {
         /*there is an error here*/
+        led_set_state(LED_STATE_UPDATE_FAILED);
         LOG_ERR("akida model program/inference failed\n");
         return 1;
       }
-
+      led_set_state(LED_STATE_UPDATE_SUCCESS);
       total_received = 0;
       app_flash_offset = 0;
       ble_pgm_offset = 0;
