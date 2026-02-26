@@ -1,5 +1,4 @@
 #include "audio_processor.h"
-#include "akd_spi_flash_handler.h"
 #include "error.h"
 #include "mfcc.h"
 #include "pdm_mic.h"
@@ -9,11 +8,20 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
+
+#include "akd_spi_flash_handler.h"
+#include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
+
+#define RMS_THREASHOLD 550
+int rms_threashold = RMS_THREASHOLD;
+#define SPEECH_IDLE 0
+#define SPEECH_ACTIVE 1
+#define SPEECH_ACTIVE_TIME_MS 1300
+static atomic_t g_inference_period = 3;
 
 /** Number of channels in audio capture = 1, as it is stereo data */
 #define N_CHANNELS_PER_SAMPLE (CONFIG_CHANNELS_PER_SAMPLE)
@@ -21,15 +29,9 @@
 #define N_BYTES_PER_SAMPLE (2)
 /** Number of captures per buffer */
 #define N_CAP_PER_BUFF (2)
-/** Flag indicating that streaming is ongoing */
-static int stream = 0;
-/** Flag used to notify that only one spectrogram should be acquired */
-static int single_acquisition = 0;
 
 /** Flag used to control verbose output */
-static int verbose_on;
-/** Flag used to check if the worqueue processing is done */
-static uint8_t in_rx_processing;
+extern int verbose_on;
 
 /* Private data structure to maintain state */
 typedef struct {
@@ -57,8 +59,6 @@ static audio_processor_state_t _state;
 
 static audio_processor_state_t *state = &_state;
 
-static uint32_t proc_time = 0, disp_time = 0;
-
 #ifdef CONFIG_AUDIO_CAPTURE_TEST
 int is_capture_start = 0;
 #define BLOCK_SIZE_BYTES MAX_BLOCK_SIZE
@@ -68,6 +68,14 @@ static uint32_t block_index = 0;
 uint32_t offset = 0;
 extern uint8_t sram_upload_buffer[];
 #endif
+
+extern uint8_t is_kws_debounce_complete(void);
+extern void set_feature_buff_full(void);
+extern uint8_t is_feature_buff_full(void);
+extern void reset_stale_inference_data(void);
+extern int64_t time_ms();
+
+void reset_spectrogram_index(void) { state->spectrogram_index = 0; }
 
 /**
  * @brief Push an MFCC transform to the running spectrogram.
@@ -85,10 +93,8 @@ static int spectrogram_push(q7_t *data, int spectrogram_index) {
 
   spectrogram_index++;
   if (spectrogram_index >= state->spectrogram_len) {
+    set_feature_buff_full();
     spectrogram_index = 0;
-    if (single_acquisition) {
-      stream = 0;
-    }
   }
   return spectrogram_index;
 }
@@ -97,8 +103,10 @@ static int spectrogram_push(q7_t *data, int spectrogram_index) {
  * @brief This method calls generates the input buffer for
  * MFCC processing
  *
- * It takes care of overlapping the new sampled buffer with
- * the old one to create the required overlap for mfcc transform
+ * Processes streaming audio samples and computes MFCC features using
+ * overlapping frames. The function maintains a rolling buffer so that each call
+ * produces multiple MFCC frames while preserving overlap between consecutive
+ * calls.
  *
  * @param state local data structure maintained by audio processor
  * @param input the input buffer MFCC_SAMPLE_COUNT sized
@@ -107,100 +115,31 @@ static int spectrogram_push(q7_t *data, int spectrogram_index) {
 
 #define MFCC_HOP_SAMPLES CONFIG_MFCC_SAMPLE_COUNT        // 20 ms
 #define MFCC_WINDOW_SAMPLES CONFIG_MFCC_SAMPLE_COUNT * 2 // 40 ms
+#define MFCC_STREAM_SAMPLES CONFIG_MFCC_SAMPLE_COUNT * 3 // 60 ms
 
 #define MFCC_PER_BLOCK 3
 
-#if CONFIG_MFCC_METHOD == 1
-
 static void mfcc_process_input(const q15_t *input, int16_t *mfcc_input) {
 
-  for (int i = 0; i < state->mfcc_len; i++) {
-    mfcc_input[i] = mfcc_input[state->mfcc_len + i];
-    mfcc_input[state->mfcc_len + i] = input[i];
-  }
+  // make sure the mfcc_input pointer should have space for 320+960 samples
+  // 1. Copy NEW 960 samples into the rest of the buffer
+  memcpy(&mfcc_input[MFCC_HOP_SAMPLES], input,
+         MFCC_STREAM_SAMPLES * sizeof(int16_t));
 
-  for (int f = 0; f < MFCC_PER_BLOCK; f++) {
-
-    mfcc_compute(&g_mfcc_input[f * MFCC_HOP_SAMPLES], g_mfccdata);
-    state->spectrogram_index =
-        spectrogram_push(g_mfccdata, state->spectrogram_index);
-  }
-}
-
-#elif CONFIG_MFCC_METHOD == 2
-
-// This persists in memory between PDM interrupts
-static int16_t history_samples[MFCC_HOP_SAMPLES] = {0};
-static int16_t processing_frame[MFCC_WINDOW_SAMPLES] = {0};
-
-static void mfcc_process_input(const q15_t *input, int16_t *mfcc_input) {
-
-  for (int i = 0; i < state->mfcc_len; i++) {
-    mfcc_input[i] = mfcc_input[state->mfcc_len + i];
-    mfcc_input[state->mfcc_len + i] = input[i];
-  }
-
-  for (int f = 0; f < MFCC_PER_BLOCK; f++) {
-    if (f == 0) {
-      // Frame 1: [320 samples from previous 60ms] + [Samples 0-320 of new 60ms]
-      memcpy(processing_frame, history_samples,
-             MFCC_HOP_SAMPLES * sizeof(int16_t));
-      memcpy(&processing_frame[MFCC_HOP_SAMPLES], &mfcc_input[0],
-             MFCC_HOP_SAMPLES * sizeof(int16_t));
-    } else if (f == 1) {
-      // Frame 2: [Samples 0-320] + [Samples 320-640]
-      memcpy(processing_frame, &mfcc_input[0],
-             MFCC_HOP_SAMPLES * sizeof(int16_t));
-      memcpy(&processing_frame[MFCC_HOP_SAMPLES], &mfcc_input[MFCC_HOP_SAMPLES],
-             MFCC_HOP_SAMPLES * sizeof(int16_t));
-    } else {
-      // Frame 3: [Samples 320-640] + [Samples 640-960]
-      memcpy(processing_frame, &mfcc_input[MFCC_HOP_SAMPLES],
-             MFCC_HOP_SAMPLES * sizeof(int16_t));
-      memcpy(&processing_frame[MFCC_HOP_SAMPLES],
-             &mfcc_input[2 * MFCC_HOP_SAMPLES],
-             MFCC_HOP_SAMPLES * sizeof(int16_t));
-    }
-    mfcc_compute(processing_frame, g_mfccdata);
-
-    state->spectrogram_index =
-        spectrogram_push(g_mfccdata, state->spectrogram_index);
-  }
-  memcpy(history_samples, &mfcc_input[2 * MFCC_HOP_SAMPLES],
-         MFCC_HOP_SAMPLES * sizeof(int16_t));
-}
-
-#else
-
-static void mfcc_process_input(const q15_t *input, int16_t *mfcc_input) {
-
-  // Create a local buffer to stitch the overlap
-  // [Old 320 samples] + [New 960 samples] = 1280 samples total
-  static int16_t stream_buffer[MFCC_HOP_SAMPLES + _state.mfcc_len];
-
-  // 1. Move the last 320 samples of previous run to the start
-  // (Already done at the end of the previous call)
-
-  // 2. Copy NEW 960 samples into the rest of the buffer
-  memcpy(&stream_buffer[MFCC_HOP_SAMPLES], input,
-         _state.mfcc_len * sizeof(int16_t));
-
-  // 3. Compute 3 MFCCs
+  // 2. Compute 3 MFCCs
   // Frame 0: 0-640 (Contains 320 old, 320 new)
   // Frame 1: 320-960
   // Frame 2: 640-1280
   for (int f = 0; f < MFCC_PER_BLOCK; f++) {
-    mfcc_compute(&stream_buffer[f * MFCC_HOP_SAMPLES], g_mfccdata);
+    mfcc_compute(&mfcc_input[f * MFCC_HOP_SAMPLES], g_mfccdata);
     state->spectrogram_index =
         spectrogram_push(g_mfccdata, state->spectrogram_index);
   }
 
-  // 4. Save the LAST 320 samples of the CURRENT input for the NEXT call
-  memcpy(&stream_buffer[0], &stream_buffer[_state.mfcc_len],
+  // 3. Save the LAST 320 samples of the CURRENT input for the NEXT call
+  memcpy(&mfcc_input[0], &mfcc_input[MFCC_STREAM_SAMPLES],
          MFCC_HOP_SAMPLES * sizeof(int16_t));
 }
-
-#endif
 
 /**
  * @brief work function
@@ -211,14 +150,13 @@ static void mfcc_process_input(const q15_t *input, int16_t *mfcc_input) {
  *
  * @param w the work item
  */
-
 int audio_processor(void) {
 
   __aligned(32) static q15_t input[MAX_MFCC_LEN];
-  uint32_t size = 0;
 
   int min = 128000;
   int max = -128000;
+  static uint32_t ap_counter = 0;
 
   /* Select only one channel */
   for (int i = 0; i < state->mfcc_len; i++) {
@@ -236,16 +174,20 @@ int audio_processor(void) {
 
   mfcc_process_input(input, g_mfcc_input);
 
-  state->inference_cb(state->spectrogram_index);
+  if (is_feature_buff_full()) {
 
-  in_rx_processing = false;
+    if ((ap_counter % g_inference_period) == 0) {
+      state->inference_cb(state->spectrogram_index);
+    }
+    ap_counter++;
+  }
+
   return SUCCESS;
 }
 
 int audio_processor_init(int samplerate) {
   /** Initialize codec */
   _state.samplerate = samplerate;
-  // pdm_init();
   return SUCCESS;
 }
 
@@ -253,14 +195,12 @@ int audio_processor_start(bool single, q7_t *spectrogram_buff,
                           uint8_t *spectrogram_dims, int mfcc_hop_len,
                           inference_cb_t cb) {
 
-  single_acquisition = single;
-  stream = 1;
   if (mfcc_hop_len > MAX_MFCC_LEN) {
     printk(" invalid parameter \n\r ");
     return EFAILURE;
   }
   /* for TAG MFCC HOP length is 320 samples and total block size is 960 samples
-  multiply mfcc_hop_len * 3 to get 960 */
+  multiply mfcc_hop_len * 3 *2 to get 1920..> 2 frames */
   _state.mfcc_len = mfcc_hop_len * 3;
   _state.spectrogram_index = 0;
 
@@ -276,25 +216,14 @@ int audio_processor_start(bool single, q7_t *spectrogram_buff,
     return EFAILURE;
   }
 
-  in_rx_processing = false;
-
   return SUCCESS;
 }
 
 int audio_processor_stop() {
-  bool is_processing = true;
-  uint32_t flags = 0;
-  stream = 0;
 
-  // free(_state.mfccdata);
-  // free(_state.mfcc_input);
   mfcc_deinit();
 
   return SUCCESS;
-}
-
-void audio_processor_set_verbose(int verbose_level) {
-  verbose_on = verbose_level;
 }
 
 #ifdef CONFIG_AUDIO_CAPTURE_TEST
@@ -325,6 +254,8 @@ static void capture_raw_samples(size_t samples) {
 }
 #endif
 
+/* This thread is responsible to process the received DMIC sample and then
+ * trigger the inference  */
 void audio_process_thread(void *a, void *b, void *c) {
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
   wdt_enable_thread(AUDIO_PROCESS);
@@ -333,58 +264,140 @@ void audio_process_thread(void *a, void *b, void *c) {
   printk("audio_process_thread:\n\r");
   uint32_t audio_process_thread_cntr = 0;
   size_t samples;
+  float rms_val = 0.0f;
+  int speech_state = SPEECH_IDLE;
+  uint64_t speach_start_time = 0;
   while (1) {
 
-    k_msgq_get(&audio_msgq, &blk, K_FOREVER);
-
-    samples = blk.size / sizeof(int16_t);
-#ifdef CONFIG_AUDIO_CAPTURE_TEST
-    capture_raw_samples(blk.size);
-#else
-    pdm_process(orig_buf, samples);
-    audio_processor();
-#endif
-    audio_process_thread_cntr++;
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
     /* Mark thread as healthy */
     atomic_set(&thread_health[AUDIO_PROCESS], 1);
 #endif
-    // printk ("ap %d\n", audio_process_thread_cntr);
-  }
-}
+
+    k_msgq_get(&audio_msgq, &blk, K_FOREVER);
+
+    samples = blk.size / sizeof(int16_t);
 
 #ifdef CONFIG_AUDIO_CAPTURE_TEST
-int cmd_cap_start(const struct shell *shell, size_t argc, char **argv) {
-  if (argc > 1) {
-    printk("invalid command ");
-    return -EINVAL;
-  }
-  printk("cap started ");
-  is_capture_start = 1;
-  return 0;
-}
+    capture_raw_samples(blk.size);
+#else
 
-int cmd_cap_stop(const struct shell *shell, size_t argc, char **argv) {
-  if (argc > 1) {
-    printk("invalid command ");
-    return -EINVAL;
-  }
-  printk("cap stopped ");
-  is_capture_start = 0;
-  return 0;
-}
+    if (!is_kws_debounce_complete()) {
+      // debounce period, dont do anything
+      speech_state = SPEECH_IDLE;
+      if (verbose_on) {
+        printk("state idle \n\r");
+      }
+    }
 
-int cmd_dump_uart(const struct shell *shell, size_t argc, char **argv) {
-  if (argc > 1) {
-    printk("invalid command ");
-    return -EINVAL;
-  }
-  uart_send_pcm((int16_t *)sram_upload_buffer, TOTAL_BUFFER_BYTES / 2);
-  printk("\n\rdump completed\n\r ");
-  return 0;
-}
+    /* remove DC offset and compute RMS based on compute_rms, flag */
+    else if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
+      /* ok to lose fraction part resolution, comparing with int value only */
+      if (((int)rms_val >= rms_threashold)) {
+        speech_state = SPEECH_ACTIVE;
 
-SHELL_CMD_REGISTER(cap_start, NULL, "cap_start", cmd_cap_start);
-SHELL_CMD_REGISTER(cap_stop, NULL, "cap_stop", cmd_cap_stop);
-SHELL_CMD_REGISTER(dump_uart, NULL, "dump_uart", cmd_dump_uart);
+        speach_start_time = time_ms();
+        if (verbose_on) {
+          printk("rms_threashold %f\n\r", rms_val);
+        }
+
+      } else if (speech_state == SPEECH_IDLE) {
+
+        /* dont do not process as state is idle */
+        continue;
+      } else if (((time_ms() - speach_start_time) > SPEECH_ACTIVE_TIME_MS) &&
+                 ((speech_state == SPEECH_ACTIVE))) {
+        /* If the speech state is active and control reaches this point, it
+         * means that the rms_val has remained below the threshold for
+         * SPEECH_ACTIVE_TIME_MS. This indicates that no valid speech command
+         * was detected. Therefore, the system transitions back to the IDLE
+         * state and clears any stale inference data */
+        speech_state = SPEECH_IDLE;
+        reset_stale_inference_data();
+        continue;
+      }
+      /* */
+      audio_processor();
+    }
+
+    audio_process_thread_cntr++;
+  }
 #endif
+  }
+
+  int cmd_inf_period(const struct shell *shell, size_t argc, char **argv) {
+    if (argc > 1) {
+
+      char *endptr;
+      errno = 0;
+
+      uint32_t val1 = strtol(argv[1], &endptr, 10);
+      if (*endptr != '\0' || errno == ERANGE || val1 > 3 || val1 < 1) {
+        shell_error(shell, "Invalid input: ");
+        return -EINVAL;
+      }
+      g_inference_period = val1;
+      printk("g_inference_period %d \n\r", val1);
+    } else {
+      printk("incorrect command \n\r");
+    }
+    return 0;
+  }
+
+  int cmd_rms_thresh(const struct shell *shell, size_t argc, char **argv) {
+    if (argc > 1) {
+
+      char *endptr;
+      errno = 0;
+
+      uint32_t val1 = strtol(argv[1], &endptr, 10);
+      if (*endptr != '\0' || errno == ERANGE || val1 >= RMS_THREASHOLD) {
+        shell_error(shell, "Invalid input: ");
+        return -EINVAL;
+      }
+      rms_threashold = val1;
+      printk("rms_threashold %d \n\r", val1);
+    } else {
+      printk("incorrect command \n\r");
+    }
+    return 0;
+  }
+
+#ifdef CONFIG_AUDIO_CAPTURE_TEST
+  int cmd_cap_start(const struct shell *shell, size_t argc, char **argv) {
+    if (argc > 1) {
+      printk("invalid command ");
+      return -EINVAL;
+    }
+    printk("cap started ");
+    is_capture_start = 1;
+    return 0;
+  }
+
+  int cmd_cap_stop(const struct shell *shell, size_t argc, char **argv) {
+    if (argc > 1) {
+      printk("invalid command ");
+      return -EINVAL;
+    }
+    printk("cap stopped ");
+    is_capture_start = 0;
+    return 0;
+  }
+
+  int cmd_dump_uart(const struct shell *shell, size_t argc, char **argv) {
+    if (argc > 1) {
+      printk("invalid command ");
+      return -EINVAL;
+    }
+    uart_send_pcm((int16_t *)sram_upload_buffer, TOTAL_BUFFER_BYTES / 2);
+    printk("\n\rdump completed\n\r ");
+    return 0;
+  }
+
+  SHELL_CMD_REGISTER(cap_start, NULL, "cap_start", cmd_cap_start);
+  SHELL_CMD_REGISTER(cap_stop, NULL, "cap_stop", cmd_cap_stop);
+  SHELL_CMD_REGISTER(dump_uart, NULL, "dump_uart", cmd_dump_uart);
+#endif
+
+  SHELL_CMD_REGISTER(inf_period, NULL, "inf_period", cmd_inf_period);
+  SHELL_CMD_REGISTER(rms_thresh, NULL, "rms_thresh", cmd_rms_thresh);

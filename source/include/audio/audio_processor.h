@@ -41,13 +41,6 @@ int audio_processor_start(bool is_stream, q7_t *spectrogram_buff,
 int audio_processor_stop();
 
 /**
- * @brief Set verbose level
- *
- * @param verbose_level verbosity level.
- */
-void audio_processor_set_verbose(int verbose_level);
-
-/**
  * @brief Get last processing time
  *
  * @return last processing time
@@ -56,8 +49,13 @@ int audio_processor_get_proc_time(void);
 
 void audio_process_thread(void *a, void *b, void *c);
 
+void inference_periodic_thread(void *arg1, void *arg2, void *arg3);
+
+void reset_spectrogram_index(void);
+
 #define PROCESS_STACK_SIZE 4096
 #define PROCESS_PRIORITY 7
+
 #define SPECTROGRAM_COUNT 49
 #define SPECTROGRAM_RES 10
 
