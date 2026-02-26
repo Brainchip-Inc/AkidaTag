@@ -78,14 +78,19 @@ KWS - 1
 MNIST - 0
 */
 
+static void reset_chim_debouce(void);
+static void reset_kws_spectrogram(void);
+
+#define MAX_VALUE_FOR_SOFTMAX 1
+
 /** Input batch size, picked an arbitrary value */
 #define INPUT_BATCH_SIZE (CONFIG_BATCH_SIZE)
 #define GET_SEC_TO_USEC(x) (x * 1000000)
 
+#define AKIDA_FREQUENCY_MHZ 400
+
 #define SAMPLING_RATE CONFIG_SAMPLING_RATE
 
-#define NUM_CLASSES 36
-#define NUM_NEURONS_PER_CLASS 15
 #define MFCC_SAMPLE_COUNT CONFIG_MFCC_SAMPLE_COUNT
 
 #define NUM_INA_BUFF (2)
@@ -148,7 +153,7 @@ static struct kws_demo_params {
             DEFAULT_LEARNING_DELAY, DEFAULT_API_SELECTION_ASYNC,
             DEFAULT_INFERENCE_SAMPLE_THRESHOLD};
 
-static int verbose_on = 0;
+int verbose_on = 0;
 /** Current state of the application */
 static uint32_t cur_kws_edge_state = STATE_STOPPED;
 /** Current novel class id, selected for learning*/
@@ -224,9 +229,6 @@ static q7_t __aligned(4) spectrogram[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
 /** spectrogram dimensions */
 static uint8_t __aligned(4) spectrogram_dims[2] = {SPECTROGRAM_COUNT,
                                                    SPECTROGRAM_RES};
-
-/** Last class detected */
-static int current_class = -1;
 
 /** data structure to represent possible actions in a state */
 typedef struct {
@@ -309,6 +311,9 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 #define VALID_PROGRAM_DATA_KWS 0xF4020100 // 0x64d70000
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
+float akida_output_f[KWS_OUTPUT_SIZE] = {0};
+float akida_output[NUM_CLASSES] = {0};
+
 const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
 uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
                                  VALID_PROGRAM_DATA_KWS};
@@ -316,14 +321,10 @@ const unsigned char *program_info[] = {mnist_program_info, kws_program_info};
 const int64_t program_info_len[] = {mnist_program_info_len,
                                     kws_program_info_len};
 
-int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
-
-#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 /* IMU thread variables*/
 K_THREAD_STACK_DEFINE(imu_stack, IMU_STACK_SIZE);
 struct k_thread imu_thread;
 k_tid_t imu_tid;
-#endif
 
 const struct device *wdt_dev; // Global watchdog device
 void kick_watchdog(void) {
@@ -356,9 +357,9 @@ bool check_program_data(int offset, int len, int app_index_l) {
 
 // int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
 
-int64_t time_ms() { return k_uptime_get(); }
+extern "C" int64_t time_ms() { return k_uptime_get(); }
 
-void msleep(uint32_t duration) { k_sleep(K_MSEC(duration)); }
+extern "C" void msleep(uint32_t duration) { k_sleep(K_MSEC(duration)); }
 
 void panic(const char *format, ...) {
   va_list args;
@@ -381,14 +382,14 @@ void do_inference(int spectrogram_index) {
   __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
   q7_t min = 127;
   q7_t max = -128;
-  int32_t energy = 0;
-  int32_t energies[SPECTROGRAM_COUNT + 1];
-
-  // printk ("do_inference \n");
+  /* commenting out energy comptation as part of a review comment as the rms
+   * computation is happening before mfcc itself * */
+  // int32_t energy = 0;
+  // int32_t energies[SPECTROGRAM_COUNT + 1];
 
   for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
     int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
-    energies[i] = 0;
+    // energies[i] = 0;
     for (int j = 0; j < SPECTROGRAM_RES; j++) {
       if (spectrogram[idx][j] > max) {
         max = spectrogram[idx][j];
@@ -396,11 +397,11 @@ void do_inference(int spectrogram_index) {
       if (spectrogram[idx][j] < min) {
         min = spectrogram[idx][j];
       }
-      if (j > 0)
+      /*if (j > 0)
         energies[i] += spectrogram[idx][j] > 0 ? spectrogram[idx][j]
-                                               : -spectrogram[idx][j];
+                                               : -spectrogram[idx][j];*/
     }
-    energy += energies[i];
+    // energy += energies[i];
   }
 
   /* It has been experimentally determined that when we talk on the mic,
@@ -408,44 +409,26 @@ void do_inference(int spectrogram_index) {
    * is above -39. This allows not to send data to akida if we already
    * know that there is nothing to detect.
    */
-  // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
-  // energy, spectrogram[(25 + spectrogram_index) % SPECTROGRAM_COUNT][0]);
-  if ((energy > params.energy_threshold) &&
+  /*if ((energy > params.energy_threshold) &&
       (spectrogram[(25 + spectrogram_index) % SPECTROGRAM_COUNT][0] >
-       params.bin0_threshold))
-
-  {
-
-    // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
-    // energy, spectrogram_index);
-    if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
-      /* Generate model input where whole spectrogram is normalized
-         between 0 and 255 */
-      for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
-        int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
-        for (int j = 0; j < SPECTROGRAM_RES; j++) {
-          akida_input[i][j] =
-              (uint8_t)((int)255 * ((int)spectrogram[idx][j] - (int)min) /
-                        ((int)max - (int)min));
-        }
-      }
-
-      // memcpy ((uint8_t*) akida_input, &kws_inputs[0], 490);
-      // printk ("do_inference cur_kws_edge_state %d \n", cur_kws_edge_state);
-      kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
-                                                        (uint32_t *)dims);
-      if (verbose_on) {
-        printk("Spectrogram params max=%d energy=%d spectrogram_index=%d", max,
-               energy, spectrogram_index);
+       params.bin0_threshold))*/
+  if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
+    /* Generate model input where whole spectrogram is normalized
+       between 0 and 255 */
+    for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
+      int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
+      for (int j = 0; j < SPECTROGRAM_RES; j++) {
+        akida_input[i][j] =
+            (uint8_t)((int)255 * ((int)spectrogram[idx][j] - (int)min) /
+                      ((int)max - (int)min));
       }
     }
 
-    else {
-      // printk ("on_mfcc_output is NULL on cur_kws_edge_state = %d\n",
-      // cur_kws_edge_state);
-    }
+    kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
+                                                      (uint32_t *)dims);
+  }
 
-  } else if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
+  if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
     uint32_t cur_ts = k_cycle_get_32();
     uint32_t last_learn_duration = (uint32_t)(cur_ts - last_learn_ts);
     uint64_t duration_us = k_cyc_to_us_floor64(last_learn_duration);
@@ -476,7 +459,6 @@ void do_inference(int spectrogram_index) {
 
 K_THREAD_STACK_DEFINE(capture_stack, CAPTURE_STACK_SIZE);
 K_THREAD_STACK_DEFINE(process_stack, PROCESS_STACK_SIZE);
-
 K_THREAD_STACK_DEFINE(cli_worker_stack, CONFIG_SHELL_STACK_SIZE);
 
 struct k_thread capture_thread;
@@ -803,11 +785,24 @@ int main(void) {
   } else {
     printk("model is already present \n");
     // program the model info part to AKD1500
-
+    akd_device.toggle_clock_counter(true);
     printk("Programming the model\n");
+
+    uint32_t s_dma_cycls = akd_device.read_clock_counter();
+    uint64_t start_time = time_ms();
+
     akida_program_flash((uint8_t *)program_info[1], program_info_len[1],
                         flash_offsets[1]);
+    uint32_t prog_time = time_ms() - start_time;
+    uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+    uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
+
+    printk("\n model program time= %u dma cycles, dma time = %d us, cpu time = "
+           "%u ms \n\r",
+           delta_cycle, dma_time, prog_time);
+
     akd_device.set_batch_size(1, true);
+
     kws_model_present = true;
   }
 
@@ -852,42 +847,204 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
   }
 }
 
+// Tuning Parameters
+#define ALPHA 0.85f // Determines responsiveness vs stability (0.0 to 1.0)
+// Minimum smoothed confidence required to trigger
+#define TRIGGER_THRESH 0.5f
+
+#define DEBOUNCE_COOLDOWN_MS 1000 // Cooldown period after a trigger
+#define MAX_SMOOTH_CNTR 3
+
+float g_alpha_chiming = ALPHA;
+float g_thresh_chiming = TRIGGER_THRESH;
+uint32_t kws_debount_time = DEBOUNCE_COOLDOWN_MS;
+bool feature_buff_full = false;
+
+typedef struct {
+  float smoothed_score[NUM_CLASSES];
+  uint8_t chiming_counter[NUM_CLASSES];
+  int64_t last_trigger_time_ms;
+} _chiming_process_;
+_chiming_process_ chiming_process = {0};
+
+static bool kws_op_chim_debounce(_chiming_process_ *pp, float raw_prob[]) {
+  bool found = false;
+  int n_activations = NUM_CLASSES;
+
+  float max_score = 0.0;
+  int index_local = -1;
+
+  for (int i = 0; i < n_activations; i++) {
+    // 1. CHIMING (Smoothing) using the EMA formula:
+    // s[t] = (alpha * p[t]) + ((1 - alpha) * s[t-1])
+    pp->smoothed_score[i] = (g_alpha_chiming * raw_prob[i]) +
+                            ((1.0f - g_alpha_chiming) * pp->smoothed_score[i]);
+
+    if (pp->smoothed_score[i] > g_thresh_chiming) {
+      pp->chiming_counter[i]++;
+    } else {
+      pp->chiming_counter[i] = 0;
+    }
+
+    if (pp->chiming_counter[i] >= MAX_SMOOTH_CNTR) {
+      found = true;
+    }
+
+    if (verbose_on) {
+      if (pp->smoothed_score[i] > max_score) {
+        max_score = pp->smoothed_score[i];
+        index_local = i;
+      }
+    }
+    if (verbose_on == 2) {
+      printk(" smoothed_score %f \n\r", pp->smoothed_score[i]);
+    }
+  }
+  if (verbose_on) {
+    printk("max smoothed_score %f at index %i and found %d \n\r", max_score,
+           index_local, found);
+  }
+  return found;
+}
+
+extern "C" void reset_stale_inference_data(void) {
+  // reset_kws_spectrogram();
+  reset_chim_debouce();
+  if (verbose_on) {
+    printk("clearing the stale inference data\n\r");
+  }
+  return;
+}
+
+extern "C" uint8_t is_kws_debounce_complete(void) {
+  uint8_t is_debounce = 0;
+  /* DEBOUNCING (Preventing multiple rapid triggers)*/
+  int64_t current_time = time_ms();
+  if ((current_time - chiming_process.last_trigger_time_ms) > kws_debount_time)
+    is_debounce = 1;
+
+  return is_debounce;
+}
+
+extern "C" void set_feature_buff_full(void) { feature_buff_full = 1; }
+
+extern "C" uint8_t is_feature_buff_full(void) { return feature_buff_full; }
+
+static void reset_chim_debouce(void) {
+  int n_activations = NUM_CLASSES;
+  for (int i = 0; i < n_activations; i++) {
+    chiming_process.smoothed_score[i] = 0.0f;
+    chiming_process.chiming_counter[i] = 0;
+  }
+}
+
+static void reset_kws_spectrogram(void) {
+  memset(spectrogram, 0, SPECTROGRAM_COUNT * SPECTROGRAM_RES);
+  // feature_buff_full = false;
+  reset_spectrogram_index();
+}
+
+static int confirm_found_index(int _found) {
+  bool ret_val = false;
+  int n_activations = NUM_CLASSES;
+  for (int i = 0; i < n_activations; i++) {
+    if (chiming_process.chiming_counter[i] >= MAX_SMOOTH_CNTR &&
+        (_found == i)) {
+      ret_val = true;
+      break;
+    }
+  }
+  return ret_val;
+}
+
+static int count_softmax_above_threshold(float *softmax, int len,
+                                         float threshold) {
+  int count = 0;
+  float max_val = 0.0;
+  for (int i = 0; i < len; i++) {
+    if (softmax[i] > threshold) {
+      count++;
+    }
+    if (softmax[i] > max_val)
+      max_val = softmax[i];
+  }
+  printk("softmax max_val = %f \n\r", max_val);
+  return count;
+}
+
 static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
-  int ret = 0;
-  static int last_found = -1, same_count = 0;
+  int ret = EFAILURE;
 
   if (params.sync_api == 0) {
 
-    uint32_t cur_ts = k_cycle_get_32();
+    uint64_t start_time = time_ms();
+    uint32_t s_dma_cycls = akd_device.read_clock_counter();
+    // add dma counter time also
+    if (SUCCESS == akida_predict(input, input_shape, akida_output_f,
+                                 sizeof(akida_output_f))) {
+      uint32_t inf_time = time_ms() - start_time;
+      uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+      uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
 
-    if (SUCCESS == akida_forward(input, input_shape, (uint8_t *)akida_output,
-                                 sizeof(akida_output))) {
-
-      uint64_t inf_time = k_cyc_to_us_floor64((k_cycle_get_32() - cur_ts));
-      if (verbose_on)
-        printk("inf_time = %" PRIu64 " us\n", inf_time);
-
-      int found =
-          get_inferred_class(akida_output, NUM_CLASSES, NUM_NEURONS_PER_CLASS);
-
-      if (found == -1) {
-        printk("get_inferred_class failure\n");
-        return -1;
+      if (verbose_on) {
+        printk("\n\rinference time= %u dma cycles, dma time = %d us, cpu time "
+               "= %u ms\n\r",
+               delta_cycle, dma_time, inf_time);
       }
-      if (last_found != found) {
-        last_found = found;
-        same_count = 1;
-      } else {
-        same_count++;
-        if (same_count >= params.infer_threshold) {
-          current_class = found;
-          printk("\nClass : %d\n", found);
-          printk("Word : %s\n", kws_tags[found]);
-          same_count = 0;
+      float max_val = 0.0f;
+      for (int num_cls = 0; num_cls < NUM_CLASSES; num_cls++) {
+        max_val = 0.0;
+        for (int i = 0; i < NUM_NEURONS_PER_CLASS; i++) {
+          /* identify the biggest value within the NUM_NEURONS_PER_CLASS and
+          use the max value for that class */
+#if MAX_VALUE_FOR_SOFTMAX
+          float current_val =
+              akida_output_f[(num_cls * NUM_NEURONS_PER_CLASS) + i];
+          if (current_val > max_val) {
+            max_val = current_val;
+          }
+#else
+          akida_output[num_cls] +=
+              akida_output_f[(num_cls * NUM_NEURONS_PER_CLASS) + i];
+#endif
+        }
+#if MAX_VALUE_FOR_SOFTMAX
+        /* copy the max value per class */
+        akida_output[num_cls] = max_val;
+#endif
+      }
+      /* perform soft max on the output */
+      softmax(akida_output, (uint32_t)NUM_CLASSES);
+
+      if (verbose_on) {
+        int cnt = count_softmax_above_threshold(akida_output,
+                                                (uint32_t)NUM_CLASSES, 0.5f);
+        printk("softmax count more than 0.5 = %d \n\r", cnt);
+      }
+
+      /* perform chiming and debouncing on softmax output */
+      if (kws_op_chim_debounce(&chiming_process, &akida_output[0])) {
+        int index =
+            predict_class(chiming_process.smoothed_score, NUM_CLASSES, 1);
+        /* confirm if the predicted class is present */
+        if (confirm_found_index(index)) {
+          /*start the debounce time */
+          chiming_process.last_trigger_time_ms = time_ms();
+          printk("\nClass : %d\n", index);
+          printk("Word : %s\n", kws_tags[index]);
+          reset_kws_spectrogram();
+          reset_chim_debouce();
+          ret = SUCCESS;
+        } else {
+          printk(
+              "\n confirm_found_index failed and predict_class index is : %d\n",
+              index);
         }
       }
-    } else {
-      printk("akida_forward failure\n");
+    }
+
+    else {
+      printk("akida_predict failure\n");
     }
   }
   return ret;
@@ -1140,14 +1297,10 @@ int infer(int app_index_l) {
     app_index = app_index_l;
   }
 
-  akd_device.toggle_clock_counter(true);
-
-  uint32_t inf_complete = 0;
   uint32_t s_dma_cycls = 0;
   uint64_t s_tick = 0;
   uint64_t e_tick = 0;
   uint32_t inf_time = 0;
-  uint32_t e_dma_cycls = 0;
   uint32_t delta_cycle = 0;
   int num_classes = 10;
   int num_neurons_per_class = 1;
@@ -1158,24 +1311,31 @@ int infer(int app_index_l) {
     shape = kws_inputs_shape;
     num_classes = NUM_CLASSES;
     num_neurons_per_class = NUM_NEURONS_PER_CLASS;
-    output_size = sizeof(akida_output);
+    output_size = sizeof(akida_output_f);
   }
 
   int class_id = -1;
   uint32_t inp_shap[] = {shape[0], shape[1], shape[2]};
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
-  ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
-                      (uint8_t *)akida_output, output_size);
-  e_tick = time_ms();
-  e_dma_cycls = akd_device.read_clock_counter();
-  delta_cycle = e_dma_cycls - s_dma_cycls;
-  inf_time = e_tick - s_tick;
-  printk("\n\rinference time= %u dma cycles, time = %u ms\n\r", delta_cycle,
-         inf_time);
-  if (ret == SUCCESS) {
+
+  if (SUCCESS == akida_predict((uint8_t *)inputs[app_index_l], inp_shap,
+                               akida_output_f, output_size)) {
+
+    softmax(akida_output_f, (uint32_t)KWS_OUTPUT_SIZE);
+
+    int cnt = count_softmax_above_threshold(akida_output_f,
+                                            (uint32_t)KWS_OUTPUT_SIZE, 0.5f);
+    printk("softmax count more than 0.5 = %d \n\r", cnt);
+
     class_id =
-        get_inferred_class(akida_output, num_classes, num_neurons_per_class);
+        predict_class(akida_output_f, num_classes, num_neurons_per_class);
+
+    e_tick = time_ms();
+    delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+    inf_time = e_tick - s_tick;
+    printk("\n\rinference time= %u dma cycles, time = %u ms\n\r", delta_cycle,
+           inf_time);
   } else {
     printk("\n\r inference failed \n\r");
     return -1;
@@ -1187,8 +1347,8 @@ int infer(int app_index_l) {
     k_thread_suspend(process_tid);
     kws_threads_suspended = true;
   } else if (app_index_l == 1) { // kws
-    printk("\nClass : %d\n", class_id);
-    printk("Word : %s\n", kws_tags[class_id]);
+    printk("\nClass : %d\n", class_id / NUM_NEURONS_PER_CLASS);
+    printk("Word : %s\n", kws_tags[class_id / NUM_NEURONS_PER_CLASS]);
     kws_model_present = true;
     if (!is_kws_inference_started) {
       initiate_kws_inference();
@@ -1259,13 +1419,74 @@ static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
   return 0;
 }
 
-/* shell cli function to invoke erase function */
+static int cmd_chim_alpha(const struct shell *shell, size_t argc, char **argv) {
+  if (argc > 1) {
+
+    char *endptr;
+    errno = 0;
+
+    float val1 = strtof(argv[1], &endptr);
+    if (*endptr != '\0' || errno != 0) {
+      shell_error(shell, "Invalid float: %s", argv[1]);
+      return -EINVAL;
+    }
+    g_alpha_chiming = val1;
+    printk("chim_alpha %f \n\r", val1);
+  } else {
+    printk("incorrect command \n\r");
+  }
+
+  return 0;
+}
+
+static int cmd_chim_thresh(const struct shell *shell, size_t argc,
+                           char **argv) {
+  if (argc > 1) {
+
+    char *endptr;
+    errno = 0;
+
+    float val1 = strtof(argv[1], &endptr);
+    if (*endptr != '\0' || errno != 0) {
+      shell_error(shell, "Invalid input: ");
+      return -EINVAL;
+    }
+    g_thresh_chiming = val1;
+    printk("chim_thresh %f \n\r", val1);
+  } else {
+    printk("incorrect command \n\r");
+  }
+
+  return 0;
+}
+
+static int cmd_chim_debounce(const struct shell *shell, size_t argc,
+                             char **argv) {
+  if (argc > 1) {
+
+    char *endptr;
+    errno = 0;
+
+    uint32_t val1 = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || errno == ERANGE || val1 > 1000 || val1 < 500) {
+      shell_error(shell, "Invalid input: ");
+      return -EINVAL;
+    }
+    kws_debount_time = val1;
+    printk("chim_debounce %d \n\r", val1);
+  } else {
+    printk("incorrect command \n\r");
+  }
+
+  return 0;
+}
+
+/* shell cli function to invoke edge learning commands */
 static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
   printk("cmd exec argc %d\n", argc);
   if (argc > 1) {
     if (argc > 2 && !strcmp(argv[1], "verbose")) {
       verbose_on = atoi(argv[2]);
-      audio_processor_set_verbose(verbose_on);
     } else if (!strcmp(argv[1], "stop")) {
       cur_kws_edge_state = STATE_STOPPED;
       audio_processor_stop();
@@ -1343,6 +1564,12 @@ SHELL_CMD_REGISTER(threads_stop, NULL, "Stop all worker threads",
 #endif
 
 SHELL_CMD_REGISTER(kws_el, NULL, "KWS Edge Learn Support", cmd_kws_el);
+
+SHELL_CMD_REGISTER(chim_alpha, NULL, "KWS Edge Learn Support", cmd_chim_alpha);
+SHELL_CMD_REGISTER(chim_debounce, NULL, "KWS Edge Learn Support",
+                   cmd_chim_debounce);
+SHELL_CMD_REGISTER(chim_thresh, NULL, "KWS Edge Learn Support",
+                   cmd_chim_thresh);
 
 SHELL_CMD_REGISTER(full_erase, NULL, "Erase flash: erase <size>",
                    cmd_full_erase);
