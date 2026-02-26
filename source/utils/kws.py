@@ -133,12 +133,39 @@ def generate_model_files_and_run_on_sw(args):
         input_shape = model_akida.input_shape
         print("Input shape of the Akida model:", input_shape)
 
+        output_shape = model_akida.output_shape
+        print("op shape of the Akida model:", output_shape)
+
+
         # Get program parts
         program_parts = model_akida.sequences[0].program_parts
         program = model_akida.sequences[0].program
         array_to_cpp('./model_files/kws/', program, 'kws_model')
         if program_parts.program_info is not None:
             array_to_cpp('./model_files/kws/', program_parts.program_info, 'kws_program_info')
+            file_path = "./model_files/kws/kws_program_info.h"
+
+            text_to_insert = (
+                f"#define NUM_NEURONS_PER_CLASS {args.neurons_per_class}\n"
+                f"#define NUM_CLASSES {int(output_shape[2]/int(args.neurons_per_class))}\n"
+                f"#define KWS_OUTPUT_SIZE {output_shape[2]}\n"
+                
+            )
+
+            with open(file_path, "r") as f:
+                lines = f.readlines()
+
+            # Keep original line endings from the string
+            new_lines = text_to_insert.splitlines(keepends=True)
+
+            # Insert before the last line
+            lines[-1:-1] = new_lines
+
+            with open(file_path, "w") as f:
+                f.writelines(lines)
+
+            print("Text inserted before last line successfully.")
+
             
         if program_parts.program_data is not None:
             array_to_cpp('./model_files/kws/', program_parts.program_data, 'kws_program_data')
