@@ -236,6 +236,13 @@ Use the following commands on the console:
 | `dmic_start` | Starts the dmic. |
 | `threads_stop` | Terminate all running threads for testing the WDT. |
 | `wdt_disable` | System crash for watchdog validation. |
+| `kws_el verbose 1` | enables the verbose for logs. |
+| `chim_alpha 0.85` | configuration for chiming alpha value. |
+| `chim_debounce 1000` | configuration for cooldown period (ms) after a trigger. |
+| `chim_thresh 0.5` | configuration for smoothed confidence required to trigger. |
+| `kernel thread list` | lists all registered threads. |
+
+
 
 __Inference mode__
  -  Default mode, in this mode it captures live audio data and shows the inferred class id.
