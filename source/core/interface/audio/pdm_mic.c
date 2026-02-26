@@ -14,6 +14,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
+
 #include <zephyr/sys_clock.h>
 
 #include <stdint.h>
@@ -27,26 +28,6 @@ K_MSGQ_DEFINE(audio_msgq, sizeof(struct audio_block), BLOCK_COUNT, 32);
 
 const struct device *dmic_dev = DEVICE_DT_GET(DT_NODELABEL(dmic_dev));
 
-static int16_t calculate_rms_dc_removed(int16_t *samples, uint32_t count) {
-  int64_t mean = 0;
-  uint64_t sum = 0;
-
-  /* Calculate DC offset */
-  for (uint32_t i = 0; i < count; i++) {
-    mean += samples[i];
-  }
-  mean /= (int64_t)count;
-
-  /* RMS after DC removal */
-  for (uint32_t i = 0; i < count; i++) {
-    int32_t s = (int32_t)samples[i] - (int32_t)mean;
-    sum += (uint64_t)(s * s);
-  }
-
-  float rms = sqrtf((float)sum / (float)count);
-  return (int16_t)rms;
-}
-
 typedef struct {
   int32_t prev_x;
   int32_t prev_y;
@@ -58,10 +39,22 @@ void dc_block_init(dc_block_t *s) {
   s->prev_x = 0;
   s->prev_y = 0;
 }
-
-void dc_block_process(dc_block_t *s, int16_t *x, int N) {
+/*
+Applies a DC blocking (high-pass) filter to a block of 16-bit PCM samples and
+computes the RMS value of the filtered signal. This function removes DC offset
+using a first-order IIR filter implemented in fixed-point (Q15) arithmetic,
+making it suitable for embedded DSP / audio pipelines. The filtering is
+performed in-place, meaning the input buffer is overwritten with filtered
+samples.
+*/
+static int dc_block_process(dc_block_t *s, int16_t *x, int N, float *rms) {
   const int32_t alpha = 32700; // ~0.998 in Q15
+  int64_t sum_sq = 0;          // for RMS
 
+  if (N <= 0) {
+    printk("no of samples passed is incorrect %d\n", N);
+    return -EFAILURE;
+  }
   for (int i = 0; i < N; i++) {
     int32_t y = x[i] - s->prev_x + ((alpha * s->prev_y) >> 15);
 
@@ -75,7 +68,16 @@ void dc_block_process(dc_block_t *s, int16_t *x, int N) {
       y = -32768;
 
     x[i] = (int16_t)y;
+
+    // RMS accumulation
+    sum_sq += (int32_t)x[i] * x[i];
   }
+
+  // Compute RMS
+  float mean = (float)sum_sq / N;
+  *rms = sqrtf(mean);
+
+  return SUCCESS;
 }
 
 int dmic_start(void) {
@@ -133,10 +135,15 @@ int dmic_init(void) {
   return SUCCESS;
 }
 
-int pdm_process(uint16_t *pcm, uint32_t passed_size) {
-  dc_block_process(&dc_state, pcm, passed_size);
+int dmic_process(uint16_t *pcm, uint32_t passed_size, float *p_rms_val) {
+  float rms_val = 0.0f;
+  int ret_val = -EFAILURE;
+  if (SUCCESS == dc_block_process(&dc_state, pcm, passed_size, &rms_val)) {
+    *p_rms_val = rms_val;
+    ret_val = SUCCESS;
+  }
 
-  return SUCCESS;
+  return ret_val;
 }
 
 extern int16_t orig_buf[];
