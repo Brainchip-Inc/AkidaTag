@@ -57,12 +57,7 @@ macro(add_cmsis_dsp TARGET)
     # ------------------------------------------------------------------
     # Required DSP sources (FFT / MFCC use case)
     # ------------------------------------------------------------------
-    target_sources(${TARGET} PRIVATE
-        #${CMSIS_DSP_DIR}/CMSIS/DSP/Source/CommonTables/arm_common_tables.c
-        #${CMSIS_DSP_DIR}/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_f32.c
-        #${CMSIS_DSP_DIR}/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_init_f32.c
-        #${CMSIS_DSP_DIR}/CMSIS/DSP/Source/TransformFunctions/arm_cfft_f32.c
-		
+    target_sources(${TARGET} PRIVATE	
 		${CMSIS_DSP_DIR}/CMSIS/DSP/Source/BasicMathFunctions/BasicMathFunctions.c
 		${CMSIS_DSP_DIR}/CMSIS/DSP/Source/BayesFunctions/BayesFunctions.c
 		${CMSIS_DSP_DIR}/CMSIS/DSP/Source/CommonTables/CommonTables.c
