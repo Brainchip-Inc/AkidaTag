@@ -60,9 +60,14 @@ extern "C" {
 #include "ble_services/file_transfer.h"
 #include "boot_manager.h"
 #include "error.h"
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 #include "imu_h/imu.h"
+#endif
 #include "littlefs_storage.h"
 #include "pdm_mic.h"
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+#include "watchdog_h/watchdog.h"
+#endif
 #ifdef __cplusplus
 }
 #endif
@@ -158,6 +163,12 @@ static uint32_t mesh_learn_weights_size = 0;
 
 /** Timestamp of last sample enqueued for learning */
 static uint32_t last_learn_ts = 0;
+
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+/** Handle for the watchdog device  */
+static const struct device *wdt;
+static int wdt_channel_id;
+#endif
 
 /**
  *  Pointer to individual novel class learn weights data.
@@ -307,10 +318,12 @@ const int64_t program_info_len[] = {mnist_program_info_len,
 
 int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
 
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 /* IMU thread variables*/
 K_THREAD_STACK_DEFINE(imu_stack, IMU_STACK_SIZE);
 struct k_thread imu_thread;
 k_tid_t imu_tid;
+#endif
 
 const struct device *wdt_dev; // Global watchdog device
 void kick_watchdog(void) {
@@ -706,7 +719,7 @@ static int initiate_kws_inference() {
   start_dmic_audio_proc();
   return SUCCESS;
 }
-
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 static int start_imu_proc(void) {
   imu_tid =
       k_thread_create(&imu_thread, imu_stack, IMU_STACK_SIZE, imu_data_thread,
@@ -717,9 +730,39 @@ static int start_imu_proc(void) {
   k_thread_start(imu_tid);
   return 0;
 }
+#endif
+void check_reset_reason(void) {
+  uint32_t reason = NRF_RESET->RESETREAS;
+
+  printk("Reset reason raw: 0x%08x\n", reason);
+
+  if (reason & RESET_RESETREAS_OFF_Msk) {
+    printk("Wakeup from System OFF\n");
+  }
+
+  if (reason & RESET_RESETREAS_RESETPIN_Msk) {
+    printk("Reset from RESET pin\n");
+  }
+
+  if (reason & RESET_RESETREAS_DOG0_Msk) {
+    printk("Reset from Watchdog 0\n");
+  }
+
+  if (reason & RESET_RESETREAS_DOG1_Msk) {
+    printk("Reset from Watchdog 1\n");
+  }
+
+  if (reason & RESET_RESETREAS_SREQ_Msk) {
+    printk("Reset from software reset\n");
+  }
+
+  /* Clear reset reason flags */
+  NRF_RESET->RESETREAS = reason;
+}
 
 int main(void) {
 
+  check_reset_reason();
   /* printk("App Core Version: %s\n", CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION); */
   /* Image IDs defined by MCUboot */
   print_image_version(FLASH_AREA_ID(image_0), "App Core");
@@ -777,6 +820,10 @@ int main(void) {
   start_imu_proc();
 #endif
 
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+  watchdog_init(&wdt, &wdt_channel_id);
+#endif
+
   // ... inside a function like main() or a separate initialization function
   printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
@@ -796,6 +843,11 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
   printk("CLI Worker: \n\r");
 
   while (1) {
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+    if (all_threads_healthy()) {
+      wdt_feed(wdt, wdt_channel_id);
+    }
+#endif
     prcess_led();
   }
 }
@@ -1229,6 +1281,66 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
 
   return 0;
 }
+
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+/**
+ * @brief CLI command to stop all worker threads.
+ *
+ * This shell command aborts all active worker threads using
+ * k_thread_abort(). The thread IDs are cleared after aborting.
+ *
+ * Once the worker threads are stopped:
+ *  - Health flags will no longer be updated
+ *  - all_threads_healthy() will return false
+ *  - Watchdog feeding will stop
+ *  - The system will reset after the watchdog timeout
+ *
+ * Usage:
+ *   threads_stop
+ *
+ * @param shell Pointer to the Zephyr shell instance.
+ * @param argc  Argument count (unused).
+ * @param argv  Argument vector (unused).
+ *
+ * @return 0 Always returns 0.
+ */
+static int cmd_threads_stop(const struct shell *shell, size_t argc,
+                            char **argv) {
+  bool any_thread_stopped = false;
+  shell_print(shell, "Stopping all worker threads...");
+
+  if (capture_tid) {
+    k_thread_abort(capture_tid);
+    capture_tid = NULL;
+    any_thread_stopped = true;
+  }
+
+  if (process_tid) {
+    k_thread_abort(process_tid);
+    process_tid = NULL;
+    any_thread_stopped = true;
+  }
+
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+  if (imu_tid) {
+    k_thread_abort(imu_tid);
+    imu_tid = NULL;
+    any_thread_stopped = true;
+  }
+#endif
+
+  if (!any_thread_stopped) {
+    shell_print(shell, "No threads have been initialized.");
+  } else {
+    shell_print(shell, "Threads stopped successfully.");
+  }
+
+  return 0;
+}
+
+SHELL_CMD_REGISTER(threads_stop, NULL, "Stop all worker threads",
+                   cmd_threads_stop);
+#endif
 
 SHELL_CMD_REGISTER(kws_el, NULL, "KWS Edge Learn Support", cmd_kws_el);
 

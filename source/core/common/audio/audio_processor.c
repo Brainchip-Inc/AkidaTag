@@ -1,17 +1,19 @@
 #include "audio_processor.h"
+#include "akd_spi_flash_handler.h"
 #include "error.h"
 #include "mfcc.h"
 #include "pdm_mic.h"
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+#include "watchdog_h/watchdog.h"
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
-
-#include "akd_spi_flash_handler.h"
-#include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
 
 /** Number of channels in audio capture = 1, as it is stereo data */
 #define N_CHANNELS_PER_SAMPLE (CONFIG_CHANNELS_PER_SAMPLE)
@@ -324,6 +326,9 @@ static void capture_raw_samples(size_t samples) {
 #endif
 
 void audio_process_thread(void *a, void *b, void *c) {
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+  wdt_enable_thread(AUDIO_PROCESS);
+#endif
   struct audio_block blk;
   printk("audio_process_thread:\n\r");
   uint32_t audio_process_thread_cntr = 0;
@@ -340,6 +345,10 @@ void audio_process_thread(void *a, void *b, void *c) {
     audio_processor();
 #endif
     audio_process_thread_cntr++;
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+    /* Mark thread as healthy */
+    atomic_set(&thread_health[AUDIO_PROCESS], 1);
+#endif
     // printk ("ap %d\n", audio_process_thread_cntr);
   }
 }
