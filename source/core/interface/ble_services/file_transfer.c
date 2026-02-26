@@ -80,8 +80,8 @@ uint32_t app_flash_offset = AKD_FLASH_OFFSET;
 static uint32_t expected_crc = 0;
 
 /* Define SRAM buffer in a named section */
-__attribute__((section(".sram_upload_buf"),
-               used)) uint8_t sram_upload_buffer[BUFFER_SIZE];
+__attribute__((section(".sram_upload_buf"), used))
+uint8_t sram_upload_buffer[BUFFER_SIZE];
 
 static void send_ack_to_host(uint8_t ack_code);
 static void ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,

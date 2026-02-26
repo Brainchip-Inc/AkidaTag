@@ -4,6 +4,9 @@
  */
 #include "pdm_mic.h"
 #include "error.h"
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+#include "watchdog_h/watchdog.h"
+#endif
 #include <math.h>
 #include <string.h>
 #include <zephyr/audio/dmic.h>
@@ -11,7 +14,6 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
-
 #include <zephyr/sys_clock.h>
 
 #include <stdint.h>
@@ -139,6 +141,9 @@ int pdm_process(uint16_t *pcm, uint32_t passed_size) {
 
 extern int16_t orig_buf[];
 void dmic_capture_thread(void *a, void *b, void *c) {
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+  wdt_enable_thread(DMIC_CAPTURE);
+#endif
   struct audio_block blk;
   printk("dmic_capture_thread: \n\r");
   uint32_t dmic_capture_thread_cntr = 0;
@@ -154,6 +159,10 @@ void dmic_capture_thread(void *a, void *b, void *c) {
       memcpy((void *)orig_buf, blk.data, blk.size);
       k_mem_slab_free(&mem_slab, blk.data);
       dmic_capture_thread_cntr++;
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+      /* Mark thread as healthy */
+      atomic_set(&thread_health[DMIC_CAPTURE], 1);
+#endif
       // printk ("dmic %d\n", dmic_capture_thread_cntr);
     }
   }

@@ -56,7 +56,6 @@ target_include_directories(app PRIVATE include
 )	
 
 target_sources(app PRIVATE
-	core/interface/imu/imu.c
 	core/interface/akd_spi_flash/akd_spi_flash.cpp
 	core/interface/akd_nrf_spi/nrf_spi.cpp
 	core/interface/akd_spi_flash/akd1500_spi_driver.cpp
@@ -71,7 +70,16 @@ target_sources(app PRIVATE
 	core/boot_manager.c
 	core/littlefs_storage.c
 )
-
+if(CONFIG_WDT_ENABLE)
+    target_sources(app PRIVATE
+        core/interface/watchdog/watchdog.c
+    )
+endif()
+if(CONFIG_IMU_ENABLE_THREAD)
+    target_sources(app PRIVATE
+        core/interface/imu/imu.c
+    )
+endif()
 set(EXTERNAL_GEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external)
 
 
