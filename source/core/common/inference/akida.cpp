@@ -5,6 +5,7 @@
 #include "akida/tensor.h"
 #include "error.h"
 #include "io_objects.h"
+#include <dsp/statistics_functions.h>
 
 uint8_t *current_program;
 static bool current_learn_en = false;
@@ -81,6 +82,26 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
     /** Get output buffer */
     auto out = akida::Tensor::ensure_dense(std::move(ret[0]));
     if (out && out->size() * sizeof(int) == (size_t)output_size) {
+      const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
+      memcpy(output, bytes_out, output_size);
+      return SUCCESS;
+    }
+  }
+  return -EFAILURE;
+}
+
+int akida_predict(uint8_t *input, uint32_t *input_dims, float *output,
+                  int output_size) {
+
+  akida::TensorConstPtr in = akida::Dense::create_view(
+      reinterpret_cast<const char *>(input), akida::TensorType::uint8,
+      {input_dims[0], input_dims[1], input_dims[2]},
+      akida::Dense::Layout::RowMajor);
+  auto ret = akd_device.predict({in});
+  if (ret.size()) {
+    /** Get output buffer */
+    auto out = akida::Tensor::ensure_dense(std::move(ret[0]));
+    if (out && out->size() * sizeof(float) == (size_t)output_size) {
       const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
       memcpy(output, bytes_out, output_size);
       return SUCCESS;
@@ -174,17 +195,42 @@ int akida_update_learn_weights(const uint32_t *weights_ptr, uint32_t size) {
   }
 }
 
-int32_t get_inferred_class(int32_t *result, int num_classes, int num_neurons) {
-  int32_t max_val = 0, max_index = -1, n_activations = 0;
-  n_activations = num_classes * num_neurons;
-  if (num_neurons > 0) {
-    for (int i = 0; i < n_activations; i++) {
-      if (result[i] > max_val) {
-        max_val = result[i];
-        max_index = i;
-      }
-    }
-    return (max_index / num_neurons);
+/**
+ * Compute softmax probabilities from logits
+ * input  - array of raw scores (logits)
+ * output - array where probabilities will be stored
+ * len    - number of classes
+ */
+
+void softmax(float *input, uint32_t len) {
+  if (len == 0 || input == NULL)
+    return;
+
+  float max_val;
+  uint32_t max_index;
+
+  // 1️. Find maximum value (for numerical stability)
+  arm_max_f32(input, len, &max_val, &max_index);
+
+  // 2️. Subtract max, exponentiate, and accumulate sum
+  float sum = 0.0f;
+  for (uint32_t i = 0; i < len; i++) {
+    input[i] = expf(input[i] - max_val);
+    sum += input[i];
   }
-  return -EFAILURE;
+
+  // 3️. Prevent divide-by-zero (very rare, but safe)
+  if (sum == 0.0f) {
+    float uniform = 1.0f / (float)len;
+    for (uint32_t i = 0; i < len; i++) {
+      input[i] = uniform;
+    }
+    return;
+  }
+
+  // 4️. Normalize to probabilities
+  float inv_sum = 1.0f / sum;
+  for (uint32_t i = 0; i < len; i++) {
+    input[i] *= inv_sum;
+  }
 }

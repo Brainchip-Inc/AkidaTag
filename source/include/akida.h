@@ -78,6 +78,22 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
                   int output_size);
 
 /**
+ * Execute an inference on input data pointed by input pointer argument by
+ * calling predict function of HardwareDeviceImpl class and store the float
+ * output data at address pointed by output pointer argument.
+ *
+ * @param input the input data to send to inference
+ * @param input_dims the input data dimensions will hold the size of the input
+ * data
+ * @param output the buffer where output data are stored
+ * @param output_size the size of the output buffer
+ *
+ * @return SUCCESS if expected output size matches else error code
+ */
+int akida_predict(uint8_t *input, uint32_t *input_dims, float *output,
+                  int output_size);
+
+/**
  * Learn input
  *
  * @param input the input data to send to inference learn
@@ -157,6 +173,26 @@ int akida_update_learn_weights(const uint32_t *weights_ptr, uint32_t size);
  */
 uint32_t akida_learn_mem_size(void);
 
-int32_t get_inferred_class(int32_t *result, int num_classes, int num_neurons);
+void softmaxf32(float *input, uint32_t size, float thresh, uint8_t n_classes);
+
+void softmax(float *input, uint32_t len);
+
+template <typename T>
+uint32_t predict_class(T softmax_output[], uint32_t num_classes,
+                       uint32_t num_neurons) {
+  uint32_t predicted_index = 0;
+  uint32_t n_activations = num_classes * num_neurons;
+
+  // Initialise max_prob with the first element of the array
+  T max_prob = softmax_output[0];
+
+  for (uint32_t i = 1; i < n_activations; i++) {
+    if (softmax_output[i] > max_prob) {
+      max_prob = softmax_output[i];
+      predicted_index = i;
+    }
+  }
+  return predicted_index;
+}
 
 #endif //__AKIDA_H__
