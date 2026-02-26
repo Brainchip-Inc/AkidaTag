@@ -140,6 +140,12 @@ dmic_dev: &pdm0 {
 };
 
 / {
+    aliases {
+        watchdog = &wdt;
+    };
+};
+
+/ {
     gpios {
 		compatible = "gpio-keys";
 		akdsleep: akdsleep {
