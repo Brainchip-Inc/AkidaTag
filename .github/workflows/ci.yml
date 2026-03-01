@@ -1,50 +1,26 @@
-name: Spark NCS CI
+name: HIL_Test
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
+  hardware-test:
+    runs-on: self-hosted
 
     steps:
-      - name: Free disk space
-        run: |
-          echo "Before cleanup:"
-          df -h
+      - uses: actions/checkout@v4
 
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache
-          docker system prune -af || true
-
-          echo "After cleanup:"
-          df -h
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u sarans1415 --password-stdin
-
-      - name: Pull Docker Image
-        run: docker pull ghcr.io/sarans1415/spark-ncs:v3.1.1-py3.12
-
-      - name: Build demo_apps using run.sh
+      - name: Generate Signing Key
         run: |
           chmod +x scripts/run.sh
-          ./scripts/run.sh -d ghcr.io/sarans1415/spark-ncs:v3.1.1-py3.12 -b --app demo_apps
+          ./scripts/run.sh -d --key
+        
+      - name: Build and Flash
+        run: |
+          chmod +x scripts/run.sh
+          ./scripts/run.sh -d -b -f --app demo_apps
 
-      - name: Upload Firmware Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: demo_apps_firmware
-          path: |
-            build_docker/demo_apps/source/zephyr/*.hex
-            build_docker/demo_apps/source/zephyr/*.bin
-            build_docker/demo_apps/source/zephyr/*.elf
+      - name: Run CLI Test
+        run: |
+          ./scripts/run.sh -d -t

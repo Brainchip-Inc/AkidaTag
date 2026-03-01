@@ -1,6 +1,7 @@
 # ignore folder
 samples/*
 zephyrproject
+tools/*
 build*
 source/external/*
 
@@ -8,6 +9,8 @@ source/external/*
 *JLink_Linux_V888_x86_64.deb
 
 # safety
+.env/*
+*.pem
 *.key
 
 # but allow

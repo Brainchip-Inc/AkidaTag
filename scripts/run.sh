@@ -124,7 +124,8 @@ case "$(uname -s)" in
 esac
 
 BUILD_DIR="${BUILD_DIR:-}"
-
+DO_CLI_TEST=false
+CLI_PORT="/dev/ttyUSB0"
 # -----------------------------------------------------------------------------
 # Funcitons
 # -----------------------------------------------------------------------------
@@ -195,6 +196,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -r|--reset) DO_RESET=true; shift;;
         -h|--help) print_help; exit 0;;
+        -t|--cli-test)
+            DO_CLI_TEST=true
+            shift
+            ;;
         *) echo "Unknown option $1"; shift;;
     esac
 done
@@ -209,7 +214,7 @@ if $DO_SHELL && ! $DOCKER; then
 fi
 
 # If not shell/minicom, require at least one action: build/flash/bin
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]&& ! $DO_CLI_TEST; then
     echo "Nothing to do: pass --build and/or --flash and/or --bin, and/or --key or use --shell / --minicom"
     exit 1
 fi
@@ -230,7 +235,9 @@ if [[ -n "$MODEL_BIN" && ! -f "$MODEL_BIN" ]]; then
     echo "Error: --bin file not found: $MODEL_BIN"
     exit 1
 fi
-
+if $DO_CLI_TEST; then
+    DOCKER_RUN_BASE+=(--device "${CLI_PORT}:${CLI_PORT}")
+fi
 # -----------------------------------------------------------------------------
 # BLE needed?
 #   - if --bin present (sending model), OR
@@ -259,8 +266,12 @@ DOCKER_RUN_BASE=(
     -e USER_UID="$HOST_UID"
     -e USER_GID="$HOST_GID"
     -e CCACHE_DIR="/home/demo/.ccache"
-    -it
 )
+
+# Add interactive mode only if terminal exists
+if [ -t 1 ]; then
+    DOCKER_RUN_BASE+=(-it)
+fi
 
 if $IS_LINUX; then
   DOCKER_RUN_BASE+=(--device /dev/bus/usb:/dev/bus/usb)
@@ -301,7 +312,10 @@ if $DO_MINICOM; then
     "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" minicom -D "$MINICOM_DEV"
     exit $?
 fi
-
+CLI_TEST_CMD=""
+if $DO_CLI_TEST; then
+    CLI_TEST_CMD="python source/utils/hil_test.py --port ${CLI_PORT}"
+fi
 # -----------------------------------------------------------------------------
 # SHELL MODE (interactive)
 # NOTE: -it MUST be before the image name
@@ -436,6 +450,7 @@ declare -a STEPS=()
 $DO_BUILD && STEPS+=("$BUILD_CMD")
 $DO_FLASH && STEPS+=("$FLASH_CMD")
 [[ -n "$SEND_MODEL_CMD" ]] && STEPS+=("$SEND_MODEL_CMD")
+[[ -n "$CLI_TEST_CMD" ]] && STEPS+=("$CLI_TEST_CMD")
 
 if [[ ${#STEPS[@]} -eq 0 ]]; then
   echo "Nothing to do"
