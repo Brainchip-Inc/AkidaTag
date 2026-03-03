@@ -781,6 +781,14 @@ void check_reset_reason(void) {
   /* Clear reset reason flags */
   NRF_RESET->RESETREAS = reason;
 }
+/**
+ * @brief Create and start the LED indication thread.
+ *
+ * This function creates the LED indication thread with the configured
+ * stack size and priority.
+ *
+ * @return 0 on successful thread creation and start.
+ */
 static int start_led_ind(void) {
   led_tid =
       k_thread_create(&led_thread, led_stack, LED_STACK_SIZE, led_ind_thread,
@@ -811,13 +819,13 @@ int main(void) {
   ble_init();
   akida_spiflash_init();
 
-  // const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
+  const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
 
-  // if (!device_is_ready(qspi)) {
-  //   printk("QSPI not ready\n");
-  // } else {
-  //   printk("QSPI device ready: %s \n", qspi->name);
-  // }
+  if (!device_is_ready(qspi)) {
+    printk("QSPI not ready\n");
+  } else {
+    printk("QSPI device ready: %s \n", qspi->name);
+  }
   int err = storage_init();
   if (err != 0) {
     printk("LittleFS mount failed %d", err);

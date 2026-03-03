@@ -1,6 +1,12 @@
 #include "led/led_init.h"
 #include <zephyr/sys/atomic.h>
 
+/*
+ * Global semaphore used to synchronize the LED indication thread with
+ * dmic_capture_thread
+ */
+K_SEM_DEFINE(led_sem, 0, 1);
+
 /* GPIO specs */
 static const struct gpio_dt_spec red_led =
     GPIO_DT_SPEC_GET(RED_LED_NODE, gpios);
@@ -109,14 +115,22 @@ int32_t led_init(void) {
  * State behavior:
  * - NORMAL_APP        : Green slow blink (2s), Red OFF
  * - BLE_CONNECTED     : Green ON, Red OFF
- * - FOTA_RECEIVING    : Green ON, Red fast blink (500ms)
+ * - MODEL_RECEIVING   : Green ON, Red fast blink (500ms)
  * - FLASH_WRITE       : Green ON, Red ON
- * - VERIFICATION      : Green OFF, Red slow blink (2s)
  * - UPDATE_SUCCESS    : Both LEDs blink 3 times, then
  *                       restore runtime state based on BLE status
  * - UPDATE_FAILED     : Green OFF, Red ON
  *
- * The thread runs indefinitely with LED_TICK_MS timing base.
+ * Synchronization:
+ * The thread waits for a signal from DMIC thread using a semaphore.
+ * If the semaphore is given (k_sem_give), the LED thread wakes immediately
+ * and updates the LED state. If no signal is received within LED_TICK_MS,
+ * the wait call times out and the LED thread continues execution using the
+ * timeout as a fallback timing mechanism.
+ *
+ * This allows the LED logic to operate in two modes:
+ * 1) Synchronized with DMIC thread (when a signal is provided)
+ * 2) Independently using a periodic timeout if that thread is not running
  *
  * @param a Unused
  * @param b Unused
@@ -125,12 +139,15 @@ int32_t led_init(void) {
 
 void led_ind_thread(void *a, void *b, void *c) {
   if (led_init() < 0) {
+    printk("LED init failed\n");
     return;
   }
 
   uint32_t tick = 0;
 
   while (1) {
+    /* Wait for a signal from DMIC thread to update the LED state. */
+    k_sem_take(&led_sem, K_MSEC(LED_TICK_MS));
 
     led_state_t state = atomic_get(&current_state);
 
@@ -152,7 +169,7 @@ void led_ind_thread(void *a, void *b, void *c) {
       red_led_off();
       break;
 
-    case LED_STATE_FOTA_RECEIVING:
+    case LED_STATE_MODEL_RECEIVING:
       /* LED1: ON, LED2: Fast blink (500ms) */
       green_led_on();
       if ((tick / 2) % 2 == 0)
@@ -165,15 +182,6 @@ void led_ind_thread(void *a, void *b, void *c) {
       /* LED1: ON, LED2: ON */
       green_led_on();
       red_led_on();
-      break;
-
-    case LED_STATE_VERIFICATION:
-      /* LED1: OFF, LED2: Slow blink */
-      green_led_off();
-      if ((tick / 10) % 2 == 0)
-        red_led_on();
-      else
-        red_led_off();
       break;
 
     case LED_STATE_UPDATE_SUCCESS: {
@@ -217,7 +225,6 @@ void led_ind_thread(void *a, void *b, void *c) {
     }
 
     tick++;
-    k_msleep(LED_TICK_MS);
   }
 }
 /**

@@ -215,7 +215,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
   ble_pgm_offset += len;
 
   total_received += len;
-  led_set_state(LED_STATE_FOTA_RECEIVING);
+  led_set_state(LED_STATE_MODEL_RECEIVING);
   LOG_INF("Rx B %d, len %d\n", total_received, len);
 
   if (ble_pgm_offset == BUFFER_SIZE || total_received == total_pgm_size) {

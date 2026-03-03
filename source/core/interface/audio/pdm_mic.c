@@ -7,7 +7,9 @@
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 #include "watchdog_h/watchdog.h"
 #endif
+#include "led/led_init.h"
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 #include <zephyr/audio/dmic.h>
 #include <zephyr/kernel.h>
@@ -15,8 +17,6 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys_clock.h>
-
-#include <stdint.h>
 
 atomic_t is_dmic_start;
 
@@ -164,6 +164,14 @@ void dmic_capture_thread(void *a, void *b, void *c) {
       }
       memcpy((void *)orig_buf, blk.data, blk.size);
       k_mem_slab_free(&mem_slab, blk.data);
+      /*
+       * Signal the LED indication thread every 2 cycles of the DMIC capture
+       * loop. The DMIC thread runs every ~60 ms, so triggering on every second
+       * cycle generates a ~120 ms event used by the LED thread for timing.
+       */
+      if (dmic_capture_thread_cntr % 2 == 0) {
+        k_sem_give(&led_sem);
+      }
       dmic_capture_thread_cntr++;
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
       /* Mark thread as healthy */

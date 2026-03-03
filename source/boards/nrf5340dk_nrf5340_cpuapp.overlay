@@ -137,7 +137,7 @@ dmic_dev: &pdm0 {
     pinctrl-1 = <&spi2_sleep>;
     pinctrl-names = "default", "sleep";
     cs-gpios = <&gpio1 7 GPIO_ACTIVE_LOW>,  /* CS for AKIDA */
-               <&gpio0 12 GPIO_ACTIVE_LOW>;  /* CS for AKIDA flash */
+               <&gpio0 12 GPIO_ACTIVE_LOW>;  /* CS for AKIDA flash (CS pin for AKIDA flash changed to pin p0.12 according to schematic)*/
 
     /* camera device at index 0 */
     akd: akd@0 {

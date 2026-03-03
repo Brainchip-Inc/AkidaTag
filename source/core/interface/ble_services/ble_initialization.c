@@ -7,11 +7,11 @@ LOG_MODULE_REGISTER(ble_initilaization, CONFIG_LOG_DEFAULT_LEVEL);
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 
-// #define RUN_STATUS_LED DK_LED1
-// #define CON_STATUS_LED DK_LED2
+#define RUN_STATUS_LED DK_LED1
+#define CON_STATUS_LED DK_LED2
 #define RUN_LED_BLINK_INTERVAL 1000
 
-// #define USER_LED DK_LED3
+#define USER_LED DK_LED3
 
 #define USER_BUTTON DK_BTN1_MSK
 
@@ -52,14 +52,12 @@ static void connected_ble(struct bt_conn *conn, uint8_t err) {
     LOG_INF("Security level 4 requested - pairing should start\n");
   }
 #endif
-  // dk_set_led_on(CON_STATUS_LED);
 }
 
 static void disconnected_ble(struct bt_conn *conn, uint8_t reason) {
   LOG_INF("Disconnected_ble (reason %u)\n", reason);
   led_set_state(LED_STATE_NORMAL_APP);
   ble_connection_callback(BLE_NOT_CONNECTED);
-  // dk_set_led_off(CON_STATUS_LED);
 }
 
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED
@@ -130,12 +128,12 @@ static struct bt_conn_auth_cb conn_auth_callbacks;
 static struct bt_conn_auth_info_cb conn_auth_info_callbacks;
 #endif
 #ifdef CONFIG_DK_BOARD
-// static void app_led_cb(bool led_state) { dk_set_led(USER_LED, led_state); }
+static void app_led_cb(bool led_state) { dk_set_led(USER_LED, led_state); }
 
 static bool app_button_cb(void) { return app_button_state; }
 
 static struct bt_lbs_cb lbs_callbacs = {
-    // .led_cb = app_led_cb,
+    .led_cb = app_led_cb,
     .button_cb = app_button_cb,
 };
 
@@ -171,11 +169,11 @@ int ble_init(void)
 
 #ifdef CONFIG_DK_BOARD
 
-  // err = dk_leds_init();
-  // if (err) {
-  //   LOG_ERR("LEDs init failed (err %d)\n", err);
-  //   return -1;
-  // }
+  err = dk_leds_init();
+  if (err) {
+    LOG_ERR("LEDs init failed (err %d)\n", err);
+    return -1;
+  }
 
   err = init_button();
   if (err) {
@@ -237,7 +235,7 @@ int ble_init(void)
 
 void prcess_led(void) {
 #ifdef CONFIG_DK_BOARD
-  // dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
+  dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
 #endif
   k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 }
