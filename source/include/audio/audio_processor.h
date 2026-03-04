@@ -30,7 +30,7 @@ int audio_processor_init(int samplerate);
  * @param mfcc_len  length of mfcc, which effects audio buffer length
  * @param cb callback function pointer invoked on a valid mfcc
  */
-int audio_processor_start(bool is_stream, q7_t *spectrogram_buff,
+int audio_processor_start(bool is_stream, float *spectrogram_buff,
                           uint8_t *spectrogram_dims, int mfcc_len,
                           inference_cb_t cb);
 

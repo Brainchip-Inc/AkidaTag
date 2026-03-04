@@ -11,5 +11,6 @@ extern const akida::Shape kws_inputs_shape;
 extern const akida::TensorType kws_inputs_type;
 
 extern const char *const kws_tags[];
+extern const char *const kws_new_tags[];
 
 #endif // AKIDA_KWS_INPUTS_DATA_H_

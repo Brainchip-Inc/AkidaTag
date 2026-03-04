@@ -30,7 +30,7 @@
 #include "akida.h"
 #include "akida/hardware_device.h"
 #include "io_objects.h"
-#include "kws/kws_program_info.h"
+#include "kws_new/kws_program_info.h"
 #include "mnist/mnist_program_info.h"
 #include "nrf_spi.h"
 #include "sample_input/kws/kws_inputs.h"
@@ -78,14 +78,16 @@ KWS - 1
 MNIST - 0
 */
 
+static void reset_kws_spectrogram(void);
+
 /** Input batch size, picked an arbitrary value */
 #define INPUT_BATCH_SIZE (CONFIG_BATCH_SIZE)
 #define GET_SEC_TO_USEC(x) (x * 1000000)
 
+#define AKIDA_FREQUENCY_MHZ 400
+
 #define SAMPLING_RATE CONFIG_SAMPLING_RATE
 
-#define NUM_CLASSES 36
-#define NUM_NEURONS_PER_CLASS 15
 #define MFCC_SAMPLE_COUNT CONFIG_MFCC_SAMPLE_COUNT
 
 #define NUM_INA_BUFF (2)
@@ -148,7 +150,7 @@ static struct kws_demo_params {
             DEFAULT_LEARNING_DELAY, DEFAULT_API_SELECTION_ASYNC,
             DEFAULT_INFERENCE_SAMPLE_THRESHOLD};
 
-static int verbose_on = 0;
+int verbose_on = 0;
 /** Current state of the application */
 static uint32_t cur_kws_edge_state = STATE_STOPPED;
 /** Current novel class id, selected for learning*/
@@ -220,7 +222,7 @@ static uint8_t *base_labels_wts_ptr = NULL;
 
 /** Spectrogram holding the required spectrogram for inference (prior to
   normalization) */
-static q7_t __aligned(4) spectrogram[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
+static float __aligned(4) spectrogram[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
 /** spectrogram dimensions */
 static uint8_t __aligned(4) spectrogram_dims[2] = {SPECTROGRAM_COUNT,
                                                    SPECTROGRAM_RES};
@@ -306,7 +308,7 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 };
 
 #define VALID_PROGRAM_DATA_MNIST 0xD8130700
-#define VALID_PROGRAM_DATA_KWS 0xF4020100 // 0x64d70000
+#define VALID_PROGRAM_DATA_KWS 0x24D20000 // 0xF4020100 // 0x64d70000
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
 const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
@@ -356,9 +358,11 @@ bool check_program_data(int offset, int len, int app_index_l) {
 
 // int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
 
-int64_t time_ms() { return k_uptime_get(); }
+extern "C" int64_t time_ms() { return k_uptime_get(); }
 
-void msleep(uint32_t duration) { k_sleep(K_MSEC(duration)); }
+extern "C" void msleep(uint32_t duration) { k_sleep(K_MSEC(duration)); }
+
+extern "C" void reset_spectrogram_index(void);
 
 void panic(const char *format, ...) {
   va_list args;
@@ -376,10 +380,10 @@ static bool kws_model_present = false;
  * @param mode  - mode to be switched to.
  */
 static void switch_mode(int mode);
-
+float mfcc_fs = 123.56967163085938f;
 void do_inference(int spectrogram_index) {
   __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
-  q7_t min = 127;
+  /*q7_t min = 127;
   q7_t max = -128;
   int32_t energy = 0;
   int32_t energies[SPECTROGRAM_COUNT + 1];
@@ -401,7 +405,7 @@ void do_inference(int spectrogram_index) {
                                                : -spectrogram[idx][j];
     }
     energy += energies[i];
-  }
+  }*/
 
   /* It has been experimentally determined that when we talk on the mic,
    * the energy goes above 666, and the first bin of the MFCC spectrogram
@@ -410,42 +414,35 @@ void do_inference(int spectrogram_index) {
    */
   // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
   // energy, spectrogram[(25 + spectrogram_index) % SPECTROGRAM_COUNT][0]);
-  if ((energy > params.energy_threshold) &&
+  /*if ((energy > params.energy_threshold) &&
       (spectrogram[(25 + spectrogram_index) % SPECTROGRAM_COUNT][0] >
-       params.bin0_threshold))
+       params.bin0_threshold))*/
 
-  {
+  // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
+  // energy, spectrogram_index);
+  if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
+    /* Generate model input where whole spectrogram is normalized
+       between 0 and 255 */
+    for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
+      int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
+      for (int j = 0; j < SPECTROGRAM_RES; j++) {
+        float normalized = ((spectrogram[idx][j] / mfcc_fs) + 1.0) * 128.0;
+        if (normalized < 0.0f)
+          normalized = 0.0f;
+        else if (normalized > 255.0f)
+          normalized = 255.0f;
 
-    // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
-    // energy, spectrogram_index);
-    if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
-      /* Generate model input where whole spectrogram is normalized
-         between 0 and 255 */
-      for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
-        int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
-        for (int j = 0; j < SPECTROGRAM_RES; j++) {
-          akida_input[i][j] =
-              (uint8_t)((int)255 * ((int)spectrogram[idx][j] - (int)min) /
-                        ((int)max - (int)min));
-        }
-      }
-
-      // memcpy ((uint8_t*) akida_input, &kws_inputs[0], 490);
-      // printk ("do_inference cur_kws_edge_state %d \n", cur_kws_edge_state);
-      kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
-                                                        (uint32_t *)dims);
-      if (verbose_on) {
-        printk("Spectrogram params max=%d energy=%d spectrogram_index=%d", max,
-               energy, spectrogram_index);
+        akida_input[i][j] = (uint8_t)normalized;
       }
     }
 
-    else {
-      // printk ("on_mfcc_output is NULL on cur_kws_edge_state = %d\n",
-      // cur_kws_edge_state);
-    }
+    // memcpy ((uint8_t*) akida_input, &kws_inputs[0], 490);
+    // printk ("do_inference cur_kws_edge_state %d \n", cur_kws_edge_state);
+    kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
+                                                      (uint32_t *)dims);
+  }
 
-  } else if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
+  if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
     uint32_t cur_ts = k_cycle_get_32();
     uint32_t last_learn_duration = (uint32_t)(cur_ts - last_learn_ts);
     uint64_t duration_us = k_cyc_to_us_floor64(last_learn_duration);
@@ -504,7 +501,7 @@ static int start_dmic_audio_proc(void) {
   audio_processor_init(SAMPLING_RATE);
 
   int is_audio_started =
-      audio_processor_start(false, (q7_t *)spectrogram, spectrogram_dims,
+      audio_processor_start(false, (float *)spectrogram, spectrogram_dims,
                             MFCC_SAMPLE_COUNT, do_inference);
   if (is_audio_started == EFAILURE) {
     printk("audio_processor not started\n");
@@ -690,29 +687,30 @@ static void read_learn_weights_from_flash(void) {
 }
 
 static int initiate_kws_inference() {
-  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
-  mesh_learn_weights_size = akida_learn_mem_size();
 
-  printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
+  /*  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
+    mesh_learn_weights_size = akida_learn_mem_size();
 
-  /* allocating memory for structure (this will hold crc, size etc ) + learn
-   * weights data together to place them in contiguous locations */
-  saved_learn_weights_ptr = (saved_learn_weights *)malloc(
-      sizeof(saved_learn_weights) + mesh_learn_weights_size);
+    printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
 
-  base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
+    // allocating memory for structure (this will hold crc, size etc ) + learn
+    // weights data together to place them in contiguous locations
+    saved_learn_weights_ptr = (saved_learn_weights *)malloc(
+        sizeof(saved_learn_weights) + mesh_learn_weights_size);
 
-  if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
-    printk("dynamic memory allocation failed for weights data and hence "
-           "application is not "
-           "running ");
-    return -EFAILURE;
-  }
-  /* initialize the learn_weights_mem structure */
-  reset_saved_weights();
-  // init_learn_weights_mem(mesh_learn_weights_size);
+    base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
 
-  read_learn_weights_from_flash();
+    if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
+      printk("dynamic memory allocation failed for weights data and hence "
+             "application is not "
+             "running ");
+      return -EFAILURE;
+    }
+    // initialize the learn_weights_mem structure
+    reset_saved_weights();
+    // init_learn_weights_mem(mesh_learn_weights_size);
+
+    read_learn_weights_from_flash();*/
 
   cur_kws_edge_state = STATE_INFERENCE;
 
@@ -803,10 +801,22 @@ int main(void) {
   } else {
     printk("model is already present \n");
     // program the model info part to AKD1500
-
+    akd_device.toggle_clock_counter(true);
     printk("Programming the model\n");
+
+    uint32_t s_dma_cycls = akd_device.read_clock_counter();
+    uint64_t start_time = time_ms();
+
     akida_program_flash((uint8_t *)program_info[1], program_info_len[1],
                         flash_offsets[1]);
+    uint32_t prog_time = time_ms() - start_time;
+    uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+    uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
+
+    printk("\n model program time= %u dma cycles, dma time = %d us, cpu time = "
+           "%u ms \n\r",
+           delta_cycle, dma_time, prog_time);
+
     akd_device.set_batch_size(1, true);
     kws_model_present = true;
   }
@@ -852,21 +862,56 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
   }
 }
 
+#define DEBOUNCE_COOLDOWN_MS 1000 // Cooldown period after a trigger
+
+uint32_t kws_debount_time = DEBOUNCE_COOLDOWN_MS;
+bool feature_buff_full = false;
+uint64_t last_trigger_time_ms = 0ULL;
+extern "C" void reset_stale_inference_data(void) {
+  reset_kws_spectrogram();
+  if (verbose_on) {
+    printk("clearing the stale inference data\n\r");
+  }
+  return;
+}
+
+extern "C" uint8_t is_kws_debounce_complete(void) {
+  uint8_t is_debounce = 0;
+  /* DEBOUNCING (Preventing multiple rapid triggers)*/
+  if ((time_ms() - last_trigger_time_ms) > kws_debount_time)
+    is_debounce = 1;
+
+  return is_debounce;
+}
+
+extern "C" void set_feature_buff_full(void) { feature_buff_full = 1; }
+
+extern "C" uint8_t is_feature_buff_full(void) { return feature_buff_full; }
+
+static void reset_kws_spectrogram(void) {
+  memset(spectrogram, 0, SPECTROGRAM_COUNT * SPECTROGRAM_RES);
+  // feature_buff_full = false;
+  reset_spectrogram_index();
+}
 static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   int ret = 0;
   static int last_found = -1, same_count = 0;
 
   if (params.sync_api == 0) {
 
-    uint32_t cur_ts = k_cycle_get_32();
+    uint64_t start_time = time_ms();
+    uint32_t s_dma_cycls = akd_device.read_clock_counter();
 
     if (SUCCESS == akida_forward(input, input_shape, (uint8_t *)akida_output,
                                  sizeof(akida_output))) {
-
-      uint64_t inf_time = k_cyc_to_us_floor64((k_cycle_get_32() - cur_ts));
-      if (verbose_on)
-        printk("inf_time = %" PRIu64 " us\n", inf_time);
-
+      uint32_t inf_time = time_ms() - start_time;
+      uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+      uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
+      if (verbose_on) {
+        printk("\n\rinference time= %u dma cycles, dma time = %d us, cpu time "
+               "= %u ms\n\r",
+               delta_cycle, dma_time, inf_time);
+      }
       int found =
           get_inferred_class(akida_output, NUM_CLASSES, NUM_NEURONS_PER_CLASS);
 
@@ -882,7 +927,9 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         if (same_count >= params.infer_threshold) {
           current_class = found;
           printk("\nClass : %d\n", found);
-          printk("Word : %s\n", kws_tags[found]);
+          printk("Word : %s\n", kws_new_tags[found]);
+          reset_kws_spectrogram();
+          last_trigger_time_ms = time_ms();
           same_count = 0;
         }
       }
@@ -1265,7 +1312,6 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
     if (argc > 2 && !strcmp(argv[1], "verbose")) {
       verbose_on = atoi(argv[2]);
-      audio_processor_set_verbose(verbose_on);
     } else if (!strcmp(argv[1], "stop")) {
       cur_kws_edge_state = STATE_STOPPED;
       audio_processor_stop();
