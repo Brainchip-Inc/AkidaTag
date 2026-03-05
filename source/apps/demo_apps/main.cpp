@@ -71,6 +71,12 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
+
+// Extern variables for audio processor configuration
+extern int rms_threshold;
+extern int g_min_inference_frames;
+extern int speech_active_time_ms;
+
 void cli_worker_proc_thread(void *a, void *b, void *c);
 /*
 FLash offset indices
@@ -381,6 +387,20 @@ static bool kws_model_present = false;
  */
 static void switch_mode(int mode);
 float mfcc_fs = 123.56967163085938f;
+
+// KWS class definitions
+#define KWS_SILENCE_CLASS 10
+#define KWS_UNKNOWN_CLASS 11
+
+// Sliding window score smoothing parameters
+#define SCORE_WINDOW_SIZE 5
+#define SCORE_THRESHOLD 0.6f
+int score_window_size = SCORE_WINDOW_SIZE;
+float score_threshold = SCORE_THRESHOLD;
+
+// Metrics mode: show confidence and timing details on keyword detection
+int metrics_on = 0;
+
 void do_inference(int spectrogram_index) {
   __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
   /*q7_t min = 127;
@@ -862,9 +882,9 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
   }
 }
 
-#define DEBOUNCE_COOLDOWN_MS 1000 // Cooldown period after a trigger
+#define DEBOUNCE_COOLDOWN_MS 300 // Cooldown period after a trigger (changed from 1000ms)
 
-uint32_t kws_debount_time = DEBOUNCE_COOLDOWN_MS;
+uint32_t kws_debounce_time = DEBOUNCE_COOLDOWN_MS;
 bool feature_buff_full = false;
 uint64_t last_trigger_time_ms = 0ULL;
 extern "C" void reset_stale_inference_data(void) {
@@ -878,7 +898,7 @@ extern "C" void reset_stale_inference_data(void) {
 extern "C" uint8_t is_kws_debounce_complete(void) {
   uint8_t is_debounce = 0;
   /* DEBOUNCING (Preventing multiple rapid triggers)*/
-  if ((time_ms() - last_trigger_time_ms) > kws_debount_time)
+  if ((time_ms() - last_trigger_time_ms) > kws_debounce_time)
     is_debounce = 1;
 
   return is_debounce;
@@ -889,13 +909,14 @@ extern "C" void set_feature_buff_full(void) { feature_buff_full = 1; }
 extern "C" uint8_t is_feature_buff_full(void) { return feature_buff_full; }
 
 static void reset_kws_spectrogram(void) {
-  memset(spectrogram, 0, SPECTROGRAM_COUNT * SPECTROGRAM_RES);
+  memset(spectrogram, 0, sizeof(spectrogram));
   // feature_buff_full = false;
   reset_spectrogram_index();
 }
 static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   int ret = 0;
-  static int last_found = -1, same_count = 0;
+  static int class_history[SCORE_WINDOW_SIZE] = {-1, -1, -1, -1, -1};
+  static int history_idx = 0;
 
   if (params.sync_api == 0) {
 
@@ -916,22 +937,59 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
           get_inferred_class(akida_output, NUM_CLASSES, NUM_NEURONS_PER_CLASS);
 
       if (found == -1) {
-        printk("get_inferred_class failure\n");
-        return -1;
-      }
-      if (last_found != found) {
-        last_found = found;
-        same_count = 1;
-      } else {
-        same_count++;
-        if (same_count >= params.infer_threshold) {
-          current_class = found;
-          printk("\nClass : %d\n", found);
-          printk("Word : %s\n", kws_new_tags[found]);
-          reset_kws_spectrogram();
-          last_trigger_time_ms = time_ms();
-          same_count = 0;
+        if (verbose_on) {
+          printk("no class detected (zero activations)\n\r");
         }
+        return 0;
+      }
+
+      if (found == KWS_SILENCE_CLASS || found == KWS_UNKNOWN_CLASS) {
+        if (verbose_on) {
+          printk("suppressed: %s\n\r", kws_new_tags[found]);
+        }
+        return 0;
+      }
+
+      // Sliding window score smoothing
+      class_history[history_idx % score_window_size] = found;
+      history_idx++;
+
+      // Compute smoothing score for this class
+      int match_count = 0;
+      for (int i = 0; i < score_window_size; i++) {
+        if (class_history[i] == found) match_count++;
+      }
+      float score = (float)match_count / score_window_size;
+
+      if (verbose_on) {
+        printk("class=%d (%s) score=%.2f\n\r", found, kws_new_tags[found], score);
+      }
+
+      if (score >= score_threshold) {
+        current_class = found;
+        // Compute softmax confidence over class-level spike sums
+        float class_sums[NUM_CLASSES] = {0};
+        for (int c = 0; c < NUM_CLASSES; c++)
+          for (int n = 0; n < NUM_NEURONS_PER_CLASS; n++)
+            class_sums[c] += (float)akida_output[c * NUM_NEURONS_PER_CLASS + n];
+        float max_sum = class_sums[0];
+        for (int c = 1; c < NUM_CLASSES; c++)
+          if (class_sums[c] > max_sum) max_sum = class_sums[c];
+        float exp_sum = 0.0f;
+        for (int c = 0; c < NUM_CLASSES; c++)
+          exp_sum += expf(class_sums[c] - max_sum);
+        float confidence = (exp_sum > 0.0f) ? expf(class_sums[found] - max_sum) / exp_sum : 0.0f;
+
+        printk("\nKeyword Detected: %s\n\r", kws_new_tags[found]);
+        if (metrics_on) {
+          printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
+                 confidence * 100.0f, score, inf_time, dma_time);
+        }
+        // Clear history so next word starts fresh
+        memset(class_history, -1, sizeof(class_history));
+        history_idx = 0;
+        reset_kws_spectrogram();
+        last_trigger_time_ms = time_ms();
       }
     } else {
       printk("akida_forward failure\n");
@@ -1312,6 +1370,7 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
     if (argc > 2 && !strcmp(argv[1], "verbose")) {
       verbose_on = atoi(argv[2]);
+      printk("verbose_on = %d\n\r", verbose_on);
     } else if (!strcmp(argv[1], "stop")) {
       cur_kws_edge_state = STATE_STOPPED;
       audio_processor_stop();
@@ -1320,8 +1379,56 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
         printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
         kws_edge_state[cur_kws_edge_state].on_user_input(atoi(argv[2]));
       }
+    } else if (argc > 2 && !strcmp(argv[1], "rms")) {
+      rms_threshold = atoi(argv[2]);
+      printk("rms_threshold = %d\n\r", rms_threshold);
+    } else if (argc > 2 && !strcmp(argv[1], "debounce")) {
+      kws_debounce_time = atoi(argv[2]);
+      printk("kws_debounce_time = %lu ms\n\r", kws_debounce_time);
+    } else if (argc > 2 && !strcmp(argv[1], "window")) {
+      score_window_size = atoi(argv[2]);
+      if (score_window_size < 1) score_window_size = 1;
+      if (score_window_size > SCORE_WINDOW_SIZE) score_window_size = SCORE_WINDOW_SIZE;
+      printk("score_window_size = %d\n\r", score_window_size);
+    } else if (argc > 2 && !strcmp(argv[1], "score")) {
+      score_threshold = atof(argv[2]);
+      if (score_threshold < 0.0f) score_threshold = 0.0f;
+      if (score_threshold > 1.0f) score_threshold = 1.0f;
+      printk("score_threshold = %.2f\n\r", score_threshold);
+    } else if (argc > 2 && !strcmp(argv[1], "min_frames")) {
+      g_min_inference_frames = atoi(argv[2]);
+      if (g_min_inference_frames < 1) g_min_inference_frames = 1;
+      printk("g_min_inference_frames = %d\n\r", g_min_inference_frames);
+    } else if (argc > 2 && !strcmp(argv[1], "speech")) {
+      speech_active_time_ms = atoi(argv[2]);
+      printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
+    } else if (argc > 2 && !strcmp(argv[1], "metrics")) {
+      metrics_on = atoi(argv[2]);
+      printk("metrics_on = %d\n\r", metrics_on);
+    } else if (!strcmp(argv[1], "show")) {
+      printk("\n\r=== KWS Parameters ===\n\r");
+      printk("verbose_on = %d\n\r", verbose_on);
+      printk("rms_threshold = %d\n\r", rms_threshold);
+      printk("kws_debounce_time = %lu ms\n\r", kws_debounce_time);
+      printk("score_window_size = %d\n\r", score_window_size);
+      printk("score_threshold = %.2f\n\r", score_threshold);
+      printk("g_min_inference_frames = %d\n\r", g_min_inference_frames);
+      printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
+      printk("metrics_on = %d\n\r", metrics_on);
+      printk("====================\n\r");
     } else {
-      printk("incorrect command \n\r");
+      printk("KWS Commands:\n\r");
+      printk("  kws_el verbose <0|1>\n\r");
+      printk("  kws_el rms <threshold>\n\r");
+      printk("  kws_el debounce <ms>\n\r");
+      printk("  kws_el window <n>\n\r");
+      printk("  kws_el score <0.0-1.0>\n\r");
+      printk("  kws_el min_frames <n>\n\r");
+      printk("  kws_el speech <ms>\n\r");
+      printk("  kws_el metrics <0|1>\n\r");
+      printk("  kws_el show\n\r");
+      printk("  kws_el stop\n\r");
+      printk("  kws_el evt <n>\n\r");
     }
   }
 
