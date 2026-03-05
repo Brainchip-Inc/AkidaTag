@@ -268,6 +268,64 @@ __Learning mode__
  - In this mode it captures live audio data and use it for training the selected class.
  - Application continues to stay in **__Learning** mode until user switches the mode or if no valid samples are available for last 5 sec. In the later case, application switches from **__Learning ---> __Learn_select** after waiting for 5 sec.
 
+### KWS Pipeline Configuration Commands
+
+The `kws_el` command provides runtime configuration for the KWS (Keyword Spotting) pipeline:
+
+| Command | Default | Description |
+| --- | --- | --- |
+| `kws_el verbose <0\|1>` | 0 | Enable/disable verbose logging (shows per-inference class and voting score) |
+| `kws_el rms <threshold>` | 550 | Set RMS energy threshold for speech detection (higher = less sensitive) |
+| `kws_el debounce <ms>` | 300 | Set debounce cooldown after keyword detection (prevents rapid re-triggers) |
+| `kws_el window <n>` | 5 | Set sliding window size for score smoothing (1–5) |
+| `kws_el score <f>` | 0.60 | Set trigger threshold as fraction of matching inferences (0.0–1.0) |
+| `kws_el min_frames <n>` | 16 | Set minimum frames needed before inference starts (~320ms at default) |
+| `kws_el speech <ms>` | 1300 | Set maximum speech duration window (silence resets state if exceeded) |
+| `kws_el metrics <0\|1>` | 0 | Enable/disable detailed metrics output (confidence %, voting score, timing) |
+| `kws_el show` | — | Print all current KWS parameters |
+
+#### Keyword Detection Output
+
+**Default (metrics disabled):**
+```
+Keyword Detected: up
+```
+
+**With metrics enabled (kws_el metrics 1):**
+```
+Keyword Detected: up
+  confidence=98.5% vote=1.00 cpu=45ms dma=112us
+```
+
+Where:
+- `confidence` — Softmax-based SNN confidence score (0–100%)
+- `vote` — Sliding window voting score (fraction of recent matches)
+- `cpu` — Inference execution time in milliseconds
+- `dma` — Akida DMA cycle time in microseconds
+
+#### Tuning Guide
+
+**Quieter room (more sensitive):**
+```
+kws_el rms 400     (lower threshold detects quieter speech)
+```
+
+**Stricter detection (fewer false positives):**
+```
+kws_el window 3
+kws_el score 0.67  (2 of 3 matches required instead of 3 of 5)
+```
+
+**Faster debounce (allowing repeated keywords):**
+```
+kws_el debounce 200
+```
+
+**Faster first detection:**
+```
+kws_el min_frames 10  (detection ~200ms instead of ~320ms)
+```
+
 
 
 
