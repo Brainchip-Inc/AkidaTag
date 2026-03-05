@@ -24,9 +24,8 @@
 
 #include "mfcc.h"
 #include "error.h"
-#include "float.h"
 #include "string.h"
-#include <arm_math.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <zephyr/kernel.h>
@@ -41,7 +40,6 @@ static kiss_fftr_cfg kiss_cfg;
 static int num_mfcc_features;
 static int frame_len;
 static int frame_len_padded;
-static int mfcc_dec_bits;
 static float *frame;
 static float *buffer;
 static float *mel_energies;
@@ -50,7 +48,6 @@ static int32_t *fbank_filter_first;
 static int32_t *fbank_filter_last;
 static float **mel_fbank;
 static float *dct_matrix;
-static arm_rfft_fast_instance_f32 *rfft;
 
 static float *create_dct_matrix(int32_t input_length,
                                 int32_t coefficient_count);
@@ -65,10 +62,9 @@ static inline float MelScale(float freq) {
   return 1127.0f * logf(1.0f + freq / 700.0f);
 }
 
-int mfcc_init(int features, int len, int dec_bits, float _samplerate) {
+int mfcc_init(int features, int len, float _samplerate) {
   num_mfcc_features = features;
   frame_len = len;
-  mfcc_dec_bits = dec_bits;
   samplerate = _samplerate;
 
   // Round-up to nearest power of 2.
@@ -132,16 +128,6 @@ int mfcc_init(int features, int len, int dec_bits, float _samplerate) {
   // create DCT matrix
   dct_matrix = create_dct_matrix(NUM_FBANK_BINS, num_mfcc_features);
 
-  // initialize FFT
-  bytes = sizeof(arm_rfft_fast_instance_f32);
-  rfft = (arm_rfft_fast_instance_f32 *)malloc(bytes);
-  if (!rfft) {
-    printk("mfcc_init: rfft alloc failed\n");
-    return EFAILURE;
-  }
-
-  memset(rfft, 0, bytes);
-  // arm_rfft_fast_init_f32(rfft, frame_len_padded);
   return 0;
 }
 
@@ -153,7 +139,6 @@ void mfcc_deinit() {
   free(fbank_filter_first);
   free(fbank_filter_last);
   free(dct_matrix);
-  free(rfft);
   for (int i = 0; i < NUM_FBANK_BINS; i++)
     free(mel_fbank[i]);
   free(mel_fbank);
@@ -166,8 +151,7 @@ float *create_dct_matrix(int32_t input_length, int32_t coefficient_count) {
     printk("create_dct_matrix: M alloc failed\n");
     return NULL;
   }
-  float normalizer;
-  arm_sqrt_f32(2.0f / (float)input_length, &normalizer);
+  float normalizer = sqrtf(2.0f / (float)input_length);
   for (k = 0; k < coefficient_count; k++) {
     for (n = 0; n < input_length; n++) {
       M[k * input_length + n] =
@@ -283,7 +267,6 @@ void mfcc_compute(const int16_t *audio_data, float *mfcc_out) {
   // buffer[0] = first_energy;
   // buffer[half_dim] = last_energy;
 
-  float sqrt_data;
   // Apply mel filterbanks
   for (bin = 0; bin < NUM_FBANK_BINS; bin++) {
     j = 0;
@@ -299,10 +282,6 @@ void mfcc_compute(const int16_t *audio_data, float *mfcc_out) {
           buffer[i] * mel_fbank[bin][j++]; // use power spectrum directly
     }
     mel_energies[bin] = mel_energy;
-
-    // avoid log of zero
-    if (mel_energy == 0.0f)
-      mel_energies[bin] = FLT_MIN;
   }
 
   // Take log
@@ -321,14 +300,6 @@ void mfcc_compute(const int16_t *audio_data, float *mfcc_out) {
       sum += dct_matrix[i * NUM_FBANK_BINS + j] * mel_energies[j];
     }
 
-    // Input is Qx.mfcc_dec_bits (from quantization step)
-    sum *= (0x1 << mfcc_dec_bits);
-    sum = round(sum);
-    /*if (sum >= 127)
-      mfcc_out[i] = 127;
-    else if (sum <= -128)
-      mfcc_out[i] = -128;
-    else*/
     mfcc_out[i] = sum;
   }
 }
