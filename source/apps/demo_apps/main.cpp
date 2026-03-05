@@ -446,7 +446,7 @@ void do_inference(int spectrogram_index) {
     for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
       int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
       for (int j = 0; j < SPECTROGRAM_RES; j++) {
-        float normalized = ((spectrogram[idx][j] / mfcc_fs) + 1.0) * 128.0;
+        float normalized = ((spectrogram[idx][j] / mfcc_fs) + 1.0f) * 128.0f;
         if (normalized < 0.0f)
           normalized = 0.0f;
         else if (normalized > 255.0f)
@@ -882,7 +882,8 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
   }
 }
 
-#define DEBOUNCE_COOLDOWN_MS 300 // Cooldown period after a trigger (changed from 1000ms)
+#define DEBOUNCE_COOLDOWN_MS                                                   \
+  300 // Cooldown period after a trigger (changed from 1000ms)
 
 uint32_t kws_debounce_time = DEBOUNCE_COOLDOWN_MS;
 bool feature_buff_full = false;
@@ -957,12 +958,14 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       // Compute smoothing score for this class
       int match_count = 0;
       for (int i = 0; i < score_window_size; i++) {
-        if (class_history[i] == found) match_count++;
+        if (class_history[i] == found)
+          match_count++;
       }
       float score = (float)match_count / score_window_size;
 
       if (verbose_on) {
-        printk("class=%d (%s) score=%.2f\n\r", found, kws_new_tags[found], score);
+        printk("class=%d (%s) score=%.2f\n\r", found, kws_new_tags[found],
+               score);
       }
 
       if (score >= score_threshold) {
@@ -974,11 +977,14 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
             class_sums[c] += (float)akida_output[c * NUM_NEURONS_PER_CLASS + n];
         float max_sum = class_sums[0];
         for (int c = 1; c < NUM_CLASSES; c++)
-          if (class_sums[c] > max_sum) max_sum = class_sums[c];
+          if (class_sums[c] > max_sum)
+            max_sum = class_sums[c];
         float exp_sum = 0.0f;
         for (int c = 0; c < NUM_CLASSES; c++)
           exp_sum += expf(class_sums[c] - max_sum);
-        float confidence = (exp_sum > 0.0f) ? expf(class_sums[found] - max_sum) / exp_sum : 0.0f;
+        float confidence = (exp_sum > 0.0f)
+                               ? expf(class_sums[found] - max_sum) / exp_sum
+                               : 0.0f;
 
         printk("\nKeyword Detected: %s\n\r", kws_new_tags[found]);
         if (metrics_on) {
@@ -1247,7 +1253,6 @@ int infer(int app_index_l) {
 
   akd_device.toggle_clock_counter(true);
 
-  uint32_t inf_complete = 0;
   uint32_t s_dma_cycls = 0;
   uint64_t s_tick = 0;
   uint64_t e_tick = 0;
@@ -1384,20 +1389,25 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
       printk("rms_threshold = %d\n\r", rms_threshold);
     } else if (argc > 2 && !strcmp(argv[1], "debounce")) {
       kws_debounce_time = atoi(argv[2]);
-      printk("kws_debounce_time = %lu ms\n\r", kws_debounce_time);
+      printk("kws_debounce_time = %u ms\n\r", kws_debounce_time);
     } else if (argc > 2 && !strcmp(argv[1], "window")) {
       score_window_size = atoi(argv[2]);
-      if (score_window_size < 1) score_window_size = 1;
-      if (score_window_size > SCORE_WINDOW_SIZE) score_window_size = SCORE_WINDOW_SIZE;
+      if (score_window_size < 1)
+        score_window_size = 1;
+      if (score_window_size > SCORE_WINDOW_SIZE)
+        score_window_size = SCORE_WINDOW_SIZE;
       printk("score_window_size = %d\n\r", score_window_size);
     } else if (argc > 2 && !strcmp(argv[1], "score")) {
       score_threshold = atof(argv[2]);
-      if (score_threshold < 0.0f) score_threshold = 0.0f;
-      if (score_threshold > 1.0f) score_threshold = 1.0f;
+      if (score_threshold < 0.0f)
+        score_threshold = 0.0f;
+      if (score_threshold > 1.0f)
+        score_threshold = 1.0f;
       printk("score_threshold = %.2f\n\r", score_threshold);
     } else if (argc > 2 && !strcmp(argv[1], "min_frames")) {
       g_min_inference_frames = atoi(argv[2]);
-      if (g_min_inference_frames < 1) g_min_inference_frames = 1;
+      if (g_min_inference_frames < 1)
+        g_min_inference_frames = 1;
       printk("g_min_inference_frames = %d\n\r", g_min_inference_frames);
     } else if (argc > 2 && !strcmp(argv[1], "speech")) {
       speech_active_time_ms = atoi(argv[2]);
@@ -1409,7 +1419,7 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
       printk("\n\r=== KWS Parameters ===\n\r");
       printk("verbose_on = %d\n\r", verbose_on);
       printk("rms_threshold = %d\n\r", rms_threshold);
-      printk("kws_debounce_time = %lu ms\n\r", kws_debounce_time);
+      printk("kws_debounce_time = %u ms\n\r", kws_debounce_time);
       printk("score_window_size = %d\n\r", score_window_size);
       printk("score_threshold = %.2f\n\r", score_threshold);
       printk("g_min_inference_frames = %d\n\r", g_min_inference_frames);
