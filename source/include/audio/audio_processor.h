@@ -61,4 +61,9 @@ void audio_process_thread(void *a, void *b, void *c);
 #define SPECTROGRAM_COUNT 49
 #define SPECTROGRAM_RES 10
 
+// Configurable audio processor parameters
+extern int rms_threshold;
+extern int g_min_inference_frames;
+extern int speech_active_time_ms;
+
 #endif

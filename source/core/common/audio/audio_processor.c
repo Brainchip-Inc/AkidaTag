@@ -15,12 +15,14 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
 
-#define RMS_THREASHOLD 550
-int rms_threashold = RMS_THREASHOLD;
+#define RMS_THRESHOLD 550
+int rms_threshold = RMS_THRESHOLD;
 #define SPEECH_IDLE 0
 #define SPEECH_ACTIVE 1
-#define SPEECH_ACTIVE_TIME_MS 1300
+int speech_active_time_ms = 1300;
+int g_min_inference_frames = 16;
 static atomic_t g_inference_period = 3;
+static int g_frames_since_reset = 0;
 /** Number of channels in audio capture = 1, as it is stereo data */
 #define N_CHANNELS_PER_SAMPLE (CONFIG_CHANNELS_PER_SAMPLE)
 /** Number of bytes in each sample */
@@ -72,7 +74,10 @@ extern uint8_t is_feature_buff_full(void);
 extern void reset_stale_inference_data(void);
 extern int64_t time_ms();
 
-void reset_spectrogram_index(void) { state->spectrogram_index = 0; }
+void reset_spectrogram_index(void) {
+  state->spectrogram_index = 0;
+  g_frames_since_reset = 0;
+}
 
 /**
  * @brief Push an MFCC transform to the running spectrogram.
@@ -89,6 +94,7 @@ static int spectrogram_push(float *data, int spectrogram_index) {
   }
 
   spectrogram_index++;
+  g_frames_since_reset++;
   if (spectrogram_index >= state->spectrogram_len) {
     set_feature_buff_full();
     spectrogram_index = 0;
@@ -172,7 +178,7 @@ int audio_processor(void) {
 
   mfcc_process_input(input, g_mfcc_input);
 
-  if (is_feature_buff_full()) {
+  if (g_frames_since_reset >= g_min_inference_frames) {
 
     if ((ap_counter % g_inference_period) == 0) {
       state->inference_cb(state->spectrogram_index);
@@ -265,7 +271,7 @@ void audio_process_thread(void *a, void *b, void *c) {
   size_t samples;
   float rms_val = 0.0f;
   int speech_state = SPEECH_IDLE;
-  uint64_t speach_start_time = 0;
+  uint64_t speech_start_time = 0;
   while (1) {
 
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
@@ -292,22 +298,22 @@ void audio_process_thread(void *a, void *b, void *c) {
     /* remove DC offset and compute RMS based on compute_rms, flag */
     else if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
       /* ok to lose fraction part resolution, comparing with int value only */
-      if (((int)rms_val >= rms_threashold)) {
+      if (((int)rms_val >= rms_threshold)) {
         speech_state = SPEECH_ACTIVE;
 
-        speach_start_time = time_ms();
+        speech_start_time = time_ms();
         if (verbose_on) {
-          printk("rms_threashold %f\n\r", rms_val);
+          printk("rms_threshold %f\n\r", rms_val);
         }
 
       } else if (speech_state == SPEECH_IDLE) {
 
         /* do not process as state is idle */
         continue;
-      } else if ((time_ms() - speach_start_time) > SPEECH_ACTIVE_TIME_MS) {
+      } else if ((time_ms() - speech_start_time) > speech_active_time_ms) {
         /* If the speech state is active and control reaches this point, it
          * means that the rms_val has remained below the threshold for
-         * SPEECH_ACTIVE_TIME_MS. This indicates that no valid speech command
+         * speech_active_time_ms. This indicates that no valid speech command
          * was detected. Therefore, the system transitions back to the IDLE
          * state and clears any stale inference data */
         speech_state = SPEECH_IDLE;
