@@ -45,9 +45,9 @@ typedef struct {
   int spectrogram_index; /* Index of the circular spectrogram buffer */
 } audio_processor_state_t;
 
-__aligned(32) q7_t
-    g_mfccdata[sizeof(q7_t) * SPECTROGRAM_RES]; /* local data structure to hold
-                                                   MFCCs computed */
+__aligned(32) float
+    g_mfccdata[SPECTROGRAM_RES]; /* local data structure to hold
+                                    MFCCs computed */
 __aligned(32) int16_t g_mfcc_input[N_BYTES_PER_SAMPLE * BLOCK_SAMPLES *
                                    N_CHANNELS_PER_SAMPLE * N_CAP_PER_BUFF];
 __aligned(32) int16_t orig_buf[N_BYTES_PER_SAMPLE * BLOCK_SAMPLES *
@@ -80,7 +80,7 @@ void reset_spectrogram_index(void) { state->spectrogram_index = 0; }
  * @param data The MFCC data (expected to be mfcc_len )
  * @param spectrogram_index starting index of circular spectrogram buffer
  */
-static int spectrogram_push(q7_t *data, int spectrogram_index) {
+static int spectrogram_push(float *data, int spectrogram_index) {
   float *spectrogram_buff;
   spectrogram_buff =
       state->spectrogram_buff + (spectrogram_index * state->nmfcc);
@@ -209,7 +209,7 @@ int audio_processor_start(bool single, float *spectrogram_buff,
   _state.spectrogram_buff = spectrogram_buff;
 
   int ret =
-      mfcc_init(_state.nmfcc, mfcc_hop_len * 2, 1, (float)_state.samplerate);
+      mfcc_init(_state.nmfcc, mfcc_hop_len * 2, (float)_state.samplerate);
   if (ret == EFAILURE) {
     printk("mfcc_init failure\n\r ");
     return EFAILURE;
