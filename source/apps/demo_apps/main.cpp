@@ -30,7 +30,7 @@
 #include "akida.h"
 #include "akida/hardware_device.h"
 #include "io_objects.h"
-#include "kws_new/kws_program_info.h"
+#include "kws/kws_program_info.h"
 #include "mnist/mnist_program_info.h"
 #include "nrf_spi.h"
 #include "sample_input/kws/kws_inputs.h"
