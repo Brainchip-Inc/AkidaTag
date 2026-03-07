@@ -17,7 +17,7 @@ def run_dmic_test(port, baudrate=115200, timeout=10):
         # Clear any old buffer
         ser.reset_input_buffer()
 
-        command = "imu_set 5 3 5 1 5 5 8\n"
+        command = "imu_start 5 3 5 1 5 5 8\n"
         print(f"Sending command: {command.strip()}")
         ser.write(command.encode())
 
