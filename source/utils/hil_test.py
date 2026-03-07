@@ -32,7 +32,7 @@ def run_dmic_test(port, baudrate=115200, timeout=10):
                 print(f"RX: {line}")
                 response_buffer += line + "\n"
 
-                if "IMU started" in line.lower():
+                if "imu started" in line.lower():
                     print("IMU TEST PASSED")
                     ser.close()
                     return 0
