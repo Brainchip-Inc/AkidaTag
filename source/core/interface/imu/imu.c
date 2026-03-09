@@ -574,7 +574,7 @@ static int32_t cmd_imu_start(const struct shell *shell, size_t argc,
                              char **argv) {
   if (argc != 8) {
     shell_print(shell, "Usage:\n"
-                       "imu_set <acc_odr> <acc_fs> "
+                       "imu_start <acc_odr> <acc_fs> "
                        "<gyro_odr> <gyro_fs> "
                        "<fifo_acc_odr> <fifo_gyro_odr> "
                        "<watermark>");

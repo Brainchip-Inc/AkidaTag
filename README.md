@@ -25,6 +25,35 @@ This project works with the following devices:
 
 ---
 
+### Hardware-in-the-Loop (HIL) CI Testing
+
+- This repository uses a self-hosted GitHub Actions runner to perform automated Hardware-in-the-Loop (HIL) validation during pull requests.
+- When a pull request is raised against the `main` branch, the CI pipeline automatically triggers the following steps:
+  - Build the firmware using the provided build environment.
+  - Flash the generated firmware to the connected hardware board.
+  - Execute CLI-based validation tests.
+
+### IMU CLI Validation
+
+- The CLI test is executed using a Python script.
+- The script opens the serial interface (e.g., `/dev/ttyUSB0`) connected to the device.
+- The following command is sent to the device:
+
+  `imu_start 5 3 5 1 5 5 8`
+
+- The script waits for the expected response from the device:
+
+  `imu_start done`
+
+- If the expected response is received within the defined timeout, the test is marked as **PASS**.
+- If the response is not received, the test is marked as **FAIL**, and the CI pipeline fails.
+
+### Requirements
+
+- Self-hosted GitHub runner configured for the repository.
+- Hardware board connected to the runner machine via USB.
+- Serial interface access available (e.g., `/dev/ttyUSB0`).
+
 ## Repository Structure
 
 ```text
