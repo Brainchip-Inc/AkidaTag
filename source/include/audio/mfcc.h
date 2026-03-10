@@ -1,6 +1,6 @@
 #ifndef __MFCC_H__
 #define __MFCC_H__
-#include <arm_math.h>
+#include <stdint.h>
 #define NUM_FBANK_BINS 40
 #define MEL_LOW_FREQ 20
 #define MEL_HIGH_FREQ 4000
@@ -9,11 +9,11 @@
  *
  * @param features number of features extracted in the output
  * @param len length of the input buffers
- * @param dec_bits decimation
+ * @param _samplerate audio sample rate
  *
  * @return 0 if success
  */
-int mfcc_init(int features, int len, int dec_bits, float _samplerate);
+int mfcc_init(int features, int len, float _samplerate);
 
 /**
  * Release mfcc allocated memory
@@ -26,6 +26,6 @@ void mfcc_deinit();
  * @param audio_data the input audio data
  * @param mfcc_out the mfcc output data
  */
-void mfcc_compute(const int16_t *audio_data, q7_t *mfcc_out);
+void mfcc_compute(const int16_t *audio_data, float *mfcc_out);
 
 #endif
