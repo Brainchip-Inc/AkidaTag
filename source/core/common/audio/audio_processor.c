@@ -15,10 +15,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
 
-#include "akd_spi_flash_handler.h"
 #include "ble_services/file_transfer.h"
-#include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
 
 #include "akd_spi_flash_handler.h"
 #include "ble_services/file_transfer.h"

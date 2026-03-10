@@ -839,6 +839,7 @@ int main(void) {
   printk("Akida TAG Application\n");
   confirm_image_if_needed();
   init_setting_sub_system();
+  shared_buf_init();
   file_transfer_init();
   ble_init();
   akida_spiflash_init();

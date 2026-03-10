@@ -11,6 +11,10 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
 #include <zephyr/sys/printk.h>
+
+// Define an event object used for SRAM buffer synchronization
+K_EVENT_DEFINE(sram_buf_event);
+
 LOG_MODULE_REGISTER(file_transfer, CONFIG_LOG_DEFAULT_LEVEL);
 
 static ssize_t get_app_index(struct bt_conn *conn,
@@ -210,6 +214,20 @@ ssize_t get_app_index(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 ssize_t file_transfer_write(struct bt_conn *conn,
                             const struct bt_gatt_attr *attr, const void *buf,
                             uint16_t len, uint16_t offset, uint8_t flags) {
+
+  /* --- Signal buffer is BUSY ---
+   * The BUF_EVENT_FREE flag is cleared so the camera thread cannot use the
+   * buffer. The camera thread blocks in k_event_wait() until BUF_EVENT_FREE is
+   * posted again. The camera thread does not own or post any events; it only
+   * waits for the buffer to become available.
+   */
+
+  // Clear the BUF_EVENT_FREE flag before using the buffer
+  k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
+  // Mark the SRAM buffer as busy so other tasks cannot access it
+  k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
+  LOG_INF("sram_upload_buffer claimed by model update");
+
   memcpy(&sram_upload_buffer[ble_pgm_offset], buf, len);
 
   ble_pgm_offset += len;
@@ -242,10 +260,18 @@ ssize_t file_transfer_write(struct bt_conn *conn,
         total_received = 0;
         app_flash_offset = 0;
         ble_pgm_offset = 0;
-
+        /* Error: release buffer — camera unblocks */
+        k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+        k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+        LOG_INF("sram_upload_buffer released (CRC error)\n");
         return -1;
-      } else
+      } else {
+        /* Success: release buffer — camera unblocks */
+        k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+        k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+        LOG_INF("sram_upload_buffer released (write complete)\n");
         LOG_INF("CRC check passed\n");
+      }
     }
     led_set_state(LED_STATE_FLASH_WRITE);
     spi_flash_write_helper_func((uint8_t *)sram_upload_buffer, app_flash_offset,
@@ -257,6 +283,10 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     if (total_received == total_pgm_size && crc_ctx.crc_ok) {
 
       if (akida_program_infer() != 0) {
+        /* Error: release buffer — camera unblocks */
+        k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+        k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+        LOG_INF("sram_upload_buffer released (akida error)\n");
         /*there is an error here*/
         led_set_state(LED_STATE_UPDATE_FAILED);
         LOG_ERR("akida model program/inference failed\n");
@@ -269,6 +299,10 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     }
   } else if (ble_pgm_offset > BUFFER_SIZE) {
     ble_pgm_offset = 0;
+    /* Error: release buffer — camera unblocks */
+    k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+    k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+    LOG_INF("sram_upload_buffer released (buffer overflow)\n");
     LOG_ERR("Data exceeds buffer size %d\n", BUFFER_SIZE);
   }
   return len;
@@ -322,4 +356,26 @@ void send_ack_to_host(uint8_t ack_code) {
   } else {
     LOG_INF("ACK (0x%02X) sent to central\n", ack_code);
   }
+}
+/**
+ * @brief Initialize the shared SRAM buffer event.
+ *
+ * This function initializes the event flags used for synchronizing access
+ * to the shared SRAM buffer between camera and model update.
+ *
+ * The function performs the following steps:
+ * - Clears any previously set (stale) event flags.
+ * - Sets the initial state of the buffer as FREE.
+ *
+ * After initialization, the camera thread is allowed to access and use
+ * the buffer until another module marks it as BUSY.
+ */
+void shared_buf_init(void) {
+  /* Clear any stale bits */
+  k_event_clear(&sram_buf_event, BUF_EVENT_FREE | BUF_EVENT_BUSY);
+
+  /* Initial state: buffer is FREE — camera is allowed to proceed */
+  k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+
+  printk("sram_buf: initialized, buffer is FREE\n");
 }

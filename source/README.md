@@ -202,7 +202,12 @@ The script plots accelerometer and gyroscope data in real time.
 Ensure matplotlib and pyserial are installed before running.
 
 ### SPI CAMERA
-The SPI Camera module enables continuous image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (16 MHz, MSB-first, with a dedicated CS pin) to communicate with the camera. On startup, it performs full sensor initialization and reset, then configures ISP settings (brightness, contrast, saturation, sharpness, white balance, EV) and applies manual exposure and gain values.
+The SPI Camera module enables image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with a dedicated CS pin) to communicate with the camera. On startup, it performs full sensor initialization and reset, then configures ISP settings (brightness, contrast, saturation, sharpness, white balance, EV) and applies manual exposure and gain values.
+
+Frame acquisition follows a **demand  model**. Each frame capture is initiated explicitly using a `FIFO_START` command, allowing frames to be requested only when needed. Multiple frames can be requested in quick succession when higher capture throughput is required.
+
+The capture process is **synchronous** (blocking). After initiating a capture, the software waits for completion by polling the `CAP_DONE` flag. During this period, the calling thread waits until the frame capture is finished.
+
 
 ## Supported Resolutions
 
@@ -217,13 +222,43 @@ Frames are captured based on a CLI command. Due to RAM constraints, only two res
 
 ## Frame Timing
 
-| Event 				  				  | Time 	       	   |
-|-----------------------------------------|--------------------|
-| First frame ready (from `camera_start`) | ~1116 ms (average) |
-| Each frame — 96×96 resolution 	  	  | ~64 ms	           |
-| Each frame — 128×128 resolution 	  	  | ~100 ms            |
+| Event 				  				  			 | Time 	       	  |
+|------------------------------------------------------------|--------------------|
+| First frame ready — 96x96(from `camera_start`)  	      | ~956 ms (average)  |
+| First frame ready — 128x128(from `camera_start`)	      | ~1042 ms (average) |
+| Execution time of the capture_rgb() function
+			 — 96×96 resolution 	  	  			 | ~22 ms	            |
+| Execution time of the capture_rgb() function
+			 — 128×128 resolution 	  	  			 | ~36 ms             |
+
+Sensor Capture Time
+The time was calculated based on the duration the firmware waits for the CAP_DONE_MASK flag to be set. The measurement was verified using CRO.
+
+Resolution	Capture Time
+|-----------------------|
+96×96		~50 µs
+128×128		~50 µs
+
+SPI Transfer Time
+Measured time required to transfer image data from the camera FIFO to the MCU using SPI @8 MHz.
+
+Resolution			Data Size	SPI Transfer Time
+|-------------------------------------------------|
+ 96×96 (RGB565)		~18 KB		~18 ms
+ 128×128 (RGB565)	     ~32 KB		~33 ms
+
+Image Conversion Time
+
+Resolution	Conversion Time
+|--------------------------|
+ 96×96		~3 ms
+ 128×128	     ~5 ms
 
 The first-frame timer starts when the `camera_start` shell command is issued. This includes the warm-up sequence (3 discarded frames) before the first valid frame is delivered.
+
+### SRAM Upload Buffer
+
+`sram_upload_buffer` is a shared memory buffer used between the camera capture thread and the model update process. Access to this buffer is synchronized using a Zephyr `k_event` to ensure that only one module uses the buffer at a time. The buffer state is controlled using `BUF_EVENT_FREE` and `BUF_EVENT_BUSY` flags to prevent concurrent access and data corruption.
 
 ## Frame Output
 

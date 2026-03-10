@@ -16,6 +16,13 @@ the application after transfer completes.
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/types.h>
 
+/* Event bits */
+#define BUF_EVENT_FREE BIT(0) /* buffer is free  — camera can proceed */
+#define BUF_EVENT_BUSY BIT(1) /* model update in progress — camera waits */
+
+/* Shared event used to synchronize access to the SRAM buffer between threads */
+extern struct k_event sram_buf_event;
+
 #define SRAM_BUFFER_SIZE CONFIG_SRAM_BUFFER_SIZE
 extern uint8_t sram_upload_buffer[];
 /**
@@ -25,4 +32,6 @@ extern uint8_t sram_upload_buffer[];
  */
 int file_transfer_init(void);
 
+/* Initializes the SRAM buffer event and sets the buffer state to FREE */
+void shared_buf_init(void);
 #endif /* FILE_TRANSFER_H_ */

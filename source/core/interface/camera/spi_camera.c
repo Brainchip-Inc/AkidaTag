@@ -71,7 +71,7 @@ const struct device *spi3_dev = DEVICE_DT_GET(DT_NODELABEL(spi3));
 /* SPI configuration for the camera */
 
 static struct spi_config spi_cfg_camera = {
-    .frequency = 16000000,                           // SPI frequency: 16 MHz
+    .frequency = 8000000,                            // SPI frequency: 8 MHz
     .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB, // 8-bit MSB first
     .slave = 0,
     .cs =
@@ -455,6 +455,16 @@ void camera_capture_thread(void *a, void *b, void *c) {
     if (camera_satrt_flg) {
 
       printk("--- Sequence start ---\n");
+      /* --- Wait for buffer to be FREE ---
+       *
+       * Camera does NOT own or post any event.
+       * It only waits here until model update posts BUF_EVENT_FREE.
+       *
+       * If buffer is already free  → returns immediately, no wait.
+       * If model update is running → blocks here until it finishes
+       *   (success or any error path), then continues automatically.
+       */
+      k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
       int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
       if (len > 0) {
         if (convert_rgb565_to_rgb888(sram_upload_buffer, sram_upload_buffer,

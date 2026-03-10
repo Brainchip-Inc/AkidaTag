@@ -70,9 +70,16 @@
 #define CAMERA_STACK_SIZE 4096
 #define CAMERA_PRIORITY 3
 
+/* Initializes the camera hardware and required configurations */
 int camera_init(void);
+
+/* Starts the camera capture process */
 int camera_start(void);
+
+/* Stops the camera capture operation */
 void camera_stop(void);
+
+/* Camera thread responsible for continuous image capture and processing */
 void camera_capture_thread(void *a, void *b, void *c);
 
 #endif /*SPI_CAMERA_H*/
