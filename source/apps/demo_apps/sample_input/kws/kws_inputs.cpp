@@ -68,3 +68,8 @@ const char *const kws_tags[] = {
     "stop",      "three", "tree",   "two",    "up",     "visual", // 24-29
     "wow",       "yes",   "zero",   "cls_33", "cls_34", "cls_35", // 30-35
 };
+
+const char *const kws_new_tags[] = {
+    "down",  "go",   "left", "no",  "off",     "on",      // 0-5
+    "right", "stop", "up",   "yes", "silence", "unknown", // 6-11
+};

@@ -30,7 +30,7 @@ int audio_processor_init(int samplerate);
  * @param mfcc_len  length of mfcc, which effects audio buffer length
  * @param cb callback function pointer invoked on a valid mfcc
  */
-int audio_processor_start(bool is_stream, q7_t *spectrogram_buff,
+int audio_processor_start(bool is_stream, float *spectrogram_buff,
                           uint8_t *spectrogram_dims, int mfcc_len,
                           inference_cb_t cb);
 
@@ -60,5 +60,10 @@ void audio_process_thread(void *a, void *b, void *c);
 #define PROCESS_PRIORITY 7
 #define SPECTROGRAM_COUNT 49
 #define SPECTROGRAM_RES 10
+
+// Configurable audio processor parameters
+extern int rms_threshold;
+extern int g_min_inference_frames;
+extern int speech_active_time_ms;
 
 #endif

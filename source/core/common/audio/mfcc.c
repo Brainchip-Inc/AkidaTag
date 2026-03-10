@@ -24,12 +24,15 @@
 
 #include "mfcc.h"
 #include "error.h"
-#include "float.h"
 #include "string.h"
-#include <arm_math.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <zephyr/kernel.h>
+
+#include "kiss_fftr.h"
+
+static kiss_fftr_cfg kiss_cfg;
 
 #define M_2PI 6.283185307179586476925286766559005
 #define M_PI (M_2PI / 2)
@@ -37,7 +40,6 @@
 static int num_mfcc_features;
 static int frame_len;
 static int frame_len_padded;
-static int mfcc_dec_bits;
 static float *frame;
 static float *buffer;
 static float *mel_energies;
@@ -46,7 +48,6 @@ static int32_t *fbank_filter_first;
 static int32_t *fbank_filter_last;
 static float **mel_fbank;
 static float *dct_matrix;
-static arm_rfft_fast_instance_f32 *rfft;
 
 static float *create_dct_matrix(int32_t input_length,
                                 int32_t coefficient_count);
@@ -61,17 +62,18 @@ static inline float MelScale(float freq) {
   return 1127.0f * logf(1.0f + freq / 700.0f);
 }
 
-int mfcc_init(int features, int len, int dec_bits, float _samplerate) {
+int mfcc_init(int features, int len, float _samplerate) {
   num_mfcc_features = features;
   frame_len = len;
-  mfcc_dec_bits = dec_bits;
   samplerate = _samplerate;
 
   // Round-up to nearest power of 2.
-  frame_len_padded = pow(2, ceil((log(frame_len) / log(2))));
+  // frame_len_padded = pow(2, ceil((log(frame_len) / log(2))));
+  frame_len_padded = frame_len;
   size_t bytes = frame_len_padded * sizeof(float);
 
   frame = (float *)malloc(bytes);
+  kiss_cfg = kiss_fftr_alloc(frame_len_padded, 0, NULL, NULL);
 
   if (!frame) {
     printk("mfcc_init: frame alloc failed\n");
@@ -100,7 +102,7 @@ int mfcc_init(int features, int len, int dec_bits, float _samplerate) {
   }
 
   for (int i = 0; i < frame_len; i++)
-    window_func[i] = 0.5 - 0.5 * cos(M_2PI * ((float)i) / (float)frame_len);
+    window_func[i] = 0.5f - 0.5f * cos(M_2PI * ((float)i) / (float)frame_len);
 
   bytes = sizeof(int32_t) * NUM_FBANK_BINS;
   // create mel filterbank
@@ -126,16 +128,6 @@ int mfcc_init(int features, int len, int dec_bits, float _samplerate) {
   // create DCT matrix
   dct_matrix = create_dct_matrix(NUM_FBANK_BINS, num_mfcc_features);
 
-  // initialize FFT
-  bytes = sizeof(arm_rfft_fast_instance_f32);
-  rfft = (arm_rfft_fast_instance_f32 *)malloc(bytes);
-  if (!rfft) {
-    printk("mfcc_init: rfft alloc failed\n");
-    return EFAILURE;
-  }
-
-  memset(rfft, 0, bytes);
-  arm_rfft_fast_init_f32(rfft, frame_len_padded);
   return 0;
 }
 
@@ -147,7 +139,6 @@ void mfcc_deinit() {
   free(fbank_filter_first);
   free(fbank_filter_last);
   free(dct_matrix);
-  free(rfft);
   for (int i = 0; i < NUM_FBANK_BINS; i++)
     free(mel_fbank[i]);
   free(mel_fbank);
@@ -160,12 +151,11 @@ float *create_dct_matrix(int32_t input_length, int32_t coefficient_count) {
     printk("create_dct_matrix: M alloc failed\n");
     return NULL;
   }
-  float normalizer;
-  arm_sqrt_f32(2.0f / (float)input_length, &normalizer);
+  float normalizer = sqrtf(2.0f / (float)input_length);
   for (k = 0; k < coefficient_count; k++) {
     for (n = 0; n < input_length; n++) {
       M[k * input_length + n] =
-          normalizer * cos(((double)M_PI) / input_length * (n + 0.5) * k);
+          normalizer * cos(((double)M_PI) / input_length * (n + 0.5f) * k);
     }
   }
   return M;
@@ -174,8 +164,10 @@ float *create_dct_matrix(int32_t input_length, int32_t coefficient_count) {
 float **create_mel_fbank() {
   int32_t bin, i;
 
-  int32_t num_fft_bins = frame_len_padded / 2;
-  float fft_bin_width = ((float)samplerate) / frame_len_padded;
+  // int32_t num_fft_bins = frame_len_padded / 2;
+  // float fft_bin_width = ((float)samplerate) / frame_len_padded;
+  int32_t num_fft_bins = frame_len_padded / 2;                  // now 320
+  float fft_bin_width = ((float)samplerate) / frame_len_padded; // now 25.0 Hz
   float mel_low_freq = MelScale(MEL_LOW_FREQ);
   float mel_high_freq = MelScale(MEL_HIGH_FREQ);
   float mel_freq_delta = (mel_high_freq - mel_low_freq) / (NUM_FBANK_BINS + 1);
@@ -239,7 +231,7 @@ float **create_mel_fbank() {
   return mel_fbank;
 }
 
-void mfcc_compute(const int16_t *audio_data, q7_t *mfcc_out) {
+void mfcc_compute(const int16_t *audio_data, float *mfcc_out) {
   int32_t i, j, bin;
 
   // TensorFlow way of normalizing .wav data to (-1,1)
@@ -254,21 +246,27 @@ void mfcc_compute(const int16_t *audio_data, q7_t *mfcc_out) {
   }
 
   // Compute FFT
-  arm_rfft_fast_f32(rfft, frame, buffer, 0);
+  // arm_rfft_fast_f32(rfft, frame, buffer, 0);
+  kiss_fft_cpx cpx_out[frame_len_padded / 2 + 1];
+  kiss_fftr(kiss_cfg, frame, cpx_out);
 
   // Convert to power spectrum
   // frame is stored as [real0, realN/2-1, real1, im1, real2, im2, ...]
-  int32_t half_dim = frame_len_padded / 2;
+  /*int32_t half_dim = frame_len_padded / 2;
   float first_energy = buffer[0] * buffer[0],
         last_energy = buffer[1] * buffer[1]; // handle this special case
   for (i = 1; i < half_dim; i++) {
     float real = buffer[i * 2], im = buffer[i * 2 + 1];
     buffer[i] = real * real + im * im;
+  }*/
+  // NEW: KissFFT output is already kiss_fft_cpx array
+  int num_bins = frame_len_padded / 2 + 1; // 321
+  for (i = 0; i < num_bins; i++) {
+    buffer[i] = cpx_out[i].r * cpx_out[i].r + cpx_out[i].i * cpx_out[i].i;
   }
-  buffer[0] = first_energy;
-  buffer[half_dim] = last_energy;
+  // buffer[0] = first_energy;
+  // buffer[half_dim] = last_energy;
 
-  float sqrt_data;
   // Apply mel filterbanks
   for (bin = 0; bin < NUM_FBANK_BINS; bin++) {
     j = 0;
@@ -276,23 +274,20 @@ void mfcc_compute(const int16_t *audio_data, q7_t *mfcc_out) {
     int32_t first_index = fbank_filter_first[bin];
     int32_t last_index = fbank_filter_last[bin];
     for (i = first_index; i <= last_index; i++) {
-#ifdef MAG
-      sqrt_data = buffer[i];
-#else
-      arm_sqrt_f32(buffer[i], &sqrt_data);
-#endif
-      mel_energy += (sqrt_data)*mel_fbank[bin][j++];
+
+      // arm_sqrt_f32(buffer[i], &sqrt_data);
+
+      // mel_energy += (sqrt_data)*mel_fbank[bin][j++];
+      mel_energy +=
+          buffer[i] * mel_fbank[bin][j++]; // use power spectrum directly
     }
     mel_energies[bin] = mel_energy;
-
-    // avoid log of zero
-    if (mel_energy == 0.0)
-      mel_energies[bin] = FLT_MIN;
   }
 
   // Take log
   for (bin = 0; bin < NUM_FBANK_BINS; bin++) {
-    mel_energies[bin] = logf(mel_energies[bin]);
+    // mel_energies[bin] = logf(mel_energies[bin]);
+    mel_energies[bin] = logf(mel_energies[bin] + 1e-6f);
 #if 0
         if (mel_energies[bin] < 1e-12)
             mel_energies[bin] = 1e-12;
@@ -305,14 +300,6 @@ void mfcc_compute(const int16_t *audio_data, q7_t *mfcc_out) {
       sum += dct_matrix[i * NUM_FBANK_BINS + j] * mel_energies[j];
     }
 
-    // Input is Qx.mfcc_dec_bits (from quantization step)
-    sum *= (0x1 << mfcc_dec_bits);
-    sum = round(sum);
-    if (sum >= 127)
-      mfcc_out[i] = 127;
-    else if (sum <= -128)
-      mfcc_out[i] = -128;
-    else
-      mfcc_out[i] = sum;
+    mfcc_out[i] = sum;
   }
 }
