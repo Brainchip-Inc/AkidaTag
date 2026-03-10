@@ -3,7 +3,8 @@
 #include <stdint.h>
 #include <zephyr/kernel.h>
 // int pdm_read(uint32_t *buffer, uint32_t * size);
-int dmic_process(uint16_t *passed_buffer, uint32_t passed_size);
+int dmic_process(uint16_t *passed_buffer, uint32_t passed_size,
+                 float *p_rms_val);
 int dmic_start(void);
 int dmic_init(void);
 void dmic_capture_thread(void *a, void *b, void *c);

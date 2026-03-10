@@ -70,6 +70,15 @@ target_sources(app PRIVATE
 	core/boot_manager.c
 	core/littlefs_storage.c
 )
+
+target_sources(app PRIVATE
+    core/common/audio/kissfft/kiss_fft.c
+    core/common/audio/kissfft/kiss_fftr.c
+)
+target_include_directories(app PRIVATE
+    core/common/audio/kissfft
+)
+
 if(CONFIG_WDT_ENABLE)
     target_sources(app PRIVATE
         core/interface/watchdog/watchdog.c
@@ -87,16 +96,19 @@ set(MNIST_MODEL_FILE ${EXTERNAL_GEN_DIR}/model_files/mnist/mnist_program_info.cp
 
 # Run only if file does not exist
 if(NOT EXISTS ${MNIST_MODEL_FILE})
-    message(STATUS ${MNIST_MODEL_FILE} "MNIST Model file not found. Generating...")
+    message(STATUS "MNIST Model file not found. Fetching and generating...")
 
     execute_process(
-        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/utils/mnist.py ${EXTERNAL_GEN_DIR}
-        WORKING_DIRECTORY "${EXTERNAL_GEN_DIR}"
+        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/utils/fetch_model.py
+            --model mnist --prefix mnist
+            --output_dir ${EXTERNAL_GEN_DIR}/model_files/mnist
+            --akida_version v1
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
         RESULT_VARIABLE MNIST_MODEL_FILES_RESULT
     )
 
     if(NOT MNIST_MODEL_FILES_RESULT EQUAL 0)
-        message(FATAL_ERROR "mnist Model generation failed with exit code: ${MNIST_MODEL_FILES_RESULT}")
+        message(FATAL_ERROR "MNIST Model generation failed with exit code: ${MNIST_MODEL_FILES_RESULT}")
     endif()
 else()
     message(STATUS "MNIST Model already exists. Skipping generation.")
@@ -107,11 +119,14 @@ set(KWS_MODEL_FILE ${EXTERNAL_GEN_DIR}/model_files/kws/kws_program_info.cpp)
 
 # Run only if file does not exist
 if(NOT EXISTS ${KWS_MODEL_FILE})
-    message(STATUS ${KWS_MODEL_FILE} "KWS Model file not found. Generating...")
+    message(STATUS "KWS Model file not found. Fetching and generating...")
 
     execute_process(
-        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/utils/kws.py -o ${EXTERNAL_GEN_DIR} -class 3 -model kws_edge_learn -neurons 15 -av v1
-        WORKING_DIRECTORY "${EXTERNAL_GEN_DIR}"
+        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/utils/fetch_model.py
+            --model kws --prefix kws
+            --output_dir ${EXTERNAL_GEN_DIR}/model_files/kws
+            --neurons_per_class 1 --akida_version v1
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
         RESULT_VARIABLE KWS_MODEL_FILES_RESULT
     )
 
