@@ -51,6 +51,7 @@ add_subdirectory(apps)
 # Make sure the app sees the DSP + Core headers
 target_include_directories(app PRIVATE include 
 	include/audio
+    include/led
     ${CMSIS_DSP_DIR}/CMSIS/DSP/Include
     ${ZEPHYR_BASE}/modules/hal/cmsis/CMSIS/Core/Include
 )	
@@ -63,6 +64,7 @@ target_sources(app PRIVATE
 	core/interface/ble_services/file_transfer.c
 	core/interface/ble_services/ble_initialization.c
 	core/interface/audio/pdm_mic.c
+    core/interface/led/led_init.c
 	core/common/audio/mfcc.c
 	core/common/audio/audio_processor.c
 	core/common/inference/akida.cpp

@@ -19,6 +19,75 @@ The following updates were made to enable the nRF-provided MCUBoot bootloader:
 - Added a sysbuild/ directory containing mcuboot.conf
 	- In this file, add `CONFIG_SERIAL=n` option to suppress mcuboot log messages
 
+### LED Indication
+
+This application provides visual status indication using Red and Green LEDs.  
+A dedicated Zephyr thread manages LED patterns based on the system state.
+
+---
+
+### Application Threads
+
+This application currently runs the following LED-related thread:
+
+- **LED Indication Thread**
+  - **Function:** `led_ind_thread()`
+  - **Responsibilities:**
+    - Controls the Red and Green LEDs.
+    - Displays device status using predefined LED patterns.
+    - Monitors the global LED state (`current_state`).
+    - Updates LED behavior based on the system state.
+
+---
+
+### LED Thread Synchronization
+
+The LED thread execution is synchronized using a Zephyr semaphore (`led_sem`).
+
+- DMIC thread running at ~60 ms can signal the LED thread using `k_sem_give(&led_sem)` to trigger an LED update.
+- The LED thread waits using `k_sem_take(&led_sem, K_MSEC(LED_TICK_MS))`.
+- If a signal is received, the LED thread wakes immediately and updates the LED state.
+- If no signal is received within `LED_TICK_MS`, the wait call times out and the LED thread continues execution using the timeout as a fallback timing mechanism.
+
+This allows the LED logic to operate in two modes:
+
+1. **Synchronized Mode** – LED updates are triggered by another thread.
+2. **Standalone Mode** – LED updates run periodically using the timeout when the signaling thread is not active.
+
+---
+
+### LED State Control
+
+- The LED behavior is controlled using the `led_set_state()` API.
+- The LED state is stored using atomic variables to ensure thread-safe access.
+- BLE connection status is updated through the `ble_connection_callback()` function.
+- Based on these states, the LED thread updates the LED patterns accordingly.
+
+**Note:**  
+`CMAKE_EXTRA_ARGS+=(-DCONFIG_DK_BOARD=n)` disables the onboard LED.
+
+---
+
+### LED Pin Configuration (According to schematic)
+
+| LED        | GPIO  | Pin | Active Level |
+|------------|-------|-----|--------------|
+| Red LED    | GPIO0 | 28  | Active High  |
+| Green LED  | GPIO0 | 27  | Active High  |
+
+---
+
+### LED Behavior
+
+| State           | Behavior |
+|-----------------|----------|
+| NORMAL_APP      | Green slow blink (2s), Red OFF |
+| BLE_CONNECTED   | Green ON, Red OFF |
+| MODEL_RECEIVING | Green ON, Red fast blink (500ms) |
+| FLASH_WRITE / FLASH FULL_ERASE    | Green ON, Red ON |
+| UPDATE_SUCCESS  | Both LEDs blink 3 times, then restore runtime state based on BLE status |
+| UPDATE_FAILED   | Green OFF, Red ON |
+
 ### PDM MIC 
 This application uses the DMIC (PDM microphone) interface with PDM_CLK on P0.26 and PDM_DIN on P0.25.
 The DMIC peripheral is enabled via DeviceTree using the dmic_dev node and pinctrl configuration.
