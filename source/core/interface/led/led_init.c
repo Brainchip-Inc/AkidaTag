@@ -116,7 +116,7 @@ int32_t led_init(void) {
  * - NORMAL_APP        : Green slow blink (2s), Red OFF
  * - BLE_CONNECTED     : Green ON, Red OFF
  * - MODEL_RECEIVING   : Green ON, Red fast blink (500ms)
- * - FLASH_WRITE       : Green ON, Red ON
+ * - FLASH FULL_ERASE  : Green ON, Red ON
  * - UPDATE_SUCCESS    : Both LEDs blink 3 times, then
  *                       restore runtime state based on BLE status
  * - UPDATE_FAILED     : Green OFF, Red ON

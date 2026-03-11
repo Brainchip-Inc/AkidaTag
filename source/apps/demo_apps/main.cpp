@@ -1385,11 +1385,17 @@ static int cmd_set(const struct shell *shell, size_t argc, char **argv) {
 
 /* shell cli function to invoke erase function */
 static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
-
+  led_set_state(LED_STATE_FLASH_WRITE);
   if (spi_flash_erase_helper_func(0x1000, FLASH_MAX_16_MB_SIZE - 0x1000)) {
     return 1;
   }
-
+  /* After success pattern, return to NORMAL */
+  /* Restore correct runtime state */
+  if (is_ble_connected()) {
+    led_set_state(LED_STATE_BLE_CONNECTED);
+  } else {
+    led_set_state(LED_STATE_NORMAL_APP);
+  }
   return 0;
 }
 
