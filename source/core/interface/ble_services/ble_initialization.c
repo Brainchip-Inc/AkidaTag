@@ -1,5 +1,6 @@
 
 #include "ble_services/ble_initialization.h"
+#include "led_init.h"
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(ble_initilaization, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -36,7 +37,8 @@ static void connected_ble(struct bt_conn *conn, uint8_t err) {
     LOG_ERR("Connection failed (err 0x%02x)\n", err);
     return;
   }
-
+  led_set_state(LED_STATE_BLE_CONNECTED);
+  ble_connection_callback(BLE_CONNECTED);
   LOG_INF("connected_ble: %s\n", addr);
 
 #ifdef CONFIG_BT_ENCRYPTION_EN
@@ -50,13 +52,12 @@ static void connected_ble(struct bt_conn *conn, uint8_t err) {
     LOG_INF("Security level 4 requested - pairing should start\n");
   }
 #endif
-  dk_set_led_on(CON_STATUS_LED);
 }
 
 static void disconnected_ble(struct bt_conn *conn, uint8_t reason) {
   LOG_INF("Disconnected_ble (reason %u)\n", reason);
-
-  dk_set_led_off(CON_STATUS_LED);
+  led_set_state(LED_STATE_NORMAL_APP);
+  ble_connection_callback(BLE_NOT_CONNECTED);
 }
 
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED
