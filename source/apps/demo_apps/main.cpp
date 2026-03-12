@@ -57,6 +57,7 @@ extern "C" {
 #endif
 #include "audio_processor.h"
 #include "ble_services/ble_initialization.h"
+#include "ble_services/edge_learning.h"
 #include "ble_services/file_transfer.h"
 #include "boot_manager.h"
 #include "error.h"
@@ -477,6 +478,7 @@ void do_inference(int spectrogram_index) {
               saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
         saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
             1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
+        learning_completed();
         printk("Save Weights from MESH->MEM \n\r");
       } else {
         printk(
@@ -1255,7 +1257,7 @@ int infer(int app_index_l) {
     printk("Illegal model index %d\n", app_index_l);
     return -1;
   }
-
+  int32_t perc = 0;
   akida_config_spi(1);
   int ret = check_program_data(flash_offsets[app_index_l], 4, app_index_l);
   akida_config_spi(0);
@@ -1473,6 +1475,11 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
   }
 
   return 0;
+}
+void edge_learning_cmd_process(uint8_t value) {
+  printk("cur_kws_edge_state %d\n", cur_kws_edge_state);
+
+  kws_edge_state[cur_kws_edge_state].on_user_input(value);
 }
 
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
