@@ -319,9 +319,9 @@ int convert_rgb565_to_rgb888(const uint8_t *rgb565, uint8_t *rgb888,
     /* Pixel i-2 */
     uint16_t p2 =
         ((uint16_t)rgb565[(i - 2) * 2] << 8) | rgb565[(i - 2) * 2 + 1];
-    r5 = (p3 >> 11) & RED_BIT_MASK;
-    g6 = (p3 >> 5) & GREEN_BIT_MASK;
-    b5 = p3 & BLUE_BIT_MASK;
+    r5 = (p2 >> 11) & RED_BIT_MASK;
+    g6 = (p2 >> 5) & GREEN_BIT_MASK;
+    b5 = p2 & BLUE_BIT_MASK;
     rgb888[(i - 2) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
     rgb888[(i - 2) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
     rgb888[(i - 2) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
@@ -329,9 +329,9 @@ int convert_rgb565_to_rgb888(const uint8_t *rgb565, uint8_t *rgb888,
     /* Pixel i-3 */
     uint16_t p1 =
         ((uint16_t)rgb565[(i - 3) * 2] << 8) | rgb565[(i - 3) * 2 + 1];
-    r5 = (p3 >> 11) & RED_BIT_MASK;
-    g6 = (p3 >> 5) & GREEN_BIT_MASK;
-    b5 = p3 & BLUE_BIT_MASK;
+    r5 = (p1 >> 11) & RED_BIT_MASK;
+    g6 = (p1 >> 5) & GREEN_BIT_MASK;
+    b5 = p1 & BLUE_BIT_MASK;
     rgb888[(i - 3) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
     rgb888[(i - 3) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
     rgb888[(i - 3) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
@@ -339,9 +339,9 @@ int convert_rgb565_to_rgb888(const uint8_t *rgb565, uint8_t *rgb888,
     /* Pixel i-4 (lowest in this group) */
     uint16_t p0 =
         ((uint16_t)rgb565[(i - 4) * 2] << 8) | rgb565[(i - 4) * 2 + 1];
-    r5 = (p3 >> 11) & RED_BIT_MASK;
-    g6 = (p3 >> 5) & GREEN_BIT_MASK;
-    b5 = p3 & BLUE_BIT_MASK;
+    r5 = (p0 >> 11) & RED_BIT_MASK;
+    g6 = (p0 >> 5) & GREEN_BIT_MASK;
+    b5 = p0 & BLUE_BIT_MASK;
     rgb888[(i - 4) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
     rgb888[(i - 4) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
     rgb888[(i - 4) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
