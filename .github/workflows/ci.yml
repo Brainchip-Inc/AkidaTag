@@ -15,7 +15,15 @@ jobs:
         run: |
           chmod +x scripts/run.sh
           ./scripts/run.sh -d --key
-        
+
+      - name: Transfer Model
+        run: |
+          chmod +x scripts/run.sh
+          ./scripts/run.sh -d \
+          --model_transfer "https://drive.usercontent.google.com/download?id=19iPANlklDn_OAmPVgurPpCCfZnxyNkaf&export=download&authuser=0" \
+          --model_name kws \
+          --model_flash_addr 0x101000 \
+          --map_mode 1
       - name: Build and Flash
         run: |
           chmod +x scripts/run.sh
