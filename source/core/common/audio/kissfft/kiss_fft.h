@@ -138,7 +138,7 @@ int kiss_fft_next_fast_size(int n);
     (res).r = (a).r - (b).r;                                                   \
     (res).i = (a).i - (b).i;                                                   \
   } while (0)
-#define HALF_OF(x) ((x)*.5f)
+#define HALF_OF(x) ((x) * .5f)
 #define kf_cexp(x, phase)                                                      \
   do {                                                                         \
     (x).r = cosf(phase);                                                       \

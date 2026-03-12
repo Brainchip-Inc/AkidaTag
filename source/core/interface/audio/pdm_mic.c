@@ -18,6 +18,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/sys_clock.h>
 
+#include "ble_services/ble_initialization.h"
+#include <stdint.h>
 atomic_t is_dmic_start;
 
 K_MEM_SLAB_DEFINE(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 32);
@@ -37,6 +39,30 @@ dc_block_t dc_state;
 void dc_block_init(dc_block_t *s) {
   s->prev_x = 0;
   s->prev_y = 0;
+}
+/**
+ * @brief Calculate RMS value of audio samples after removing DC offset.
+ * Computes the mean of the samples to remove DC bias and then calculates
+ * the RMS amplitude of the centered signal.
+ */
+static int16_t calculate_rms_dc_removed(int16_t *samples, uint32_t count) {
+  int64_t mean = 0;
+  uint64_t sum = 0;
+
+  /* Calculate DC offset */
+  for (uint32_t i = 0; i < count; i++) {
+    mean += samples[i];
+  }
+  mean /= (int64_t)count;
+
+  /* RMS after DC removal */
+  for (uint32_t i = 0; i < count; i++) {
+    int32_t s = (int32_t)samples[i] - (int32_t)mean;
+    sum += (uint64_t)(s * s);
+  }
+
+  float rms = sqrtf((float)sum / (float)count);
+  return (int16_t)rms;
 }
 /*
 Applies a DC blocking (high-pass) filter to a block of 16-bit PCM samples and
@@ -161,6 +187,12 @@ void dmic_capture_thread(void *a, void *b, void *c) {
       if (k_msgq_put(&audio_msgq, &blk, K_NO_WAIT) != 0) {
         /* Queue full → drop buffer safely */
         printk("audio_msgq is full");
+      }
+
+      if (pdm_stream_flag) {
+        uint16_t rms =
+            calculate_rms_dc_removed((int16_t *)blk.data, blk.size / 16);
+        send_pdm_data(rms);
       }
       memcpy((void *)orig_buf, blk.data, blk.size);
       k_mem_slab_free(&mem_slab, blk.data);

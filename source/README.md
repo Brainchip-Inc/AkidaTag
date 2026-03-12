@@ -201,6 +201,129 @@ Close the serial monitor and run utils/imu_data_screening.py.
 The script plots accelerometer and gyroscope data in real time.
 Ensure matplotlib and pyserial are installed before running.
 
+### BLE Service Implementation
+This firmware implements Bluetooth Low Energy (BLE) services for the AKIDA device platform on the Nordic Semiconductor nRF5340. It enables mobile applications to communicate with the device through the Nordic UART Service (NUS).
+NUS provides:
+One RX characteristic (write from phone)
+One TX characteristic (notify to phone)
+It behaves like a bidirectional data pipe. It simplifies protocol scalability and allows structured communication over a single BLE service.
+It is used in eg: battery_response and device_info_response etc.
+1. Device Advertising
+When scanning for devices, phones will see:
+
+Device Name: Configured through CONFIG_BT_DEVICE_NAME
+Manufacturer Data (human-readable ASCII):
+BLE Version: "53" (version 5.3)
+Firmware Version: "241" (version 2.4.1)
+Chip ID: "AKD1500"
+The manufacturer data is encoded in ASCII text format, allowing phones to display this information directly without needing to convert binary data.
+
+ The Nordic UART Service (NUS) handles command processing with a sophisticated multi-frame protocol supporting single-frame messages for battery commands and multi-frame fragmentation for larger device information transfers, complete with retry logic and send-state management.
+
+
+2. Phone-Firmware Communication Flow
+The communication between the mobile application and firmware follows a simple command-response protocol over BLE's Nordic UART Service (NUS).
+Command Frame Format: [frame_type],[index],[size],[command],[data]
+
+MOBILE APP  ◄────────►   BLE STACK   ◄────────►     FIRMWARE
+
+     │                           │                           │
+     ├───Connect & Pair──────────┼────────────────────────────►│
+     │                           │                           │
+     ├───Send Command───────────┼────────────────────────────►│
+     │    "CMD_BATTERY"          │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Read battery (97%)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │    "BATTERY:97"           │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_DEVICE_INFO"      │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Gather device data
+     │                           │                           │    "AKIDA,TYPE,5.3,1.2.3"
+     │                           │                           │
+     │◄──Receive Response────────┼───────────────────────────┤
+     │    "DEVICE:AKIDA,TYPE,    │                           │
+     │           5.3,1.2.3"      │                           │
+     │                           │                           │
+	 ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_DEPLOY_START"     │                           │
+     │                           │                           ├───Set event_flag = true
+     │                           │                           │    (KWS detection send start)
+     │                           │                           │
+     │◄──Receive KWS Events──────┼──────────────────────────────┤
+     │    "KWS:hello"            │                           │
+     │    "KWS:stop"             │                           │
+     │    "KWS:yes"              │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_STREAM_START"     │                           │
+     │                           │                           ├───Set pdm_stream_flag = true
+     │                           │                           │    (Audio streaming active)
+     │                           │                           │
+     │◄──Receive PDM Audio Data──┼──────────────────────────────┤
+     │    [Audio chunk 1]        │                           │
+     │    [Audio chunk 2]        │                           │
+     │    [Audio chunk 3]        │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_DEPLOY_STOP"      │                           │
+     │                           │                           ├───Set event_flag = false
+     │                           │                           │    (KWS detection sending stopped)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │    "DEPLOY_STOP:ACK"      │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_STREAM_STOP"      │                           │
+     │                           │                           ├───Set pdm_stream_flag = false
+     │                           │                           │    (Audio streaming stopped)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │    "STREAM_STOP:ACK"      │                           │
+
+3. How It Works
+
+Phone sends a command - The mobile app writes a command string to the NUS characteristic
+Firmware parses the command - The nus_received_cb callback identifies which command was received
+Firmware prepares response - Based on the command type, the appropriate data is gathered
+Response is sent back - Data is formatted and transmitted to the phone via NUS
+Phone displays the data - The app receives and presents the information to the user
+
+NOTE: A static MAC address is required for phone app testing. Hence, CONFIG_BT_PRIVACY is disabled(CONFIG_BT_PRIVACY = n). Ensure this is re-enabled for the final production build.
+
+### Edge Learning BLE Service
+
+MOBILE APP                    BLE STACK                    FIRMWARE
+     │                              │                             │
+     │───Subscribe to ACK───────────┼────────────────────────────►│
+     │    (Enable notifications)    │                             │
+     │                              │                             ├───Set notify_enabled = true
+     │                              │                             │
+     ├───Write Command──────────────┼────────────────────────────►│
+     │    [CMD=0] Enter Inference   │                             │
+     │                              │                             ├───edge_cmd_write() called
+     │                              │                             ├───Process command
+     │                              │                             │
+     ├───Write Command──────────────┼────────────────────────────►│
+     │    [CMD=1] Start Learning    │                             │
+     │                              │                             ├───Begin training process
+     │                              │                             │   
+     │                              │                             │
+     │                              │                             │
+     │◄──Receive ACK────────────────┼─────────────────────────────┤
+     │    [ACK=0xA7]                │                             │   learning_completed()
+     │    (Learning complete)       │                             │   send_ack(ACK_LEARNING_DONE)
+     │                              │                             │
+     ├───Write Command──────────────┼────────────────────────────►│
+     │    [CMD=2] Delete Class      │                             │
+     │                              │                             │
+     ├───Write Command──────────────┼────────────────────────────►│
+     │    [CMD=3] Select Next Class │                             │
+     │                              │                             │
+
 ### Build the demo_apps Sample.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
