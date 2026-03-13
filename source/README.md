@@ -201,6 +201,123 @@ Close the serial monitor and run utils/imu_data_screening.py.
 The script plots accelerometer and gyroscope data in real time.
 Ensure matplotlib and pyserial are installed before running.
 
+### SPI CAMERA
+The SPI Camera module enables image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with a dedicated CS pin) to communicate with the camera. On startup, it performs full sensor initialization and reset, then configures ISP settings (brightness, contrast, saturation, sharpness, white balance, EV) and applies manual exposure and gain values.
+
+Frame acquisition follows a **demand  model**. Each frame capture is initiated explicitly using a `FIFO_START` command, allowing frames to be requested only when needed. Multiple frames can be requested in quick succession when higher capture throughput is required.
+
+The capture process is **synchronous** (blocking). After initiating a capture, the software waits for completion by polling the `CAP_DONE` flag. During this period, the calling thread waits until the frame capture is finished.
+
+
+## Supported Resolutions
+
+Frames are captured based on a CLI command. Due to RAM constraints, only two resolutions are supported:
+
+| Index | Resolution | RGB888 Size |
+|-------|------------|-------------|
+| 1     | 96 × 96    | 27,648 B    |
+| 2     | 128 × 128  | 49,152 B    |
+
+> **WARNING:** 320×240, 320×320, and higher resolutions exceed available RAM and are **not supported**.
+
+## Frame Timing
+
+| Event 				  				  			 | Time 	       	  |
+|------------------------------------------------------------|--------------------|
+| First frame ready — 96x96(from `camera_start`)  	      | ~956 ms (average)  |
+| First frame ready — 128x128(from `camera_start`)	      | ~1042 ms (average) |
+| Execution time of the capture_rgb() function
+			 — 96×96 resolution 	  	  			 | ~22 ms	            |
+| Execution time of the capture_rgb() function
+			 — 128×128 resolution 	  	  			 | ~36 ms             |
+
+Sensor Capture Time
+The time was calculated based on the duration the firmware waits for the CAP_DONE_MASK flag to be set. The measurement was verified using CRO.
+
+Resolution	Capture Time
+|-----------------------|
+96×96		~50 µs
+128×128		~50 µs
+
+SPI Transfer Time
+Measured time required to transfer image data from the camera FIFO to the MCU using SPI @8 MHz.
+
+Resolution			Data Size	SPI Transfer Time
+|-------------------------------------------------|
+ 96×96 (RGB565)		~18 KB		~18 ms
+ 128×128 (RGB565)	     ~32 KB		~33 ms
+
+Image Conversion Time
+
+Resolution	Conversion Time
+|--------------------------|
+ 96×96		~3 ms
+ 128×128	     ~5 ms
+
+The first-frame timer starts when the `camera_start` shell command is issued. This includes the warm-up sequence (3 discarded frames) before the first valid frame is delivered.
+
+### SRAM Upload Buffer
+
+`sram_upload_buffer` is a shared memory buffer used between the camera capture thread and the model update process. Access to this buffer is synchronized using a Zephyr `k_event` to ensure that only one module uses the buffer at a time. The buffer state is controlled using `BUF_EVENT_FREE` and `BUF_EVENT_BUSY` flags to prevent concurrent access and data corruption.
+
+## Frame Output
+
+Captured frames are read from the camera FIFO and validated. The raw RGB565 data is converted to RGB888 format. Frames are then Base64-encoded and printed to the console, delimited by:
+
+```
+--- RGB888_START_ ---
+<base64 data>
+--- RGB888_END_ ---
+```
+
+## Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `camera_set_pixel 1` | Set resolution to 96×96 (must be run before `camera_start`) |
+| `camera_set_pixel 2` | Set resolution to 128×128 (must be run before `camera_start`) |
+| `camera_start` | Initialize camera, run warm-up, and begin continuous capture |
+| `camera_stop` | Stop capture and reset the sensor |
+
+`camera_set_pixel` **must** be called before `camera_start`. If resolution is not set, `camera_start` will return an error.
+
+## Configuration
+
+- **`CONFIG_DK_BOARD`** — Set to `N`. If enabled (`Y`), the DK board pins overlap with the SPI pins used by the camera, causing incorrect image capture.
+- **`CONFIG_CAMERA_ENABLE_THREAD`** — Enables or disables the dedicated camera processing thread. When disabled, no camera thread or stack is allocated.
+- A separate Kconfig file **`camera_app.conf`** is provided for all camera-related configuration options.
+
+
+### To check camera image
+A Python script `utils/image_display.py` is provided to receive frames over serial, decode them, and save them as PNG images.
+
+## Prerequisites
+
+```bash
+pip install pyserial numpy pillow
+```
+
+## Usage
+
+1. Close any active serial monitor (e.g. in your IDE or terminal).
+2. Run the script:
+
+```bash
+python utils/image_display.py
+```
+
+The script will prompt for serial port, baud rate, frame dimensions, and output folder. Frames are saved as `frame_00001.png`, `frame_00002.png`, etc. under the specified folder (default: `./frames/`), upscaled 4× for easier viewing.
+
+## Notes
+
+- The script buffers serial data and only processes a frame once both `--- RGB888_START_ ---` and `--- RGB888_END_ ---` markers are found.
+- Frames with incorrect byte counts (not equal to `width × height × 3`) are skipped with a warning.
+- Each saved PNG is upscaled 4× using nearest-neighbour interpolation for easy visual inspection.
+- Press **Ctrl+C** to stop; the script prints a final frame count summary.
+
+### SPI CAMERA
+The SPI Camera module enables continuous image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with dedicated CS pin) to communicate with the camera, performs initialization and sensor reset, configures ISP settings (brightness, contrast, saturation, sharpness, white balance), and sets manual exposure and gain. Frames are captured in 96×96 RGB resolution (legacy mode) using the camera FIFO buffer. Captured frames are read from the FIFO, validated, and optionally converted to Base64 format for safe logging or transmission, marked with --- RGB_START_X --- and --- RGB_END_X ---. A continuous capture thread handles multi-frame capture sequences, while shell commands camera_start and camera_stop allow starting and stopping the camera via Zephyr shell.
+
 ### BLE Service Implementation
 This firmware implements Bluetooth Low Energy (BLE) services for the AKIDA device platform on the Nordic Semiconductor nRF5340. It enables mobile applications to communicate with the device through the Nordic UART Service (NUS).
 NUS provides:
