@@ -215,19 +215,6 @@ ssize_t file_transfer_write(struct bt_conn *conn,
                             const struct bt_gatt_attr *attr, const void *buf,
                             uint16_t len, uint16_t offset, uint8_t flags) {
 
-  /* --- Signal buffer is BUSY ---
-   * The BUF_EVENT_FREE flag is cleared so the camera thread cannot use the
-   * buffer. The camera thread blocks in k_event_wait() until BUF_EVENT_FREE is
-   * posted again. The camera thread does not own or post any events; it only
-   * waits for the buffer to become available.
-   */
-
-  // Clear the BUF_EVENT_FREE flag before using the buffer
-  k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
-  // Mark the SRAM buffer as busy so other tasks cannot access it
-  k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
-  LOG_INF("sram_upload_buffer claimed by model update");
-
   memcpy(&sram_upload_buffer[ble_pgm_offset], buf, len);
 
   ble_pgm_offset += len;
@@ -266,10 +253,6 @@ ssize_t file_transfer_write(struct bt_conn *conn,
         LOG_INF("sram_upload_buffer released (CRC error)\n");
         return -1;
       } else {
-        /* Success: release buffer — camera unblocks */
-        k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-        k_event_post(&sram_buf_event, BUF_EVENT_FREE);
-        LOG_INF("sram_upload_buffer released (write complete)\n");
         LOG_INF("CRC check passed\n");
       }
     }
@@ -281,12 +264,12 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     send_ack_to_host(ACK_FLASH_WRITE_DONE);
 
     if (total_received == total_pgm_size && crc_ctx.crc_ok) {
+      /* Success: release buffer — camera unblocks */
+      k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+      k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+      LOG_INF("sram_upload_buffer released (write complete)\n");
 
       if (akida_program_infer() != 0) {
-        /* Error: release buffer — camera unblocks */
-        k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-        k_event_post(&sram_buf_event, BUF_EVENT_FREE);
-        LOG_INF("sram_upload_buffer released (akida error)\n");
         /*there is an error here*/
         led_set_state(LED_STATE_UPDATE_FAILED);
         LOG_ERR("akida model program/inference failed\n");
@@ -330,6 +313,28 @@ ssize_t get_file_size(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     LOG_ERR("returning due to error");
     return 1;
   }
+  /* --- Acquire SRAM upload buffer for model update ---
+   *
+   * Wait until the shared buffer becomes FREE before writing model data.
+   *
+   * Behavior:
+   *  - If the camera is currently using the buffer (BUF_EVENT_BUSY),
+   *    this call blocks until the camera releases it.
+   *  - If the buffer is already FREE, execution continues immediately.
+   *
+   * After the FREE event is received:
+   *  1. Clear the BUF_EVENT_FREE flag so other components know the buffer
+   *     is no longer available.
+   *  2. Post BUF_EVENT_BUSY to take ownership of the buffer.
+   *
+   * While BUF_EVENT_BUSY is set, the camera thread will block in
+   * k_event_wait() and cannot access sram_upload_buffer.
+   */
+  k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
+  k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
+  k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
+  LOG_INF("sram_upload_buffer claimed by model update");
+
   send_ack_to_host(ACK_FLASH_ERASE_DONE);
   return len;
 }

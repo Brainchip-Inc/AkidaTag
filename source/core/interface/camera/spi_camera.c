@@ -407,6 +407,23 @@ int camera_start(void) {
   k_msleep(150);
   camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
 
+  /* --- Wait for buffer to be FREE ---
+   *
+   * Wait until the shared buffer becomes FREE before using it.
+   *
+   * Behavior:
+   *  - If the buffer is already free → returns immediately.
+   *  - If a model update is currently using the buffer
+   *    → this call blocks until the update completes and releases it.
+   *
+   * Once the FREE event is received:
+   *  1. Clear the FREE flag.
+   *  2. Mark the buffer as BUSY to take ownership.
+   *
+   */
+  k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
+  k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
+  k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
   /* Warm-up */
   printk("Warming up (3 frames)...\n");
   for (int i = 0; i < 3; i++) {
@@ -419,6 +436,17 @@ int camera_start(void) {
     k_msleep(200);
   }
   printk("Warm-up complete!\n\n");
+  /* --- Release SRAM upload buffer ---
+   *
+   * Camera processing has finished using sram_upload_buffer.
+   *
+   * Steps:
+   *  1. Clear the BUSY flag to indicate this module no longer owns the buffer.
+   *  2. Post the FREE event to notify any waiting component
+   *  that the buffer is now available.
+   */
+  k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+  k_event_post(&sram_buf_event, BUF_EVENT_FREE);
 
   camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
   k_msleep(1);
@@ -455,16 +483,25 @@ void camera_capture_thread(void *a, void *b, void *c) {
     if (camera_satrt_flg) {
 
       printk("--- Sequence start ---\n");
+
       /* --- Wait for buffer to be FREE ---
        *
-       * Camera does NOT own or post any event.
-       * It only waits here until model update posts BUF_EVENT_FREE.
+       * Wait until the shared buffer becomes FREE before using it.
        *
-       * If buffer is already free  → returns immediately, no wait.
-       * If model update is running → blocks here until it finishes
-       *   (success or any error path), then continues automatically.
+       * Behavior:
+       *  - If the buffer is already free → returns immediately.
+       *  - If a model update is currently using the buffer
+       *    → this call blocks until the update completes and releases it.
+       *
+       * Once the FREE event is received:
+       *  1. Clear the FREE flag.
+       *  2. Mark the buffer as BUSY to take ownership.
+       *
        */
       k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
+      k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
+      k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
+
       int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
       if (len > 0) {
         if (convert_rgb565_to_rgb888(sram_upload_buffer, sram_upload_buffer,
@@ -480,6 +517,19 @@ void camera_capture_thread(void *a, void *b, void *c) {
       } else {
         printk("Image FAILED\n");
       }
+
+      /* --- Release SRAM upload buffer ---
+       *
+       * Camera processing has finished using sram_upload_buffer.
+       *
+       * Steps:
+       *  1. Clear the BUSY flag to indicate this module no longer owns the
+       * buffer.
+       *  2. Post the FREE event to notify any waiting component
+       *  that the buffer is now available.
+       */
+      k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+      k_event_post(&sram_buf_event, BUF_EVENT_FREE);
 
       printk("--- Sequence complete ---\n\n");
 
