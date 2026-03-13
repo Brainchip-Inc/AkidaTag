@@ -15,6 +15,13 @@ Options:
   -f, --flash        | (flag) | Do Flash
   -jf, --jlink_flash | (flag) | Do Flash using Jlink. Also pass -f for flash.
   --bin              | (str)  | If provided, send a model .bin to Akida External Flash via BLE
+  --info             | (str)  | Path to program_info .bin file (used with --bin and --yaml for BLE send)
+  --yaml             | (str)  | Path to info.yaml metadata file (used with --info and --bin for BLE send)
+  --model_transfer   | (str)  | URL or local path to .fbz – fetch and convert (generate bins + info.yaml)
+  --send_ble         | (flag) | After --model_transfer fetch, also send via BLE (default: off)
+  --model_name       | (str)  | Model name for --model_transfer (default: kws)
+  --model_flash_addr | (str)  | Flash address for --model_transfer (default: 0x1000)
+  --map_mode         | (int)  | Akida MapMode value for --model_transfer (default: 1)
   -d, --docker       | (str)  | Run build/flash using Docker
                      |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
   -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
@@ -53,6 +60,20 @@ How to use script - Examples runs:
 
   # Send model To Akida External Flash via BLE using Docker
   $SCRIPT_INVOCATION -d --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
+
+  # Fetch .fbz locally → generate bins + info.yaml only (no BLE send)
+  $SCRIPT_INVOCATION --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000
+
+  # Fetch .fbz inside Docker (akida SDK) → generate bins + info.yaml only (no BLE send)
+  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000
+
+  # Fetch inside Docker + send via BLE on the host (add --send_ble to enable BLE step)
+  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --send_ble
+
+  # Send pre-generated model files via BLE using info.yaml (no Docker needed)
+  $SCRIPT_INVOCATION --info source/external/model_files/kws/kws_program_info.bin \
+      --bin source/external/model_files/kws/kws_program_data.bin \
+      --yaml source/external/model_files/kws/info.yaml
 
   # If there is a custom docker image then provide docker image name with -d
   $SCRIPT_INVOCATION -d custom_docker_image -b --app akida_spi_flash_app  
@@ -103,6 +124,13 @@ DO_BUILD=false
 DO_FLASH=false
 DO_JLINK_FLASH=false
 MODEL_BIN=""
+MODEL_INFO=""
+MODEL_YAML=""
+MODEL_TRANSFER_PATH=""
+MODEL_TRANSFER_NAME="kws"
+MODEL_TRANSFER_FLASH_ADDR="0x1000"
+MODEL_TRANSFER_MAP_MODE=1
+SEND_BLE=false
 
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
@@ -162,6 +190,13 @@ while [[ $# -gt 0 ]]; do
         -f|--flash) DO_FLASH=true; shift;;
         -jf|--jlink_flash) DO_JLINK_FLASH=true; shift;;
         --bin) MODEL_BIN="${2:-}"; shift 2;;
+        --info) MODEL_INFO="${2:-}"; shift 2;;
+        --yaml) MODEL_YAML="${2:-}"; shift 2;;
+        --model_transfer) MODEL_TRANSFER_PATH="${2:-}"; shift 2;;
+        --send_ble) SEND_BLE=true; shift;;
+        --model_name) MODEL_TRANSFER_NAME="${2:-kws}"; shift 2;;
+        --model_flash_addr) MODEL_TRANSFER_FLASH_ADDR="${2:-0x1000}"; shift 2;;
+        --map_mode) MODEL_TRANSFER_MAP_MODE="${2:-1}"; shift 2;;
         -d|--docker)
             DOCKER=true
             # Optional image name
@@ -208,14 +243,18 @@ if $DO_SHELL && ! $DOCKER; then
     exit 1
 fi
 
-# If not shell/minicom, require at least one action: build/flash/bin
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]]; then
-    echo "Nothing to do: pass --build and/or --flash and/or --bin, and/or --key or use --shell / --minicom"
+# If not shell/minicom, require at least one action: build/flash/bin/info+yaml/model_transfer
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_BIN" ]] && [[ -z "$MODEL_INFO" ]] && [[ -z "$MODEL_TRANSFER_PATH" ]]; then
+    echo "Nothing to do: pass --build and/or --flash and/or --bin and/or --info/--bin/--yaml and/or --model_transfer, and/or --key or use --shell / --minicom"
     exit 1
 fi
 
-# Require --app when doing build/flash/bin (minicom and shell don't need it)
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ( $DO_BUILD || $DO_FLASH || [[ -n "$MODEL_BIN" ]] ) && [[ -z "$APP" ]]; then
+# Require --app when doing build/flash/legacy-bin (not needed for --info/--bin/--yaml or --model_transfer)
+_needs_app=false
+if $DO_BUILD || $DO_FLASH || ( [[ -n "$MODEL_BIN" ]] && [[ -z "$MODEL_INFO" ]] ); then
+    _needs_app=true
+fi
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && $_needs_app && [[ -z "$APP" ]]; then
     echo "Error: --app is required"
     exit 1
 fi
@@ -231,6 +270,24 @@ if [[ -n "$MODEL_BIN" && ! -f "$MODEL_BIN" ]]; then
     exit 1
 fi
 
+# Validate --info / --yaml file existence
+if [[ -n "$MODEL_INFO" && ! -f "$MODEL_INFO" ]]; then
+    echo "Error: --info file not found: $MODEL_INFO"
+    exit 1
+fi
+if [[ -n "$MODEL_YAML" && ! -f "$MODEL_YAML" ]]; then
+    echo "Error: --yaml file not found: $MODEL_YAML"
+    exit 1
+fi
+
+# --info, --bin, and --yaml must all be provided together
+if [[ -n "$MODEL_INFO" || -n "$MODEL_YAML" ]]; then
+    if [[ -z "$MODEL_INFO" || -z "$MODEL_BIN" || -z "$MODEL_YAML" ]]; then
+        echo "Error: --info, --bin, and --yaml must all be provided together for BLE send"
+        exit 1
+    fi
+fi
+
 # -----------------------------------------------------------------------------
 # BLE needed?
 #   - if --bin present (sending model), OR
@@ -240,6 +297,8 @@ BLE_NEEDED=false
 if [[ -n "$MODEL_BIN" ]] || $DO_SHELL; then
     BLE_NEEDED=true
 fi
+# Note: --model_transfer BLE send (send_model_via_ble.py) always runs on the host,
+# so dbus is NOT needed inside Docker for that path.
 
 # -----------------------------------------------------------------------------
 # Docker run base (IMPORTANT: image name is NOT included here)
@@ -340,133 +399,193 @@ if $DO_KEY; then
 fi
 
 # -----------------------------------------------------------------------------
-# App → source dir (dynamic by default)
+# App → source dir, build dir, and build/flash commands (only when --app is set)
 # -----------------------------------------------------------------------------
-APP_SRC_DIR="samples/$APP"
+APP_SRC_DIR=""
+APP_BUILD_DIR=""
+BUILD_CMD=""
+FLASH_CMD=""
 
-# Build-time "extra CMake args" (only appended when set)
-declare -a CMAKE_EXTRA_ARGS=()
+if [[ -n "$APP" ]]; then
+  APP_SRC_DIR="samples/$APP"
 
-# Overrides for non-standard layouts
-case "$APP" in
-  demo_apps)
-    APP_SRC_DIR="source"
+  # Build-time "extra CMake args" (only appended when set)
+  declare -a CMAKE_EXTRA_ARGS=()
 
-    # Add only what demo_apps needs
-    CMAKE_EXTRA_ARGS+=(-DCONFIG_DEMO_APPS=y)
+  # Overrides for non-standard layouts
+  case "$APP" in
+    demo_apps)
+      APP_SRC_DIR="source"
 
-    # Enable/disable LBS security (pairing callbacks in your code)
-    CMAKE_EXTRA_ARGS+=(-DCONFIG_BT_LBS_SECURITY_ENABLED=n)
+      # Add only what demo_apps needs
+      CMAKE_EXTRA_ARGS+=(-DCONFIG_DEMO_APPS=y)
 
-    # Run on DK Board
-    CMAKE_EXTRA_ARGS+=(-DCONFIG_DK_BOARD=n)
-	
+      # Enable/disable LBS security (pairing callbacks in your code)
+      CMAKE_EXTRA_ARGS+=(-DCONFIG_BT_LBS_SECURITY_ENABLED=n)
+
+      # Run on DK Board
+      CMAKE_EXTRA_ARGS+=(-DCONFIG_DK_BOARD=y)
+
 	  CMAKE_EXTRA_ARGS+=(-DCONFIG_AUDIO_CAPTURE_TEST=n)
-	
-    ;;
-esac
 
-if [[ ! -d "$APP_SRC_DIR" ]]; then
-  echo "Error: app source directory not found: $APP_SRC_DIR"
-  exit 1
-fi
+      ;;
+  esac
 
-# -----------------------------------------------------------------------------
-# Build directory depends on local vs docker
-# -----------------------------------------------------------------------------
-if [[ -n "$BUILD_DIR" ]]; then
-  APP_BUILD_DIR="$BUILD_DIR/$APP"
-else
-  if $DOCKER; then
-    APP_BUILD_DIR="build_docker/$APP"
-  else
-    APP_BUILD_DIR="build/$APP"
+  if [[ ! -d "$APP_SRC_DIR" ]]; then
+    echo "Error: app source directory not found: $APP_SRC_DIR"
+    exit 1
   fi
-fi
 
-# -----------------------------------------------------------------------------
-# Commands
-# IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
-# -----------------------------------------------------------------------------
-BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
-
-# Append CMake args only if we have any
-if (( ${#CMAKE_EXTRA_ARGS[@]} > 0 )); then
-  # Join array safely into the string command (space separated)
-  extra_joined=""
-  for a in "${CMAKE_EXTRA_ARGS[@]}"; do
-    extra_joined+=" $(printf '%q' "$a")"
-  done
-  BUILD_CMD+=" --${extra_joined}"
-fi
-
-FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
-if $DO_JLINK_FLASH; then
-  JOBS="$(get_jlink_jobs "$APP" "$APP_BUILD_DIR")"
-
-  # Validate files
-  while IFS='|' read -r dev hex; do
-    [[ -f "$hex" ]] || die "HEX file not found: $hex"
-  done <<< "$JOBS"
-
-  FLASH_CMD=""
-  while IFS='|' read -r dev hex; do
-    FLASH_CMD+=$'JLinkExe -NoGui 1 <<EOF\n'
-    FLASH_CMD+=$'device '"$dev"$'\n'
-    FLASH_CMD+=$'if SWD\nspeed 4000\nconnect\nr\n'
-    FLASH_CMD+=$'loadfile '"$hex"$'\n'
-    FLASH_CMD+=$'r\n'
-    # Only run ("g") after APP load
-    if [[ "$dev" == "NRF5340_XXAA_APP" ]]; then
-      FLASH_CMD+=$'g\n'
+  # Build directory depends on local vs docker
+  if [[ -n "$BUILD_DIR" ]]; then
+    APP_BUILD_DIR="$BUILD_DIR/$APP"
+  else
+    if $DOCKER; then
+      APP_BUILD_DIR="build_docker/$APP"
+    else
+      APP_BUILD_DIR="build/$APP"
     fi
-    FLASH_CMD+=$'exit\nEOF\n'
-  done <<< "$JOBS"
+  fi
+
+  # IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
+  BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
+
+  # Append CMake args only if we have any
+  if (( ${#CMAKE_EXTRA_ARGS[@]} > 0 )); then
+    extra_joined=""
+    for a in "${CMAKE_EXTRA_ARGS[@]}"; do
+      extra_joined+=" $(printf '%q' "$a")"
+    done
+    BUILD_CMD+=" --${extra_joined}"
+  fi
+
+  FLASH_CMD="west flash -d \"$APP_BUILD_DIR\""
+  if $DO_JLINK_FLASH; then
+    JOBS="$(get_jlink_jobs "$APP" "$APP_BUILD_DIR")"
+
+    # Validate files
+    while IFS='|' read -r dev hex; do
+      [[ -f "$hex" ]] || die "HEX file not found: $hex"
+    done <<< "$JOBS"
+
+    FLASH_CMD=""
+    while IFS='|' read -r dev hex; do
+      FLASH_CMD+=$'JLinkExe -NoGui 1 <<EOF\n'
+      FLASH_CMD+=$'device '"$dev"$'\n'
+      FLASH_CMD+=$'if SWD\nspeed 4000\nconnect\nr\n'
+      FLASH_CMD+=$'loadfile '"$hex"$'\n'
+      FLASH_CMD+=$'r\n'
+      # Only run ("g") after APP load
+      if [[ "$dev" == "NRF5340_XXAA_APP" ]]; then
+        FLASH_CMD+=$'g\n'
+      fi
+      FLASH_CMD+=$'exit\nEOF\n'
+    done <<< "$JOBS"
+  fi
 fi
 
 SEND_MODEL_CMD=""
 if [[ -n "$MODEL_BIN" ]]; then
-  SEND_MODEL_CMD="python ${APP_SRC_DIR}/utils/send_model_via_ble.py --bin \"${MODEL_BIN}\""
+  SEND_MODEL_CMD="python source/utils/send_model_via_ble.py --bin \"${MODEL_BIN}\""
+fi
+
+# --info + --bin + --yaml: standalone BLE send using info.yaml metadata (always runs on host)
+SEND_YAML_CMD=""
+if [[ -n "$MODEL_INFO" && -n "$MODEL_BIN" && -n "$MODEL_YAML" ]]; then
+  SEND_YAML_CMD="python source/utils/send_model_via_ble.py \
+--info \"${MODEL_INFO}\" \
+--bin \"${MODEL_BIN}\" \
+--yaml \"${MODEL_YAML}\""
+  # Don't also run the legacy --bin-only path
+  SEND_MODEL_CMD=""
+fi
+
+# --model_transfer: two-step fetch + BLE send via info.yaml bridge
+FETCH_MODEL_CMD=""
+SEND_MODEL_YAML_CMD=""
+if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
+  MT_PREFIX="$MODEL_TRANSFER_NAME"
+  MT_OUTPUT_DIR="source/external/model_files/${MT_PREFIX}"
+  MT_YAML="${MT_OUTPUT_DIR}/info.yaml"
+  MT_INFO_BIN="${MT_OUTPUT_DIR}/${MT_PREFIX}_program_info.bin"
+  MT_DATA_BIN="${MT_OUTPUT_DIR}/${MT_PREFIX}_program_data.bin"
+
+  FETCH_MODEL_CMD="python source/utils/fetch_model.py \
+--model \"${MODEL_TRANSFER_NAME}\" \
+--prefix \"${MT_PREFIX}\" \
+--output_dir \"${MT_OUTPUT_DIR}\" \
+--model_path \"${MODEL_TRANSFER_PATH}\" \
+--flash_address \"${MODEL_TRANSFER_FLASH_ADDR}\" \
+--map_mode \"${MODEL_TRANSFER_MAP_MODE}\""
+
+  if $SEND_BLE; then
+    SEND_MODEL_YAML_CMD="python source/utils/send_model_via_ble.py \
+--info \"${MT_INFO_BIN}\" \
+--bin \"${MT_DATA_BIN}\" \
+--yaml \"${MT_YAML}\""
+  fi
 fi
 
 # -----------------------------------------------------------------------------
-# Assemble ordered steps: BUILD -> FLASH -> SEND MODEL
+# Assemble ordered steps:
+#   DOCKER_STEPS – run inside Docker when -d is set (build, flash, fetch_model)
+#   LOCAL_STEPS  – always run on the host (send_model_via_ble for --model_transfer)
 # -----------------------------------------------------------------------------
-declare -a STEPS=()
-$DO_BUILD && STEPS+=("$BUILD_CMD")
-$DO_FLASH && STEPS+=("$FLASH_CMD")
-[[ -n "$SEND_MODEL_CMD" ]] && STEPS+=("$SEND_MODEL_CMD")
+declare -a DOCKER_STEPS=()
+declare -a LOCAL_STEPS=()
 
-if [[ ${#STEPS[@]} -eq 0 ]]; then
+$DO_BUILD && DOCKER_STEPS+=("$BUILD_CMD")
+$DO_FLASH && DOCKER_STEPS+=("$FLASH_CMD")
+[[ -n "$SEND_MODEL_CMD"      ]] && DOCKER_STEPS+=("$SEND_MODEL_CMD")
+[[ -n "$FETCH_MODEL_CMD"     ]] && DOCKER_STEPS+=("$FETCH_MODEL_CMD")
+# BLE send always runs on the host (needs direct BLE hardware access)
+[[ -n "$SEND_MODEL_YAML_CMD" ]] && LOCAL_STEPS+=("$SEND_MODEL_YAML_CMD")
+# Standalone BLE send via --info/--bin/--yaml (always runs on host)
+[[ -n "$SEND_YAML_CMD"       ]] && LOCAL_STEPS+=("$SEND_YAML_CMD")
+
+if [[ ${#DOCKER_STEPS[@]} -eq 0 ]] && [[ ${#LOCAL_STEPS[@]} -eq 0 ]]; then
   echo "Nothing to do"
   exit 1
 fi
 
 # -----------------------------------------------------------------------------
 # Execute steps
-# - Docker: ONE container, run all steps sequentially
-# - Local : run all steps sequentially on host
+# - Docker: DOCKER_STEPS run inside the container; LOCAL_STEPS run on host after
+# - Local:  all steps run sequentially on host
 # -----------------------------------------------------------------------------
 if $DOCKER; then
-    echo "=== Running in Docker image: $DOCKER_IMAGE ==="
-    if $BLE_NEEDED; then
-        echo "    (dbus socket mounted: /var/run/dbus/system_bus_socket)"
+    if [[ ${#DOCKER_STEPS[@]} -gt 0 ]]; then
+        echo "=== Running Docker steps in image: $DOCKER_IMAGE ==="
+        if $BLE_NEEDED; then
+            echo "    (dbus socket mounted: /var/run/dbus/system_bus_socket)"
+        fi
+
+        joined=""
+        for c in "${DOCKER_STEPS[@]}"; do
+            joined+="echo; echo \">>> $c\"; "
+            joined+="$c; "
+        done
+
+        echo ">>> Docker command:"
+        printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -lc "$joined"
+        echo
+
+        "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -lc "$joined"
     fi
 
-    joined=""
-    for c in "${STEPS[@]}"; do
-        # Print command in container, then run it
-        joined+="echo; echo \">>> $c\"; "
-        joined+="$c; "
-    done
-
-    echo ">>> Docker command:"
-    printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -lc "$joined"
-    echo
-
-    "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -lc "$joined"
+    # LOCAL_STEPS always run on the host, even when -d was passed
+    if [[ ${#LOCAL_STEPS[@]} -gt 0 ]]; then
+        echo
+        echo "=== Running host-side steps (BLE transfer on local machine) ==="
+        for c in "${LOCAL_STEPS[@]}"; do
+            echo
+            echo ">>> $c"
+            bash -lc "$c"
+        done
+    fi
 else
-    for c in "${STEPS[@]}"; do
+    all_steps=("${DOCKER_STEPS[@]}" "${LOCAL_STEPS[@]}")
+    for c in "${all_steps[@]}"; do
         echo
         echo ">>> $c"
         bash -lc "$c"

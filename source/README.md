@@ -490,21 +490,198 @@ Firmware images are uploaded from the host PC using AuTerm over the configured U
 - The wdt_disable CLI command is implemented for watchdog validation testing. It performs an invalid memory access to generate a system fault. As watchdog feeding stops after the crash, the watchdog timeout occurs and forces a system reset, confirming correct watchdog functionality.
 - An additional CLI command (threads_stop) is available to terminate all running threads for testing purposes, allowing validation of watchdog recovery behavior when the system becomes unresponsive.
 
-### Model Loading
-To load a model, execute the Python script from another terminal in the repository root folder (spark).
+### Model Generation and BLE Transfer
 
-Upon execution, the script scans for available Bluetooth devices and displays a list of detected BLE servers.
-Select the index corresponding to `Nordic_LBS` to pair with the device. Once pairing is complete, the client will begin transferring the model to the target device. 
+### Python Setup
 
-For loading `KWS` model:
-```
-./scripts/run.sh -d --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
+```bash
+cd spark
+pip install -r scripts/requirements.txt
 ```
 
+### info.yaml – Model Metadata File
 
-For loading `MNIST` model:
+`fetch_model.py` generates an `info.yaml` alongside the binary files. It is the single source of truth for model metadata consumed by `send_model_via_ble.py`.
+
+```yaml
+flash_address: "0x101000"
+input_shape: [49, 10, 1]
+output_shape: [1, 1, 12]
+edge_learning:
+  enabled: false
+  num_classes: 0
+  num_neurons: 1
 ```
-./scripts/run.sh -d --app demo_apps --bin source/external/model_files/mnist/mnist_program_data.bin
+
+| Field | Description |
+|-------|-------------|
+| `flash_address` | Target SPI flash address for the model data segment |
+| `input_shape` | Model input dimensions read from the Akida model |
+| `output_shape` | Model output dimensions read from the Akida model |
+| `edge_learning.enabled` | `true` when the model uses on-device edge learning |
+| `edge_learning.num_classes` | Number of classes for edge learning (0 = disabled) |
+| `edge_learning.num_neurons` | Neurons per class (1 = standard, >1 = EL model) |
+
+---
+
+### Step 1 – Generate Bin Files and info.yaml
+
+```bash
+cd spark
+
+# KWS model at flash address 0x101000 with default MapMode=1
+python source/utils/fetch_model.py \
+    --model kws \
+    --prefix kws \
+    --output_dir source/external/model_files/kws \
+    --flash_address 0x101000
+
+# With a direct URL or local .fbz path
+python source/utils/fetch_model.py \
+    --model kws \
+    --prefix kws \
+    --output_dir source/external/model_files/kws \
+    --model_path http://server/akida_model.fbz \
+    --flash_address 0x101000 \
+    --map_mode 1
+
+# MNIST model at its flash address
+python source/utils/fetch_model.py \
+    --model mnist \
+    --prefix mnist \
+    --output_dir source/external/model_files/mnist \
+    --flash_address 0x1000
+```
+
+**New arguments:**
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--flash_address` | `0x1000` | Flash address written into `info.yaml` |
+| `--map_mode` | `1` | Akida `MapMode` value passed to `model.map()` |
+
+**Outputs** (in `--output_dir`):
+- `<prefix>_program_info.bin` / `_program_data.bin` – binary segments for BLE transfer
+- `<prefix>_program_info.cpp` / `_program_data.cpp` – C++ array files for compile-time inclusion
+- `info.yaml` – metadata bridge consumed by `send_model_via_ble.py`
+- `<prefix>_shapes.json` – shape sidecar (used to skip regeneration on re-runs)
+
+---
+
+### Step 2 – Transfer via BLE
+
+```bash
+cd spark
+
+# Recommended: pass info.yaml as the metadata source
+python source/utils/send_model_via_ble.py \
+    --info source/external/model_files/kws/kws_program_info.bin \
+    --bin  source/external/model_files/kws/kws_program_data.bin \
+    --yaml source/external/model_files/kws/info.yaml
+
+# Legacy: explicit CLI args (still supported, override YAML values)
+python source/utils/send_model_via_ble.py \
+    --info source/external/model_files/kws/kws_program_info.bin \
+    --bin  source/external/model_files/kws/kws_program_data.bin \
+    --flash_address 0x101000 \
+    --input_shape 49,10,1 \
+    --output_shape 1,1,12
+```
+
+**New argument:** `--yaml <path>` — path to `info.yaml`. Explicit CLI args (`--flash_address`, `--input_shape`, etc.) take priority over YAML values when provided.
+
+---
+
+### One-Step Wrapper – run_model_transfer.sh
+
+```bash
+cd spark
+
+# Default KWS model from BrainChip server
+source/utils/run_model_transfer.sh
+
+# KWS at a specific flash address and map mode
+source/utils/run_model_transfer.sh \
+    http://server/akida_model.fbz kws "" 0x101000 "" "" v1 "" 1
+
+# Edge-learning model (10 classes)
+source/utils/run_model_transfer.sh \
+    http://server/akida_model_el.fbz kws "" 0x1000 "" 10
+```
+
+Positional arguments: `MODEL_PATH MODEL_NAME OUTPUT_DIR FLASH_ADDRESS FS_NAME NUM_CLASSES AKIDA_VERSION NEURONS_PER_CLASS MAP_MODE`
+
+---
+
+### Using run.sh (build + flash + model transfer)
+
+```bash
+cd spark
+
+# Fetch model locally → generate bins + info.yaml only (no BLE send)
+./scripts/run.sh \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000
+
+# Fetch inside Docker → generate bins + info.yaml only (no BLE send)
+./scripts/run.sh -d \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000
+
+# Fetch inside Docker + also send via BLE on the host (add --send_ble)
+./scripts/run.sh -d \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000 \
+    --send_ble
+
+# Build + flash inside Docker, fetch model, then send via BLE on the host
+./scripts/run.sh -d -b -f \
+    --app demo_apps \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000 \
+    --map_mode 1 \
+    --send_ble
+```
+
+**Flags for `run.sh` model transfer:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--model_transfer <url/path>` | — | Fetch `.fbz`, generate bins + `info.yaml` (fetch only by default) |
+| `--send_ble` | off | Also send generated bins via BLE after fetch (requires `--model_transfer`) |
+| `--model_name <name>` | `kws` | Model name prefix for output files |
+| `--model_flash_addr <addr>` | `0x1000` | Flash address passed to `fetch_model.py` |
+| `--map_mode <int>` | `1` | Akida `MapMode` value |
+| `--info <path>` | — | Path to `_program_info.bin` for standalone BLE send |
+| `--yaml <path>` | — | Path to `info.yaml` for standalone BLE send (use with `--info` + `--bin`) |
+
+Output files are written to `source/external/model_files/<model_name>/`.
+
+---
+
+### Two-Step Workflow (fetch in Docker, BLE send on host)
+
+Run fetch and BLE transfer as two independent commands — useful when the Akida SDK is only available inside Docker but BLE hardware is on the host.
+
+```bash
+cd spark
+
+# Step 1: Fetch model inside Docker → generates bins + info.yaml (no BLE send)
+./scripts/run.sh -d \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000 \
+    --map_mode 1
+
+# Step 2: Send pre-generated files via BLE on the host (no Docker)
+./scripts/run.sh \
+    --info source/external/model_files/kws/kws_program_info.bin \
+    --bin  source/external/model_files/kws/kws_program_data.bin \
+    --yaml source/external/model_files/kws/info.yaml
 ```
 
 
