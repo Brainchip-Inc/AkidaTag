@@ -9,6 +9,7 @@ cmake_minimum_required(VERSION 3.20.0)
 set(CONF_FILE
     ${CMAKE_CURRENT_SOURCE_DIR}/prj.conf
     ${CMAKE_CURRENT_SOURCE_DIR}/imu_app.conf
+    ${CMAKE_CURRENT_SOURCE_DIR}/camera_app.conf
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/demo_apps/custom_app.conf 
 )
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
@@ -51,6 +52,7 @@ add_subdirectory(apps)
 # Make sure the app sees the DSP + Core headers
 target_include_directories(app PRIVATE include 
 	include/audio
+    include/camera
     include/led
     ${CMSIS_DSP_DIR}/CMSIS/DSP/Include
     ${ZEPHYR_BASE}/modules/hal/cmsis/CMSIS/Core/Include
@@ -69,10 +71,16 @@ target_sources(app PRIVATE
 	core/common/audio/mfcc.c
 	core/common/audio/audio_processor.c
 	core/common/inference/akida.cpp
+    core/interface/camera/spi_camera.c
 	core/io_objects.cpp
 	core/boot_manager.c
 	core/littlefs_storage.c
 )
+if(CONFIG_CAMERA_ENABLE_THREAD)
+    target_sources(app PRIVATE
+        core/interface/camera/spi_camera.c
+    )
+endif()
 
 target_sources(app PRIVATE
     core/common/audio/kissfft/kiss_fft.c
