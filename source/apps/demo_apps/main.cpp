@@ -30,11 +30,8 @@
 #include "akida.h"
 #include "akida/hardware_device.h"
 #include "io_objects.h"
-#include "kws/kws_program_info.h"
-#include "mnist/mnist_program_info.h"
 #include "nrf_spi.h"
 #include "sample_input/kws/kws_inputs.h"
-#include "sample_input/mnist/mnist_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <cmath>
 #include <hardware_device_impl.h>
@@ -81,6 +78,11 @@ extern "C" {
 extern int rms_threshold;
 extern int g_min_inference_frames;
 extern int speech_active_time_ms;
+
+extern "C" {
+int file_transfer_load_meta(int app_idx, model_meta_t *meta_out);
+int infer(int app_index_l);
+}
 
 void cli_worker_proc_thread(void *a, void *b, void *c);
 /*
@@ -322,14 +324,17 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 #define VALID_PROGRAM_DATA_KWS 0x24D20000 // 0xF4020100 // 0x64d70000
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
-const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
+const unsigned char *inputs[] = {kws_inputs};
 uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
                                  VALID_PROGRAM_DATA_KWS};
-const unsigned char *program_info[] = {mnist_program_info, kws_program_info};
-const int64_t program_info_len[] = {mnist_program_info_len,
-                                    kws_program_info_len};
 
-int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
+uint32_t g_num_classes = 0;
+uint32_t g_num_neurons_per_class = 1;
+uint32_t g_num_edge_learn_classes = 0;
+uint32_t g_input_size = 0;
+// int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
+int32_t *akida_output;
+uint32_t akd_op_size = 0;
 
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 /* IMU thread variables*/
@@ -824,6 +829,34 @@ static int start_led_ind(void) {
   return 0;
 }
 
+static void update_model_params(model_meta_t kws_meta) {
+  g_input_size = kws_meta.input_shape[0] * kws_meta.input_shape[1] *
+                 kws_meta.input_shape[2];
+  g_num_classes = kws_meta.output_shape[0] * kws_meta.output_shape[1] *
+                  kws_meta.output_shape[2];
+  printk("kws_meta.num_edge_classes %d \n\r", kws_meta.num_edge_classes);
+  g_num_neurons_per_class = (kws_meta.num_edge_classes & 0xFFFF0000) >> 16;
+  g_num_edge_learn_classes = (kws_meta.num_edge_classes & 0xFFFF);
+
+  printk("kws_meta.input_shape[0] %d, kws_meta.input_shape[1] %d, "
+         "kws_meta.input_shape[2] %d\n\r",
+         kws_meta.input_shape[0], kws_meta.input_shape[1],
+         kws_meta.input_shape[2]);
+
+  printk("kws_meta.output_shape[0] %d, kws_meta.output_shape[1] %d, "
+         "kws_meta.output_shape[2] %d\n\r",
+         kws_meta.output_shape[0], kws_meta.output_shape[1],
+         kws_meta.output_shape[2]);
+
+  printk("g_input_size %d, g_num_classes %d, g_num_neurons_per_class %d, "
+         "g_num_edge_learn_classes %d \n\r",
+         g_input_size, g_num_classes, g_num_neurons_per_class,
+         g_num_edge_learn_classes);
+
+  akida_output = new int32_t[g_num_classes * g_num_neurons_per_class];
+  akd_op_size = sizeof(akida_output) * g_num_classes * g_num_neurons_per_class;
+}
+
 int main(void) {
 
   check_reset_reason();
@@ -860,34 +893,52 @@ int main(void) {
 
   init_boot_count();
 
+  /* Load model metadata from LittleFS (written there by a previous BLE upload).
+   * The metadata contains the flash address and program_info binary so we do
+   * not need to rely on compile-time flash_offsets[] or hardcoded program_info
+   * arrays. */
+  model_meta_t kws_meta;
+  int meta_ret = file_transfer_load_meta(1, &kws_meta);
+
+  if (meta_ret != 0) {
+    /* CRC or file-not-found – fall back to compiled defaults */
+    printk("Metadata unavailable (err %d) using compiled defaults\n", meta_ret);
+    return -1;
+  }
+
+  uint32_t kws_flash_addr = kws_meta.flash_address;
+
   akida_config_spi(1);
-  int ret = check_program_data(flash_offsets[1], 4, 1);
+  int ret = check_program_data(kws_flash_addr, 4, 1);
   akida_config_spi(0);
 
   if (ret == false) {
-    printk("model data, not present in SPI Flash, upload the model\n");
+    printk("Model data not present in SPI Flash please upload model\n");
     kws_model_present = false;
   } else {
-    printk("model is already present \n");
-    // program the model info part to AKD1500
+    printk("Model data found at 0x%08X\n", kws_flash_addr);
+
     akd_device.toggle_clock_counter(true);
-    printk("Programming the model\n");
+    printk("Programming model info into AKD1500\n");
 
     uint32_t s_dma_cycls = akd_device.read_clock_counter();
     uint64_t start_time = time_ms();
 
-    akida_program_flash((uint8_t *)program_info[1], program_info_len[1],
-                        flash_offsets[1]);
-    uint32_t prog_time = time_ms() - start_time;
+    /* CRC verified by file_transfer_load_meta –
+     * sram_upload_buffer holds program_info; flash_address from FS header */
+    akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len,
+                        kws_meta.flash_address);
+
+    uint32_t prog_time = (uint32_t)(time_ms() - start_time);
     uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
     uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
-
-    printk("\n model program time= %u dma cycles, dma time = %d us, cpu time = "
-           "%u ms \n\r",
+    printk("\nModel program: %u dma cycles, %u us dma, %u ms cpu\n",
            delta_cycle, dma_time, prog_time);
 
     akd_device.set_batch_size(1, true);
     kws_model_present = true;
+
+    update_model_params(kws_meta);
   }
 
   if (kws_model_present) {
@@ -977,7 +1028,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     uint32_t s_dma_cycls = akd_device.read_clock_counter();
 
     if (SUCCESS == akida_forward(input, input_shape, (uint8_t *)akida_output,
-                                 sizeof(akida_output))) {
+                                 akd_op_size)) {
       uint32_t inf_time = time_ms() - start_time;
       uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
       uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
@@ -986,8 +1037,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                "= %u ms\n\r",
                delta_cycle, dma_time, inf_time);
       }
-      int found =
-          get_inferred_class(akida_output, NUM_CLASSES, NUM_NEURONS_PER_CLASS);
+      int found = get_inferred_class(akida_output, g_num_classes,
+                                     g_num_neurons_per_class);
 
       if (found == -1) {
         if (verbose_on) {
@@ -1023,16 +1074,17 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       if (score >= score_threshold) {
         current_class = found;
         // Compute softmax confidence over class-level spike sums
-        float class_sums[NUM_CLASSES] = {0};
-        for (int c = 0; c < NUM_CLASSES; c++)
-          for (int n = 0; n < NUM_NEURONS_PER_CLASS; n++)
-            class_sums[c] += (float)akida_output[c * NUM_NEURONS_PER_CLASS + n];
+        float class_sums[g_num_classes] = {0};
+        for (int c = 0; c < g_num_classes; c++)
+          for (int n = 0; n < g_num_neurons_per_class; n++)
+            class_sums[c] +=
+                (float)akida_output[c * g_num_neurons_per_class + n];
         float max_sum = class_sums[0];
-        for (int c = 1; c < NUM_CLASSES; c++)
+        for (int c = 1; c < g_num_classes; c++)
           if (class_sums[c] > max_sum)
             max_sum = class_sums[c];
         float exp_sum = 0.0f;
-        for (int c = 0; c < NUM_CLASSES; c++)
+        for (int c = 0; c < g_num_classes; c++)
           exp_sum += expf(class_sums[c] - max_sum);
         float confidence = (exp_sum > 0.0f)
                                ? expf(class_sums[found] - max_sum) / exp_sum
@@ -1278,30 +1330,35 @@ static void learning_on_user_input(int input_type) {
 }
 
 /* function to run the inference */
-int infer(int app_index_l) {
+extern "C" int infer(int app_index_l) {
   if (app_index_l > 1) {
     printk("Illegal model index %d\n", app_index_l);
     return -1;
   }
-  int32_t perc = 0;
+
+  /* Load metadata from LittleFS; fall back to compile-time defaults on error */
+  model_meta_t infer_meta;
+  int meta_ret = file_transfer_load_meta(app_index_l, &infer_meta);
+  uint32_t use_flash_addr = infer_meta.flash_address;
+  update_model_params(infer_meta);
+
   akida_config_spi(1);
-  int ret = check_program_data(flash_offsets[app_index_l], 4, app_index_l);
+  int ret = check_program_data(use_flash_addr, 4, app_index_l);
   akida_config_spi(0);
 
   if (ret == false) {
-    printk("model data, not present in SPI Flash, upload the model\n");
+    printk("Model data not present at 0x%08X – upload the model\n",
+           use_flash_addr);
     return -1;
-  } else {
-    printk("model is already present \n");
-    // program the model info part to AKD1500
-
-    printk("Programming the model\n");
-    akida_program_flash((uint8_t *)program_info[app_index_l],
-                        program_info_len[app_index_l],
-                        flash_offsets[app_index_l]);
-    akd_device.set_batch_size(1, true);
-    app_index = app_index_l;
   }
+
+  /* CRC verified by file_transfer_load_meta –
+   * sram_upload_buffer holds program_info; flash_address from FS header */
+  akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
+                      infer_meta.flash_address);
+
+  akd_device.set_batch_size(1, true);
+  app_index = app_index_l;
 
   akd_device.toggle_clock_counter(true);
 
@@ -1314,21 +1371,16 @@ int infer(int app_index_l) {
   int num_classes = 10;
   int num_neurons_per_class = 1;
 
-  auto shape = mnist_inputs_shape;
-  int output_size = 10 * 4;
-  if (app_index_l == 1) {
-    shape = kws_inputs_shape;
-    num_classes = NUM_CLASSES;
-    num_neurons_per_class = NUM_NEURONS_PER_CLASS;
-    output_size = sizeof(akida_output);
-  }
+  auto shape = kws_inputs_shape;
+  num_classes = g_num_classes;
+  num_neurons_per_class = g_num_neurons_per_class;
 
   int class_id = -1;
   uint32_t inp_shap[] = {shape[0], shape[1], shape[2]};
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
   ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
-                      (uint8_t *)akida_output, output_size);
+                      (uint8_t *)akida_output, akd_op_size);
   e_tick = time_ms();
   e_dma_cycls = akd_device.read_clock_counter();
   delta_cycle = e_dma_cycls - s_dma_cycls;
@@ -1350,7 +1402,7 @@ int infer(int app_index_l) {
     kws_threads_suspended = true;
   } else if (app_index_l == 1) { // kws
     printk("\nClass : %d\n", class_id);
-    printk("Word : %s\n", kws_tags[class_id]);
+    printk("Word : %s\n", kws_new_tags[class_id]);
     kws_model_present = true;
     if (!is_kws_inference_started) {
       initiate_kws_inference();

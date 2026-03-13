@@ -1,12 +1,17 @@
 #include "ble_services/file_transfer.h"
 #include "akd_spi_flash_handler.h"
+
 #include "led_init.h"
+
+#include <stddef.h>
+
 #include <string.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
+#include <zephyr/fs/fs.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
@@ -17,10 +22,15 @@ K_EVENT_DEFINE(sram_buf_event);
 
 LOG_MODULE_REGISTER(file_transfer, CONFIG_LOG_DEFAULT_LEVEL);
 
+/* -------------------------------------------------------------------------
+ * Forward declarations
+ * ---------------------------------------------------------------------- */
+
+static void send_ack_to_host(uint8_t ack_code);
+
 static ssize_t get_app_index(struct bt_conn *conn,
                              const struct bt_gatt_attr *attr, const void *app,
                              uint16_t len, uint16_t offset, uint8_t flags);
-
 static ssize_t file_transfer_write(struct bt_conn *conn,
                                    const struct bt_gatt_attr *attr,
                                    const void *buf, uint16_t len,
@@ -28,20 +38,50 @@ static ssize_t file_transfer_write(struct bt_conn *conn,
 static ssize_t get_file_size(struct bt_conn *conn,
                              const struct bt_gatt_attr *attr, const void *buf,
                              uint16_t len, uint16_t offset, uint8_t flags);
-
 static ssize_t get_file_crc(struct bt_conn *conn,
                             const struct bt_gatt_attr *attr, const void *buf,
                             uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t set_transfer_type(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags);
+/* New characteristic handlers */
+static ssize_t get_input_shape(struct bt_conn *conn,
+                               const struct bt_gatt_attr *attr, const void *buf,
+                               uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t get_output_shape(struct bt_conn *conn,
+                                const struct bt_gatt_attr *attr,
+                                const void *buf, uint16_t len, uint16_t offset,
+                                uint8_t flags);
+static ssize_t get_flash_address(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags);
+static ssize_t get_total_length(struct bt_conn *conn,
+                                const struct bt_gatt_attr *attr,
+                                const void *buf, uint16_t len, uint16_t offset,
+                                uint8_t flags);
+static ssize_t get_is_edge_learned(struct bt_conn *conn,
+                                   const struct bt_gatt_attr *attr,
+                                   const void *buf, uint16_t len,
+                                   uint16_t offset, uint8_t flags);
+static ssize_t get_num_edge_classes(struct bt_conn *conn,
+                                    const struct bt_gatt_attr *attr,
+                                    const void *buf, uint16_t len,
+                                    uint16_t offset, uint8_t flags);
+static ssize_t get_fs_name(struct bt_conn *conn,
+                           const struct bt_gatt_attr *attr, const void *buf,
+                           uint16_t len, uint16_t offset, uint8_t flags);
 
-// UUID definitions, the client must have the same UUIDs during communication
+/* -------------------------------------------------------------------------
+ * UUID definitions – must match Python send_model_via_ble.py
+ * ---------------------------------------------------------------------- */
 #define BT_UUID_FILE_TRANSFER_SERVICE_VAL                                      \
   BT_UUID_128_ENCODE(0xf000aa00, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FILE_TRANSFER_CHAR_VAL                                         \
   BT_UUID_128_ENCODE(0xf000aa01, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FILE_TRANSFER_ACK_CHAR_VAL                                     \
   BT_UUID_128_ENCODE(0xf000aa02, 0x0451, 0x4000, 0xb000, 0x000000000000)
-
-/* this macro is unused in code */
 #define BT_UUID_FILE_TRANSFER_CTRL_CHAR_VAL                                    \
   BT_UUID_128_ENCODE(0xf000aa03, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FILE_TRANSFER_SIZE_CHAR_VAL                                    \
@@ -50,8 +90,25 @@ static ssize_t get_file_crc(struct bt_conn *conn,
   BT_UUID_128_ENCODE(0xf000aa05, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FILE_CRC_CHAR_VAL                                              \
   BT_UUID_128_ENCODE(0xf000aa06, 0x0451, 0x4000, 0xb000, 0x000000000000)
+#define BT_UUID_TRANSFER_TYPE_CHAR_VAL                                         \
+  BT_UUID_128_ENCODE(0xf000aa07, 0x0451, 0x4000, 0xb000, 0x000000000000)
+/* New metadata characteristics (aa08–aa0e) */
+#define BT_UUID_INPUT_SHAPE_CHAR_VAL                                           \
+  BT_UUID_128_ENCODE(0xf000aa08, 0x0451, 0x4000, 0xb000, 0x000000000000)
+#define BT_UUID_OUTPUT_SHAPE_CHAR_VAL                                          \
+  BT_UUID_128_ENCODE(0xf000aa09, 0x0451, 0x4000, 0xb000, 0x000000000000)
+#define BT_UUID_FLASH_ADDRESS_CHAR_VAL                                         \
+  BT_UUID_128_ENCODE(0xf000aa0a, 0x0451, 0x4000, 0xb000, 0x000000000000)
+#define BT_UUID_TOTAL_LENGTH_CHAR_VAL                                          \
+  BT_UUID_128_ENCODE(0xf000aa0b, 0x0451, 0x4000, 0xb000, 0x000000000000)
+#define BT_UUID_IS_EDGE_LEARNED_CHAR_VAL                                       \
+  BT_UUID_128_ENCODE(0xf000aa0c, 0x0451, 0x4000, 0xb000, 0x000000000000)
+#define BT_UUID_NUM_EDGE_CLASSES_CHAR_VAL                                      \
+  BT_UUID_128_ENCODE(0xf000aa0d, 0x0451, 0x4000, 0xb000, 0x000000000000)
+#define BT_UUID_FS_NAME_CHAR_VAL                                               \
+  BT_UUID_128_ENCODE(0xf000aa0e, 0x0451, 0x4000, 0xb000, 0x000000000000)
 
-// 1. Define the 128-bit structures
+/* UUID struct instances */
 static struct bt_uuid_128 file_transfer_service_uuid =
     BT_UUID_INIT_128(BT_UUID_FILE_TRANSFER_SERVICE_VAL);
 static struct bt_uuid_128 file_transfer_char_uuid =
@@ -64,56 +121,134 @@ static struct bt_uuid_128 app_char_uuid_struct =
     BT_UUID_INIT_128(APP_CHAR_UUID_VAL);
 static struct bt_uuid_128 file_crc_uuid =
     BT_UUID_INIT_128(BT_UUID_FILE_CRC_CHAR_VAL);
+static struct bt_uuid_128 transfer_type_uuid =
+    BT_UUID_INIT_128(BT_UUID_TRANSFER_TYPE_CHAR_VAL);
+static struct bt_uuid_128 input_shape_uuid =
+    BT_UUID_INIT_128(BT_UUID_INPUT_SHAPE_CHAR_VAL);
+static struct bt_uuid_128 output_shape_uuid =
+    BT_UUID_INIT_128(BT_UUID_OUTPUT_SHAPE_CHAR_VAL);
+static struct bt_uuid_128 flash_address_uuid =
+    BT_UUID_INIT_128(BT_UUID_FLASH_ADDRESS_CHAR_VAL);
+static struct bt_uuid_128 total_length_uuid =
+    BT_UUID_INIT_128(BT_UUID_TOTAL_LENGTH_CHAR_VAL);
+static struct bt_uuid_128 is_edge_learned_uuid =
+    BT_UUID_INIT_128(BT_UUID_IS_EDGE_LEARNED_CHAR_VAL);
+static struct bt_uuid_128 num_edge_classes_uuid =
+    BT_UUID_INIT_128(BT_UUID_NUM_EDGE_CLASSES_CHAR_VAL);
+static struct bt_uuid_128 fs_name_uuid =
+    BT_UUID_INIT_128(BT_UUID_FS_NAME_CHAR_VAL);
 
-// 2. Create the pointer macro for the GATT table
-#define APP_CHAR_UUID_PTR (&app_char_uuid_struct.uuid)
-// 2. Create pointers to the base 'bt_uuid' for use in GATT definitions
-// Use these in your BT_GATT_SERVICE_DEFINE
+/* UUID pointer macros */
 #define FILE_SVC_UUID (&file_transfer_service_uuid.uuid)
 #define FILE_CHAR_UUID (&file_transfer_char_uuid.uuid)
 #define FILE_ACK_UUID (&file_transfer_ack_uuid.uuid)
 #define FILE_SIZE_UUID (&file_transfer_size_uuid.uuid)
+#define APP_CHAR_UUID_PTR (&app_char_uuid_struct.uuid)
 #define FILE_CRC_UUID (&file_crc_uuid.uuid)
+#define TRANSFER_TYPE_UUID (&transfer_type_uuid.uuid)
+#define INPUT_SHAPE_UUID (&input_shape_uuid.uuid)
+#define OUTPUT_SHAPE_UUID (&output_shape_uuid.uuid)
+#define FLASH_ADDRESS_UUID (&flash_address_uuid.uuid)
+#define TOTAL_LENGTH_UUID (&total_length_uuid.uuid)
+#define IS_EDGE_LEARNED_UUID (&is_edge_learned_uuid.uuid)
+#define NUM_EDGE_CLASSES_UUID (&num_edge_classes_uuid.uuid)
+#define FS_NAME_UUID (&fs_name_uuid.uuid)
 
-volatile static size_t total_pgm_size = 0;
-volatile static size_t ble_pgm_offset = 0;
-volatile static size_t total_received = 0;
+/* Permission shorthand */
+#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
+#define WRITE_PERM BT_GATT_PERM_WRITE_ENCRYPT
+#else
+#define WRITE_PERM BT_GATT_PERM_WRITE
+#endif
+
+/* -------------------------------------------------------------------------
+ * Transfer state
+ * ---------------------------------------------------------------------- */
 #define ACK_FLASH_ERASE_DONE 0xEE
 #define ACK_FLASH_WRITE_DONE 0xCC
-uint32_t app_flash_offset = AKD_FLASH_OFFSET;
-static uint32_t expected_crc = 0;
+#define ACK_CRC_FAIL 0xBB
+#define TRANSFER_TYPE_INFO 0x00
+#define TRANSFER_TYPE_DATA 0x01
+#define MAX_FS_NAME_LEN 64
 
-/* Define SRAM buffer in a named section */
-__attribute__((section(".sram_upload_buf"),
-               used)) uint8_t sram_upload_buffer[BUFFER_SIZE];
+volatile static size_t total_pgm_size = 0;
+volatile static size_t total_received = 0;
+static size_t ble_pgm_offset = 0;   /* write cursor inside SRAM buffer  */
+static size_t sram_info_offset = 0; /* write cursor inside info_data    */
 
-static void send_ack_to_host(uint8_t ack_code);
-static void ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                uint16_t value);
+static uint8_t transfer_type = TRANSFER_TYPE_DATA;
+static uint32_t expected_crc = 0; /* CRC received from host via aa06  */
+static uint32_t data_crc_state = 0xFFFFFFFF; /* running CRC for DATA transfer */
+
+/* -------------------------------------------------------------------------
+ * Metadata received via BLE characteristics (before INFO data stream)
+ * ---------------------------------------------------------------------- */
+static uint32_t meta_total_length = 0;
+static uint32_t meta_input_shape[MAX_MODEL_INP_SHAPE_DIMS] = {0};
+static uint32_t meta_output_shape[MAX_MODEL_OUTP_SHAPE_DIMS] = {0};
+static uint32_t meta_flash_address = 0;
+static uint32_t meta_is_edge_learned = 0;
+static uint32_t meta_num_edge_classes = 0;
+static char meta_fs_name[MAX_FS_NAME_LEN] = {0};
+
+extern int infer(int app_index_l);
+
+/* -------------------------------------------------------------------------
+ * In-RAM metadata – one per app slot.
+ * Populated when an INFO BLE transfer completes; also loaded from FS at boot.
+ * ---------------------------------------------------------------------- */
+static model_meta_t current_meta[2];
+
+/* LittleFS file 1: model_meta_t header struct (app 0 = MNIST, app 1 = KWS/EL)
+ */
+static const char *meta_hdr_paths[2] = {
+    "/ext/model_hdr_0",
+    "/ext/kws_model_hdr",
+};
+
+/* LittleFS file 2: raw program_info binary (loaded into sram_upload_buffer) */
+static const char *model_info_paths[2] = {
+    "/ext/model_info_0",
+    "/ext/kws_model_info",
+};
+
+/* -------------------------------------------------------------------------
+ * SRAM upload buffer – used by DATA transfers (chunk staging)
+ * ---------------------------------------------------------------------- */
+__attribute__((section(".sram_upload_buf"), used))
+uint8_t sram_upload_buffer[BUFFER_SIZE];
+
+/* Flash write cursor – updated as chunks are flushed to SPI flash */
+static uint32_t app_flash_offset = AKD_FLASH_OFFSET;
+
+/* -------------------------------------------------------------------------
+ * ACK notification
+ * ---------------------------------------------------------------------- */
 static bool notify_enabled = false;
 
+static void ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,
+                                uint16_t value) {
+  notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+  LOG_INF("ACK notify %s\n", notify_enabled ? "enabled" : "disabled");
+}
+
+/* -------------------------------------------------------------------------
+ * GATT service definition
+ * ---------------------------------------------------------------------- */
 BT_GATT_SERVICE_DEFINE(
     file_transfer_svc, BT_GATT_PRIMARY_SERVICE(FILE_SVC_UUID),
 
-    BT_GATT_CHARACTERISTIC(FILE_SIZE_UUID, BT_GATT_CHRC_WRITE,
-#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
-                           BT_GATT_PERM_WRITE_ENCRYPT,
-#else
-                           BT_GATT_PERM_WRITE,
-#endif
-                           NULL, get_file_size, NULL),
+    /* aa04 – file size (triggers flash erase on DATA; just acks on INFO) */
+    BT_GATT_CHARACTERISTIC(FILE_SIZE_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
+                           get_file_size, NULL),
 
-    BT_GATT_CHARACTERISTIC(FILE_CHAR_UUID, BT_GATT_CHRC_WRITE,
-#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
-                           BT_GATT_PERM_WRITE_ENCRYPT,
-#else
-                           BT_GATT_PERM_WRITE,
-#endif
-                           NULL, file_transfer_write, NULL),
+    /* aa01 – data chunk stream */
+    BT_GATT_CHARACTERISTIC(FILE_CHAR_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
+                           file_transfer_write, NULL),
 
+    /* aa02 – ACK notify + CCCD */
     BT_GATT_CHARACTERISTIC(FILE_ACK_UUID, BT_GATT_CHRC_NOTIFY,
                            BT_GATT_PERM_NONE, NULL, NULL, NULL),
-
     BT_GATT_CCC(ack_ccc_cfg_changed,
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED
                 BT_GATT_PERM_READ | BT_GATT_PERM_WRITE_ENCRYPT
@@ -122,47 +257,76 @@ BT_GATT_SERVICE_DEFINE(
 #endif
                 ),
 
-    BT_GATT_CHARACTERISTIC(APP_CHAR_UUID_PTR, BT_GATT_CHRC_WRITE,
-#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
-                           BT_GATT_PERM_WRITE_ENCRYPT,
-#else
-                           BT_GATT_PERM_WRITE,
-#endif
-
+    /* aa05 – app index (0=MNIST, 1=KWS) */
+    BT_GATT_CHARACTERISTIC(APP_CHAR_UUID_PTR, BT_GATT_CHRC_WRITE, WRITE_PERM,
                            NULL, get_app_index, NULL),
-    BT_GATT_CHARACTERISTIC(FILE_CRC_UUID, BT_GATT_CHRC_WRITE,
-#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
-                           BT_GATT_PERM_WRITE_ENCRYPT,
-#else
-                           BT_GATT_PERM_WRITE,
-#endif
-                           NULL, get_file_crc, NULL));
 
-int file_transfer_init(void) {
-  LOG_INF("File transfer service initialized (static definition)\n");
-  return 0;
+    /* aa06 – combined CRC32 (info+data) */
+    BT_GATT_CHARACTERISTIC(FILE_CRC_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
+                           get_file_crc, NULL),
+
+    /* aa07 – transfer type (0=INFO, 1=DATA) */
+    BT_GATT_CHARACTERISTIC(TRANSFER_TYPE_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, set_transfer_type, NULL),
+
+    /* aa08 – model input shape (N × 32-bit dims) */
+    BT_GATT_CHARACTERISTIC(INPUT_SHAPE_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, get_input_shape, NULL),
+
+    /* aa09 – model output shape (N × 32-bit dims) */
+    BT_GATT_CHARACTERISTIC(OUTPUT_SHAPE_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, get_output_shape, NULL),
+
+    /* aa0a – flash address for model data (32-bit) */
+    BT_GATT_CHARACTERISTIC(FLASH_ADDRESS_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, get_flash_address, NULL),
+
+    /* aa0b – combined info+data total byte count (32-bit) */
+    BT_GATT_CHARACTERISTIC(TOTAL_LENGTH_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, get_total_length, NULL),
+
+    /* aa0c – is_edge_learned flag (32-bit, 1=EL model) */
+    BT_GATT_CHARACTERISTIC(IS_EDGE_LEARNED_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, get_is_edge_learned, NULL),
+
+    /* aa0d – number of edge-learning classes (32-bit) */
+    BT_GATT_CHARACTERISTIC(NUM_EDGE_CLASSES_UUID, BT_GATT_CHRC_WRITE,
+                           WRITE_PERM, NULL, get_num_edge_classes, NULL),
+
+    /* aa0e – LittleFS metadata path (UTF-8, optional) */
+    BT_GATT_CHARACTERISTIC(FS_NAME_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
+                           get_fs_name, NULL));
+
+static void send_ack_to_host(uint8_t ack_code) {
+  if (!notify_enabled) {
+    LOG_ERR("ACK notification skipped: notify not enabled by central\n");
+    return;
+  }
+  uint8_t ack_data[1] = {ack_code};
+  /* attrs[5] = ACK characteristic – index stable as new chars are appended */
+  int err = bt_gatt_notify(NULL, &file_transfer_svc.attrs[5], ack_data,
+                           sizeof(ack_data));
+  if (err) {
+    LOG_ERR("Failed to send ACK (err %d)\n", err);
+  } else {
+    LOG_INF("ACK 0x%02X sent\n", ack_code);
+  }
 }
 
-/* function to set the allocated buffer data to zero */
-static void reset_buffer(void) {
-  ble_pgm_offset = 0;
-  memset(sram_upload_buffer, 0, sizeof(sram_upload_buffer));
+/* -------------------------------------------------------------------------
+ * Characteristic write handlers – existing
+ * ---------------------------------------------------------------------- */
+static ssize_t set_transfer_type(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags) {
+  if (len != 1) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  transfer_type = *(const uint8_t *)buf;
+  LOG_INF("Transfer type → 0x%02X\n", transfer_type);
+  return len;
 }
-
-/* CRC Init and verification utils */
-typedef struct {
-  uint32_t crc; // CRC computed value
-  bool crc_ok;  // CRC status flag
-} crc32_ctx_t;
-
-crc32_ctx_t crc_ctx;
-
-void crc32_init(crc32_ctx_t *ctx) {
-  ctx->crc = 0xFFFFFFFF;
-  ctx->crc_ok = true;
-}
-
-uint32_t crc32_finalize(crc32_ctx_t *ctx) { return ctx->crc ^ 0xFFFFFFFF; }
 
 static ssize_t get_file_crc(struct bt_conn *conn,
                             const struct bt_gatt_attr *attr, const void *buf,
@@ -170,148 +334,171 @@ static ssize_t get_file_crc(struct bt_conn *conn,
   if (len != 4) {
     return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
   }
-
   memcpy(&expected_crc, buf, 4);
-  LOG_INF("CRC write len=%d\n", len);
-
-  LOG_INF("Expected CRC32: 0x%08X\n", expected_crc);
+  LOG_INF("Combined CRC32: 0x%08X\n", expected_crc);
   return len;
 }
 
-/* This function implements a BLE service that receives the application index.
-The client must send this request first before any other communication
- */
 ssize_t get_app_index(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                       const void *app, uint16_t len, uint16_t offset,
                       uint8_t flags) {
-  if ((uint32_t *)app == NULL) {
-    LOG_ERR(" app index is NULL \n\r");
+  if (app == NULL) {
+    LOG_ERR("app index is NULL\n");
     return -1;
   }
-
-  uint8_t app_index_local = *(uint8_t *)app;
+  uint8_t app_index_local = *(const uint8_t *)app;
   if (app_index_local > 1) {
-    LOG_ERR("illegal app request: %d\n", app_index_local);
+    LOG_ERR("Illegal app index: %d\n", app_index_local);
     return -1;
   }
   app_index = app_index_local;
-  app_flash_offset = flash_offsets[app_index];
-
-  /* Initialize CRC context */
-  crc32_init(&crc_ctx);
-  LOG_INF("CRC init is done, CRC = 0x%x \n\r", crc_ctx.crc);
-
-  LOG_INF(" app index is %d \n\r", app_index);
+  /* Default flash address from compile-time table; overridden by aa0a */
+  // meta_flash_address = flash_offsets[app_index];
+  // app_flash_offset   = flash_offsets[app_index];
+  LOG_INF("App index: %d  default flash: 0x%08X\n", app_index,
+          meta_flash_address);
   return len;
 }
 
-/* This function is a BLE service that receives data and its length from the BLE
- * client host application. The data is first stored in an SRAM buffer in chunks
- * of size BUFFER_SIZE (or the remaining bytes), and later written to the SPI
- * flash.
- */
-
-ssize_t file_transfer_write(struct bt_conn *conn,
-                            const struct bt_gatt_attr *attr, const void *buf,
-                            uint16_t len, uint16_t offset, uint8_t flags) {
-
-  memcpy(&sram_upload_buffer[ble_pgm_offset], buf, len);
-
-  ble_pgm_offset += len;
-
-  total_received += len;
-  led_set_state(LED_STATE_MODEL_RECEIVING);
-  LOG_INF("Rx B %d, len %d\n", total_received, len);
-
-  if (ble_pgm_offset == BUFFER_SIZE || total_received == total_pgm_size) {
-
-    crc_ctx.crc = crc32_ieee_update(crc_ctx.crc, (uint8_t *)sram_upload_buffer,
-                                    ble_pgm_offset);
-
-    LOG_INF("CRC update done CRC = 0x%x\n", crc_ctx.crc);
-    LOG_INF("ble_pgm_offset = %u\n", ble_pgm_offset);
-
-    if (total_received == total_pgm_size) {
-      /* Compute the final CRC and compare it against expected CRC received from
-       * HOST */
-      uint32_t computed_crc = crc32_finalize(&crc_ctx);
-      if (computed_crc != expected_crc) {
-        /* Abort flash write, erase the flash and return the error */
-        crc_ctx.crc_ok = false;
-        led_set_state(LED_STATE_UPDATE_FAILED);
-        LOG_ERR("CRC check failed, Computed = 0x%x, Expected = 0x%x\n",
-                computed_crc, expected_crc);
-
-        spi_flash_erase_helper_func(flash_offsets[app_index], total_pgm_size);
-        LOG_ERR("Erasing the flash at index 0x%x\n", flash_offsets[app_index]);
-        total_received = 0;
-        app_flash_offset = 0;
-        ble_pgm_offset = 0;
-        /* Error: release buffer — camera unblocks */
-        k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-        k_event_post(&sram_buf_event, BUF_EVENT_FREE);
-        LOG_INF("sram_upload_buffer released (CRC error)\n");
-        return -1;
-      } else {
-        LOG_INF("CRC check passed\n");
-      }
-    }
-    led_set_state(LED_STATE_FLASH_WRITE);
-    spi_flash_write_helper_func((uint8_t *)sram_upload_buffer, app_flash_offset,
-                                ble_pgm_offset);
-    app_flash_offset += ble_pgm_offset;
-    reset_buffer();
-    send_ack_to_host(ACK_FLASH_WRITE_DONE);
-
-    if (total_received == total_pgm_size && crc_ctx.crc_ok) {
-      /* Success: release buffer — camera unblocks */
-      k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-      k_event_post(&sram_buf_event, BUF_EVENT_FREE);
-      LOG_INF("sram_upload_buffer released (write complete)\n");
-
-      if (akida_program_infer() != 0) {
-        /*there is an error here*/
-        led_set_state(LED_STATE_UPDATE_FAILED);
-        LOG_ERR("akida model program/inference failed\n");
-        return 1;
-      }
-      led_set_state(LED_STATE_UPDATE_SUCCESS);
-      total_received = 0;
-      app_flash_offset = 0;
-      ble_pgm_offset = 0;
-    }
-  } else if (ble_pgm_offset > BUFFER_SIZE) {
-    ble_pgm_offset = 0;
-    /* Error: release buffer — camera unblocks */
-    k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-    k_event_post(&sram_buf_event, BUF_EVENT_FREE);
-    LOG_INF("sram_upload_buffer released (buffer overflow)\n");
-    LOG_ERR("Data exceeds buffer size %d\n", BUFFER_SIZE);
+static ssize_t get_total_length(struct bt_conn *conn,
+                                const struct bt_gatt_attr *attr,
+                                const void *buf, uint16_t len, uint16_t offset,
+                                uint8_t flags) {
+  if (len != 4) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
   }
+  memcpy(&meta_total_length, buf, 4);
+  LOG_INF("Total length (info+data): %u bytes\n", meta_total_length);
   return len;
 }
 
-/* This function is a BLE service that receives the size of the model passed
- * using BLE host application and erase the spi-flash content of the given size
- */
+static ssize_t get_input_shape(struct bt_conn *conn,
+                               const struct bt_gatt_attr *attr, const void *buf,
+                               uint16_t len, uint16_t offset, uint8_t flags) {
+  if (len == 0 || len % 4 != 0 ||
+      len > (uint16_t)(MAX_MODEL_INP_SHAPE_DIMS * sizeof(uint32_t))) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memset(meta_input_shape, 0, sizeof(meta_input_shape));
+  memcpy(meta_input_shape, buf, len);
+  LOG_INF("Input shape: %u dims  [%u %u %u]\n", len / 4, meta_input_shape[0],
+          meta_input_shape[1], meta_input_shape[2]);
+  return len;
+}
+
+static ssize_t get_output_shape(struct bt_conn *conn,
+                                const struct bt_gatt_attr *attr,
+                                const void *buf, uint16_t len, uint16_t offset,
+                                uint8_t flags) {
+  if (len == 0 || len % 4 != 0 ||
+      len > (uint16_t)(MAX_MODEL_OUTP_SHAPE_DIMS * sizeof(uint32_t))) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memset(meta_output_shape, 0, sizeof(meta_output_shape));
+  memcpy(meta_output_shape, buf, len);
+  LOG_INF("Output shape: %u dims  [%u %u %u]\n", len / 4, meta_output_shape[0],
+          meta_output_shape[1], meta_output_shape[2]);
+  return len;
+}
+
+static ssize_t get_flash_address(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags) {
+  if (len != 4) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memcpy(&meta_flash_address, buf, 4);
+  LOG_INF("Flash address: 0x%08X\n", meta_flash_address);
+  return len;
+}
+
+static ssize_t get_is_edge_learned(struct bt_conn *conn,
+                                   const struct bt_gatt_attr *attr,
+                                   const void *buf, uint16_t len,
+                                   uint16_t offset, uint8_t flags) {
+  if (len != 4) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memcpy(&meta_is_edge_learned, buf, 4);
+  LOG_INF("Is edge-learned: %u\n", meta_is_edge_learned);
+  return len;
+}
+
+static ssize_t get_num_edge_classes(struct bt_conn *conn,
+                                    const struct bt_gatt_attr *attr,
+                                    const void *buf, uint16_t len,
+                                    uint16_t offset, uint8_t flags) {
+  if (len != 4) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memcpy(&meta_num_edge_classes, buf, 4);
+  LOG_INF("Num edge classes: neurons=%u classes=%u (packed=0x%08X)\n",
+          (uint32_t)((meta_num_edge_classes >> 16) & 0xFFFF),
+          (uint32_t)(meta_num_edge_classes & 0xFFFF), meta_num_edge_classes);
+  return len;
+}
+
+static ssize_t get_fs_name(struct bt_conn *conn,
+                           const struct bt_gatt_attr *attr, const void *buf,
+                           uint16_t len, uint16_t offset, uint8_t flags) {
+  if (len == 0 || len >= MAX_FS_NAME_LEN) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memcpy(meta_fs_name, buf, len);
+  meta_fs_name[len] = '\0';
+  LOG_INF("FS name: %s\n", meta_fs_name);
+  return len;
+}
+
+/* -------------------------------------------------------------------------
+ * Helpers
+ * ---------------------------------------------------------------------- */
+int file_transfer_init(void) {
+  LOG_INF("File transfer service initialised\n");
+  memset(current_meta, 0, sizeof(current_meta));
+  return 0;
+}
+
+static void reset_data_buffer(void) {
+  ble_pgm_offset = 0;
+  memset(sram_upload_buffer, 0, sizeof(sram_upload_buffer));
+}
+
+/* -------------------------------------------------------------------------
+ * get_file_size – triggers flash erase (DATA) or just ACKs (INFO)
+ * ---------------------------------------------------------------------- */
 ssize_t get_file_size(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                       const void *buf, uint16_t len, uint16_t offset,
                       uint8_t flags) {
-
   memcpy((void *)&total_pgm_size, buf, len);
+  total_received = 0;
 
-  LOG_INF("size = %d\n", total_pgm_size);
+  LOG_INF("File size = %u  transfer_type = 0x%02X\n", total_pgm_size,
+          transfer_type);
 
+  if (transfer_type == TRANSFER_TYPE_INFO) {
+    if (total_pgm_size == 0 || total_pgm_size > MAX_MODEL_INFO_SIZE) {
+      LOG_ERR("Invalid info size %u\n", total_pgm_size);
+      return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    sram_info_offset = 0;
+    /* Clear sram_upload_buffer so info chunks accumulate from a clean state */
+    memset(sram_upload_buffer, 0, MAX_MODEL_INFO_SIZE);
+    send_ack_to_host(ACK_FLASH_ERASE_DONE);
+    return len;
+  }
+
+  /* DATA path – erase SPI flash at the address received via aa0a */
   if (total_pgm_size == 0 ||
-      total_pgm_size > (FLASH_MAX_16_MB_SIZE - flash_offsets[app_index])) {
-    LOG_ERR("Invalid size. Must be > 0 and <= %d\n",
-            (FLASH_MAX_16_MB_SIZE - flash_offsets[app_index]));
+      total_pgm_size > (FLASH_MAX_16_MB_SIZE - meta_flash_address)) {
+    LOG_ERR("Invalid data size %u\n", total_pgm_size);
     return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
   }
-  LOG_INF("Received file size: %u bytes\n", total_pgm_size);
-  if (spi_flash_erase_helper_func(flash_offsets[app_index], total_pgm_size)) {
-    LOG_ERR("returning due to error");
-    return 1;
+  if (spi_flash_erase_helper_func(meta_flash_address, total_pgm_size)) {
+    LOG_ERR("Flash erase failed: addr=0x%08X size=%u\n", meta_flash_address,
+            total_pgm_size);
+    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
   }
   /* --- Acquire SRAM upload buffer for model update ---
    *
@@ -335,33 +522,287 @@ ssize_t get_file_size(struct bt_conn *conn, const struct bt_gatt_attr *attr,
   k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
   LOG_INF("sram_upload_buffer claimed by model update");
 
+  /* Reset write cursor to the metadata flash address */
+  app_flash_offset = meta_flash_address;
+  /* Reset running CRC for this DATA transfer */
+  data_crc_state = 0xFFFFFFFF;
+
   send_ack_to_host(ACK_FLASH_ERASE_DONE);
   return len;
 }
 
-void ack_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {
-  notify_enabled = (value == BT_GATT_CCC_NOTIFY);
-  LOG_INF("ACK notify %s\n", notify_enabled ? "enabled" : "disabled");
-}
+/* -------------------------------------------------------------------------
+ * file_transfer_write – receives data chunks for both INFO and DATA
+ * ---------------------------------------------------------------------- */
+ssize_t file_transfer_write(struct bt_conn *conn,
+                            const struct bt_gatt_attr *attr, const void *buf,
+                            uint16_t len, uint16_t offset, uint8_t flags) {
+  total_received += len;
+  LOG_INF("Rx %u / %u bytes\n", (unsigned)total_received,
+          (unsigned)total_pgm_size);
+  led_set_state(LED_STATE_MODEL_RECEIVING);
 
-/*
-This function sends ack notification to client
-*/
-void send_ack_to_host(uint8_t ack_code) {
-  if (!notify_enabled) {
-    LOG_ERR("ACK notification skipped: notify not enabled by central\n");
-    return;
+  /* ------------------------------------------------------------------ */
+  /* INFO path – stage raw program_info bytes into sram_upload_buffer   */
+  /* ------------------------------------------------------------------ */
+  if (transfer_type == TRANSFER_TYPE_INFO) {
+    if (sram_info_offset + len > MAX_MODEL_INFO_SIZE) {
+      LOG_ERR("Info buffer overflow\n");
+      return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    /* Accumulate directly at the start of sram_upload_buffer */
+    memcpy(&sram_upload_buffer[sram_info_offset], buf, len);
+    sram_info_offset += len;
+
+    if (total_received < total_pgm_size) {
+      return len; /* more chunks expected */
+    }
+
+    /* All INFO chunks received – populate the in-RAM header */
+    model_meta_t *m = &current_meta[app_index];
+    m->total_length = meta_total_length;
+    memcpy(m->input_shape, meta_input_shape, sizeof(meta_input_shape));
+    memcpy(m->output_shape, meta_output_shape, sizeof(meta_output_shape));
+    m->flash_address = meta_flash_address;
+    m->is_edge_learned = meta_is_edge_learned;
+    m->num_edge_classes = meta_num_edge_classes;
+    m->info_data_len = (uint32_t)sram_info_offset;
+
+    /* Compute model_info_hdr_crc32 = CRC32(header bytes
+     * [total_length..info_data_len]
+     * || program_info bytes).  Stored in the header and verified at transfer
+     * time and at boot by file_transfer_load_meta(). */
+    uint32_t crc_s = 0xFFFFFFFF;
+    crc_s = crc32_ieee_update(crc_s, (const uint8_t *)&m->total_length,
+                              sizeof(model_meta_t) -
+                                  offsetof(model_meta_t, total_length));
+    crc_s = crc32_ieee_update(crc_s, sram_upload_buffer, m->info_data_len);
+    m->model_info_hdr_crc32 = crc_s ^ 0xFFFFFFFF;
+    LOG_INF("Computed model_info_hdr_crc32: 0x%08X\n", m->model_info_hdr_crc32);
+
+    /* Validate INFO CRC against value received from host via aa06 */
+    if (expected_crc != 0 && m->model_info_hdr_crc32 != expected_crc) {
+      led_set_state(LED_STATE_UPDATE_FAILED);
+      LOG_ERR("INFO CRC FAIL: computed=0x%08X expected=0x%08X\n",
+              m->model_info_hdr_crc32, expected_crc);
+      total_received = 0;
+      sram_info_offset = 0;
+      memset(sram_upload_buffer, 0, BUFFER_SIZE);
+      send_ack_to_host(ACK_CRC_FAIL);
+      k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+      k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+      return len;
+    }
+    LOG_INF("INFO CRC OK (0x%08X)\n", m->model_info_hdr_crc32);
+
+    /* --- File 1: write model_meta_t header --- */
+    struct fs_file_t hdr_file;
+    fs_file_t_init(&hdr_file);
+    int rc = fs_open(&hdr_file, meta_hdr_paths[app_index],
+                     FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
+    if (rc == 0) {
+      fs_write(&hdr_file, m, sizeof(model_meta_t));
+      fs_close(&hdr_file);
+      LOG_INF("Header saved to %s (%u bytes)\n", meta_hdr_paths[app_index],
+              (unsigned)sizeof(model_meta_t));
+    } else {
+      LOG_ERR("Failed to open header file '%s' (err %d)\n",
+              meta_hdr_paths[app_index], rc);
+    }
+
+    /* --- File 2: write raw program_info from sram_upload_buffer --- */
+    struct fs_file_t info_file;
+    fs_file_t_init(&info_file);
+    rc = fs_open(&info_file, model_info_paths[app_index],
+                 FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
+    if (rc == 0) {
+      fs_write(&info_file, sram_upload_buffer, m->info_data_len);
+      fs_close(&info_file);
+      LOG_INF("Model info saved to %s (%u bytes)\n",
+              model_info_paths[app_index], m->info_data_len);
+    } else {
+      LOG_ERR("Failed to open info file '%s' (err %d)\n",
+              model_info_paths[app_index], rc);
+    }
+
+    total_received = 0;
+    sram_info_offset = 0;
+    /* Clear buffer so DATA transfer starts from a clean state */
+    memset(sram_upload_buffer, 0, BUFFER_SIZE);
+    send_ack_to_host(ACK_FLASH_WRITE_DONE);
+    led_set_state(LED_STATE_UPDATE_SUCCESS);
+    k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+    k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+    return len;
   }
 
-  uint8_t ack_data[1] = {ack_code};
-  int err = bt_gatt_notify(NULL, &file_transfer_svc.attrs[5], ack_data,
-                           sizeof(ack_data));
-  if (err) {
-    LOG_ERR("Failed to send ACK notification (err %d)\n", err);
-  } else {
-    LOG_INF("ACK (0x%02X) sent to central\n", ack_code);
+  /* ------------------------------------------------------------------ */
+  /* DATA path – buffer in SRAM, flush to SPI flash in BUFFER_SIZE chunks */
+  /* ------------------------------------------------------------------ */
+  /* Accumulate running CRC over each incoming chunk */
+  data_crc_state = crc32_ieee_update(data_crc_state, (const uint8_t *)buf, len);
+
+  memcpy(&sram_upload_buffer[ble_pgm_offset], buf, len);
+  ble_pgm_offset += len;
+
+  bool buffer_full = (ble_pgm_offset == BUFFER_SIZE);
+  bool last_chunk = (total_received == total_pgm_size);
+
+  if (buffer_full || last_chunk) {
+    led_set_state(LED_STATE_FLASH_WRITE);
+    spi_flash_write_helper_func((uint8_t *)sram_upload_buffer, app_flash_offset,
+                                ble_pgm_offset);
+    app_flash_offset += ble_pgm_offset;
+    reset_data_buffer();
+    send_ack_to_host(ACK_FLASH_WRITE_DONE);
+
+    if (last_chunk) {
+      /* Validate DATA CRC against value received from host via aa06 */
+      uint32_t data_crc = data_crc_state ^ 0xFFFFFFFF;
+      LOG_INF("DATA CRC computed: 0x%08X  expected: 0x%08X\n", data_crc,
+              expected_crc);
+      if (expected_crc != 0 && data_crc != expected_crc) {
+        led_set_state(LED_STATE_UPDATE_FAILED);
+        LOG_ERR("DATA CRC FAIL: computed=0x%08X expected=0x%08X\n", data_crc,
+                expected_crc);
+        total_received = 0;
+        app_flash_offset = meta_flash_address;
+        ble_pgm_offset = 0;
+        send_ack_to_host(ACK_CRC_FAIL);
+        k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+        k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+        return len;
+      }
+      LOG_INF("DATA CRC OK (0x%08X)\n", data_crc);
+      /* Success: release buffer — unblocks */
+      k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+      k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+      /* Trigger Akida programming + test inference */
+      if (infer(app_index) != 0) {
+        led_set_state(LED_STATE_UPDATE_FAILED);
+        LOG_ERR("akida_program_infer failed\n");
+        return 1;
+      }
+      total_received = 0;
+      app_flash_offset = meta_flash_address;
+      ble_pgm_offset = 0;
+      led_set_state(LED_STATE_UPDATE_SUCCESS);
+    }
+  } else if (ble_pgm_offset > BUFFER_SIZE) {
+    led_set_state(LED_STATE_UPDATE_FAILED);
+    k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+    k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+    ble_pgm_offset = 0;
+    LOG_ERR("Data exceeds BUFFER_SIZE (%d)\n", BUFFER_SIZE);
   }
+
+  return len;
 }
+
+/* -------------------------------------------------------------------------
+ * file_transfer_load_meta
+ *
+ * Reads two LittleFS files for the given app slot:
+ *   1. meta_hdr_paths[app_idx]    – model_meta_t header struct
+ *   2. model_info_paths[app_idx]  – raw program_info binary
+ *
+ * On success (return 0):
+ *   - @p meta_out contains the validated header (flash_address, info_data_len,
+ * …)
+ *   - sram_upload_buffer[0..meta_out->info_data_len-1] holds the program_info
+ *     binary ready to pass directly to akida_program_flash().
+ *
+ * Returns:
+ *    0  both files read and info CRC verified
+ *    1  header file not found – caller should use compiled defaults
+ *   -1  read error or CRC mismatch – caller should use compiled defaults
+ * ---------------------------------------------------------------------- */
+int file_transfer_load_meta(int app_idx, model_meta_t *meta_out) {
+  if (app_idx < 0 || app_idx > 1 || meta_out == NULL) {
+    return -1;
+  }
+
+  struct fs_file_t file;
+  ssize_t bytes;
+
+  /* ---- Step 1: read model_meta_t header ---- */
+  fs_file_t_init(&file);
+  int rc = fs_open(&file, meta_hdr_paths[app_idx], FS_O_READ);
+  if (rc != 0) {
+    LOG_INF("No header file for app %d ('%s', err %d) – using defaults\n",
+            app_idx, meta_hdr_paths[app_idx], rc);
+    return 1;
+  }
+
+  bytes = fs_read(&file, meta_out, sizeof(model_meta_t));
+  fs_close(&file);
+
+  if (bytes != (ssize_t)sizeof(model_meta_t)) {
+    LOG_ERR("Header read error: got %d, expected %u bytes\n", (int)bytes,
+            (unsigned)sizeof(model_meta_t));
+    return -1;
+  }
+  if (meta_out->info_data_len == 0 ||
+      meta_out->info_data_len > MAX_MODEL_INFO_SIZE) {
+    LOG_ERR("Invalid info_data_len: %u\n", meta_out->info_data_len);
+    return -1;
+  }
+
+  /* ---- Step 2: read program_info binary into sram_upload_buffer ---- */
+  fs_file_t_init(&file);
+  rc = fs_open(&file, model_info_paths[app_idx], FS_O_READ);
+  if (rc != 0) {
+    LOG_ERR("No model info file for app %d ('%s', err %d)\n", app_idx,
+            model_info_paths[app_idx], rc);
+    return -1;
+  }
+  bytes = fs_read(&file, sram_upload_buffer, meta_out->info_data_len);
+  fs_close(&file);
+
+  if (bytes != (ssize_t)meta_out->info_data_len) {
+    LOG_ERR("Model info read error: got %d, expected %u bytes\n", (int)bytes,
+            meta_out->info_data_len);
+    return -1;
+  }
+
+  /* ---- Step 3: verify model_info_hdr_crc32 ----
+   *
+   * model_info_hdr_crc32 = CRC32( struct_bytes[total_length..info_data_len]
+   *                             || program_info_bytes_in_sram_upload_buffer )
+   *
+   * Both the header fields and the info bytes are already in memory,
+   * so no SPI flash read is required here.
+   */
+  {
+    uint32_t crc_state = 0xFFFFFFFF;
+    crc_state = crc32_ieee_update(
+        crc_state, (const uint8_t *)&meta_out->total_length,
+        sizeof(model_meta_t) - offsetof(model_meta_t, total_length));
+    crc_state = crc32_ieee_update(crc_state, sram_upload_buffer,
+                                  meta_out->info_data_len);
+    uint32_t computed = crc_state ^ 0xFFFFFFFF;
+    if (computed != meta_out->model_info_hdr_crc32) {
+      LOG_ERR("model_info_hdr CRC FAIL: computed=0x%08X stored=0x%08X\n",
+              computed, meta_out->model_info_hdr_crc32);
+      return -1;
+    }
+    LOG_INF("model_info_hdr CRC OK (0x%08X)\n", computed);
+  }
+
+  {
+    uint16_t neurons = (uint16_t)((meta_out->num_edge_classes >> 16) & 0xFFFF);
+    uint16_t classes = (uint16_t)(meta_out->num_edge_classes & 0xFFFF);
+    LOG_INF("Meta loaded OK: app=%d flash=0x%08X info_len=%u el=%u "
+            "neurons=%u classes=%u\n",
+            app_idx, meta_out->flash_address, meta_out->info_data_len,
+            meta_out->is_edge_learned, neurons, classes);
+  }
+  /* Caller: akida_program_flash(sram_upload_buffer,
+   *                             meta_out->info_data_len,
+   *                             meta_out->flash_address); */
+  return 0;
+}
+
 /**
  * @brief Initialize the shared SRAM buffer event.
  *
