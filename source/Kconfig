@@ -181,5 +181,11 @@ config APP_WDT_TIMEOUT_MS
     help
       Watchdog timeout value used by the application.
 
+config CAMERA_ENABLE_THREAD
+    bool "Enable dedicated camera processing thread"
+    default y
+    help
+      Enables a separate thread for camera frame processing.
+
 
 endmenu

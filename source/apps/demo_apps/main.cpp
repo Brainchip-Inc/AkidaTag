@@ -67,6 +67,9 @@ extern "C" {
 #include "led_init.h"
 #include "littlefs_storage.h"
 #include "pdm_mic.h"
+#if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
+#include "camera/spi_camera.h"
+#endif
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 #include "watchdog_h/watchdog.h"
 #endif
@@ -503,6 +506,12 @@ K_THREAD_STACK_DEFINE(led_stack, LED_STACK_SIZE);
 struct k_thread capture_thread;
 struct k_thread process_thread;
 struct k_thread cli_worker_thread;
+
+#if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
+struct k_thread camera_thread;
+k_tid_t camera_thread_id;
+K_THREAD_STACK_DEFINE(camera_stack, CAMERA_STACK_SIZE);
+#endif
 struct k_thread led_thread;
 
 k_tid_t capture_tid;
@@ -551,7 +560,20 @@ static int start_dmic_audio_proc(void) {
 
   return 0;
 }
+#if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
+static int initialize_spi_camera_interface(void) {
 
+  camera_thread_id = k_thread_create(&camera_thread, camera_stack,
+                                     CAMERA_STACK_SIZE, camera_capture_thread,
+                                     NULL, NULL, NULL, CAMERA_PRIORITY, K_USER,
+                                     K_FOREVER // START SUSPENDED
+  );
+
+  k_thread_start(camera_thread_id);
+
+  return 0;
+}
+#endif
 /**
  * @brief Initialize the learn weights memory
  *
@@ -817,6 +839,7 @@ int main(void) {
   printk("Akida TAG Application\n");
   confirm_image_if_needed();
   init_setting_sub_system();
+  shared_buf_init();
   file_transfer_init();
   ble_init();
   akida_spiflash_init();
@@ -880,6 +903,9 @@ int main(void) {
   watchdog_init(&wdt, &wdt_channel_id);
 #endif
 
+#if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
+  initialize_spi_camera_interface();
+#endif
   // ... inside a function like main() or a separate initialization function
   printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value

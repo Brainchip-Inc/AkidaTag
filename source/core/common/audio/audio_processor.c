@@ -15,6 +15,13 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
 
+#include "ble_services/file_transfer.h"
+
+#include "akd_spi_flash_handler.h"
+#include "ble_services/file_transfer.h"
+#include <zephyr/device.h>
+#include <zephyr/drivers/uart.h>
+
 #define RMS_THRESHOLD 550
 int rms_threshold = RMS_THRESHOLD;
 #define SPEECH_IDLE 0
@@ -65,7 +72,6 @@ int is_capture_start = 0;
 #define TOTAL_BLOCKS (TOTAL_BUFFER_BYTES / BLOCK_SIZE_BYTES)
 static uint32_t block_index = 0;
 uint32_t offset = 0;
-extern uint8_t sram_upload_buffer[];
 #endif
 extern uint8_t is_kws_debounce_complete(void);
 extern void set_feature_buff_full(void);
