@@ -33,6 +33,7 @@ LOG_MODULE_REGISTER(ble_initilaization, CONFIG_LOG_DEFAULT_LEVEL);
 #define FRAME_MF_MID 2   // Multi-frame middle
 #define FRAME_MF_LAST 3  // Multi-frame last
 #define FRAME_BUFFER_SIZE 128
+#define MTU_FRAME_BUFFER_SIZE 244
 #define DATA_PART_SIZE 96
 #define SEND_FRAME_TIMEOUT_MS 100
 #define MAX_NUS_RX_BUFFER_SIZE 245
@@ -120,6 +121,12 @@ static const uint8_t adv_manufacturer_data[] = {
     0x30, // (decimal) 48 = ASCII '0'
     0x30, // (decimal) 48 = ASCII '0'
 };
+
+/* Stores the unique 64-bit hardware device ID read from the MCU.
+ * Used to uniquely identify the device during runtime or communication.
+ */
+static uint64_t device_id = 0;
+
 /* BLE advertising data including flags, device name, and manufacturer-specific
  * data */
 static const struct bt_data ad[] = {
@@ -128,9 +135,9 @@ static const struct bt_data ad[] = {
     BT_DATA(BT_DATA_MANUFACTURER_DATA, adv_manufacturer_data,
             sizeof(adv_manufacturer_data)),
 };
-/* BLE scan response data containing the 128-bit UUID of the custom service */
+/* BLE scan response data containing the 128-bit UUID of the Device ID */
 static const struct bt_data sd[] = {
-    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_LBS_VAL),
+    BT_DATA(BT_DATA_UUID128_ALL, &device_id, sizeof(device_id)),
 };
 
 /**
@@ -396,6 +403,44 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
     LOG_INF(" ACK Sent successfully\n");
   }
 }
+
+static void app_info(void) {
+  char frame[MTU_FRAME_BUFFER_SIZE];
+  char data_part[MAX_NUS_RX_BUFFER_SIZE];
+
+  snprintf(data_part, sizeof(data_part),
+           "%d:%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\r", CMD_APPS,
+           "Keyword Spotting",
+           "Voice-activated wake word detection using microphone input",
+           "128 kb", "ADK1500", "DS-CNN-KWS", "v1.0.0", "65 Kb", "Input shape",
+           "31", "512 nodes", "2.3 mW");
+
+  int data_len = strlen(data_part);
+
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
+           data_part);
+
+  int err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send KWS event (err=%d)", err);
+  }
+}
+
+/* Performs a software-triggered cold reboot of the device.
+ * This resets the system and restarts firmware execution from boot.
+ */
+static void restart_device(void) { sys_reboot(SYS_REBOOT_COLD); }
+
+/* Reads the unique hardware device identifier from the nRF FICR registers
+ * and combines the two 32-bit values into a single 64-bit device ID.
+ * This ID is unique for every chip and can be used for device tracking.
+ */
+static uint64_t get_device_id(void) {
+  uint32_t id0 = NRF_FICR->INFO.DEVICEID[0];
+  uint32_t id1 = NRF_FICR->INFO.DEVICEID[1];
+  return ((uint64_t)id1 << 32) | id0;
+}
+
 /**
  * @brief Callback when data is received via NUS
  *
@@ -437,6 +482,10 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
     LOG_INF("DEVICE_INFO command received\n");
     send_device_info_response();
     break;
+  case CMD_APPS:
+    LOG_INF("APP INFO command received\n");
+    app_info();
+    break;
   case CMD_DEPLOY_START:
     LOG_INF("DEPLOY START command received\n");
     event_flag = true;
@@ -454,6 +503,11 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
     LOG_INF("STREAM STOP command received\n");
     pdm_stream_flag = false;
     send_ack(ACK_DONE, CMD_STREAM_STOP);
+    break;
+  case CMD_RESET:
+    LOG_INF("RESET command received\n");
+    send_ack(ACK_DONE, CMD_RESET);
+    restart_device();
     break;
   default:
     LOG_INF("Command %d not implemented\n", frame.command);
@@ -697,6 +751,7 @@ int ble_init(void)
     return -1;
   }
 #endif
+  device_id = get_device_id();
   err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
   if (err) {
     LOG_ERR("Advertising failed to start (err %d)\n", err);

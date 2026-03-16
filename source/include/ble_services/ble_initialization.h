@@ -4,6 +4,7 @@
 #include <bluetooth/services/lbs.h>
 #include <bluetooth/services/nus.h>
 #include <dk_buttons_and_leds.h>
+#include <hal/nrf_ficr.h>
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/bluetooth/bluetooth.h>
@@ -12,7 +13,7 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/settings/settings.h>
-
+#include <zephyr/sys/reboot.h>
 /* Flag indicating whether deployment mode is active.
  * Set when CMD_DEPLOY_START is received and cleared on CMD_DEPLOY_STOP.
  */

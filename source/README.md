@@ -365,6 +365,15 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │    "DEVICE:AKIDA,TYPE,    │                           │
      │           5.3,1.2.3"      │                           │
      │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_APP_INFO"         │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Prepare application info
+     │                           │                           │    (model, memory, version)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │    Application metadata   │                           │
+     │                           │                           │
 	 ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_START"     │                           │
      │                           │                           ├───Set event_flag = true
@@ -400,6 +409,13 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
      │    "STREAM_STOP:ACK"      │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_RESTART"          │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Trigger system reboot
+     │                           │                           │    sys_reboot()
+     │                           │                           │
 
 3. How It Works
 
