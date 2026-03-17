@@ -62,13 +62,13 @@ How to use script - Examples runs:
   $SCRIPT_INVOCATION -d --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
 
   # Fetch .fbz locally → generate bins + info.yaml only (no BLE send)
-  $SCRIPT_INVOCATION --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000
+  $SCRIPT_INVOCATION --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1
 
   # Fetch .fbz inside Docker (akida SDK) → generate bins + info.yaml only (no BLE send)
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000
+  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1
 
-  # Fetch inside Docker + send via BLE on the host (add --send_ble to enable BLE step)
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --send_ble
+  # Fetch inside Docker + send via BLE (outside of docker) on the host (add --send_ble to enable BLE step)
+  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1 --send_ble
 
   # Send pre-generated model files via BLE using info.yaml (no Docker needed)
   $SCRIPT_INVOCATION --info source/external/model_files/kws/kws_program_info.bin \
@@ -543,7 +543,7 @@ $DO_FLASH && DOCKER_STEPS+=("$FLASH_CMD")
 # Standalone BLE send via --info/--bin/--yaml (always runs on host)
 [[ -n "$SEND_YAML_CMD"       ]] && LOCAL_STEPS+=("$SEND_YAML_CMD")
 
-if [[ ${#DOCKER_STEPS[@]} -eq 0 ]] && [[ ${#LOCAL_STEPS[@]} -eq 0 ]]; then
+if [[ ${#DOCKER_STEPS[@]} -eq 0 && ${#LOCAL_STEPS[@]} -eq 0 ]]; then
   echo "Nothing to do"
   exit 1
 fi
@@ -584,7 +584,7 @@ if $DOCKER; then
         done
     fi
 else
-    all_steps=("${DOCKER_STEPS[@]}" "${LOCAL_STEPS[@]}")
+    all_steps=(${DOCKER_STEPS[@]+"${DOCKER_STEPS[@]}"} ${LOCAL_STEPS[@]+"${LOCAL_STEPS[@]}"})
     for c in "${all_steps[@]}"; do
         echo
         echo ">>> $c"
