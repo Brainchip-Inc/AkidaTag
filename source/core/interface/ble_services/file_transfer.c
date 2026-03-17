@@ -169,7 +169,6 @@ static struct bt_uuid_128 fs_name_uuid =
 #define ACK_CRC_FAIL 0xBB
 #define TRANSFER_TYPE_INFO 0x00
 #define TRANSFER_TYPE_DATA 0x01
-#define MAX_FS_NAME_LEN 64
 
 volatile static size_t total_pgm_size = 0;
 volatile static size_t total_received = 0;
@@ -179,6 +178,7 @@ static size_t sram_info_offset = 0; /* write cursor inside info_data    */
 static uint8_t transfer_type = TRANSFER_TYPE_DATA;
 static uint32_t expected_crc = 0; /* CRC received from host via aa06  */
 static uint32_t data_crc_state = 0xFFFFFFFF; /* running CRC for DATA transfer */
+static uint32_t data_first_4_bytes = 0; /* first 4 raw bytes of model_data */
 
 /* -------------------------------------------------------------------------
  * Metadata received via BLE characteristics (before INFO data stream)
@@ -202,15 +202,63 @@ static model_meta_t current_meta[2];
 /* LittleFS file 1: model_meta_t header struct (app 0 = MNIST, app 1 = KWS/EL)
  */
 static const char *meta_hdr_paths[2] = {
-    "/ext/model_hdr_0",
+    "/ext/mnist_model_hdr",
     "/ext/kws_model_hdr",
 };
 
 /* LittleFS file 2: raw program_info binary (loaded into sram_upload_buffer) */
 static const char *model_info_paths[2] = {
-    "/ext/model_info_0",
+    "/ext/mnist_model_info",
     "/ext/kws_model_info",
 };
+
+/* LittleFS file 3: model_data_meta_t (CRC, first 4 bytes, length, name) */
+static const char *model_data_meta_paths[2] = {
+    "/ext/mnist_model_data_hdr",
+    "/ext/kws_model_data_hdr",
+};
+
+/* -------------------------------------------------------------------------
+ * Dynamic path construction from meta_fs_name (set via FS_NAME_CHAR aa0e)
+ *
+ * build_fs_paths_from_name() extracts the model name (last component after
+ * the final '/') from meta_fs_name and constructs the three LittleFS paths.
+ * It validates the constructed hdr path against the hardcoded whitelist and
+ * stores the matching slot index in dyn_app_slot (-1 if unknown).
+ * ---------------------------------------------------------------------- */
+static char dyn_hdr_path[80];  /* e.g. "/ext/kws_model_hdr"      */
+static char dyn_info_path[80]; /* e.g. "/ext/kws_model_info"     */
+static char dyn_data_path[80]; /* e.g. "/ext/kws_model_data_hdr" */
+static int dyn_app_slot = -1;  /* index into meta_hdr_paths[]    */
+
+static bool build_fs_paths_from_name(const char *fs_name) {
+  /* Extract last path component: "kws" from "/model_meta/kws" */
+  const char *name = strrchr(fs_name, '/');
+  name = (name != NULL) ? name + 1 : fs_name;
+  if (name[0] == '\0') {
+    LOG_ERR("Empty model name in fs_name '%s'\n", fs_name);
+    dyn_app_slot = -1;
+    return false;
+  }
+
+  snprintf(dyn_hdr_path, sizeof(dyn_hdr_path), "/ext/%s_model_hdr", name);
+  snprintf(dyn_info_path, sizeof(dyn_info_path), "/ext/%s_model_info", name);
+  snprintf(dyn_data_path, sizeof(dyn_data_path), "/ext/%s_model_data_hdr",
+           name);
+
+  /* Validate against hardcoded whitelist */
+  dyn_app_slot = -1;
+  for (int i = 0; i < 2; i++) {
+    if (strcmp(dyn_hdr_path, meta_hdr_paths[i]) == 0) {
+      dyn_app_slot = i;
+      LOG_INF("Model name '%s' → slot %d (hdr=%s)\n", name, i, dyn_hdr_path);
+      return true;
+    }
+  }
+  LOG_ERR("Unknown model name '%s' (hdr='%s') – not in whitelist\n", name,
+          dyn_hdr_path);
+  return false;
+}
 
 /* -------------------------------------------------------------------------
  * SRAM upload buffer – used by DATA transfers (chunk staging)
@@ -477,6 +525,11 @@ ssize_t get_file_size(struct bt_conn *conn, const struct bt_gatt_attr *attr,
   LOG_INF("File size = %u  transfer_type = 0x%02X\n", total_pgm_size,
           transfer_type);
 
+  /* Build dynamic paths from meta_fs_name (set via FS_NAME_CHAR before this) */
+  if (meta_fs_name[0] != '\0') {
+    build_fs_paths_from_name(meta_fs_name);
+  }
+
   if (transfer_type == TRANSFER_TYPE_INFO) {
     if (total_pgm_size == 0 || total_pgm_size > MAX_MODEL_INFO_SIZE) {
       LOG_ERR("Invalid info size %u\n", total_pgm_size);
@@ -524,8 +577,9 @@ ssize_t get_file_size(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 
   /* Reset write cursor to the metadata flash address */
   app_flash_offset = meta_flash_address;
-  /* Reset running CRC for this DATA transfer */
+  /* Reset running CRC and first-4-bytes capture for this DATA transfer */
   data_crc_state = 0xFFFFFFFF;
+  data_first_4_bytes = 0;
 
   send_ack_to_host(ACK_FLASH_ERASE_DONE);
   return len;
@@ -567,6 +621,12 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     m->is_edge_learned = meta_is_edge_learned;
     m->num_edge_classes = meta_num_edge_classes;
     m->info_data_len = (uint32_t)sram_info_offset;
+    /* Extract and store model name from meta_fs_name (e.g. "kws" from
+     * "/model_meta/kws") */
+    memset(m->model_name, 0, MAX_FS_NAME_LEN);
+    const char *nm = strrchr(meta_fs_name, '/');
+    nm = (nm != NULL) ? nm + 1 : meta_fs_name;
+    strncpy(m->model_name, nm, MAX_FS_NAME_LEN - 1);
 
     /* Compute model_info_hdr_crc32 = CRC32(header bytes
      * [total_length..info_data_len]
@@ -595,34 +655,38 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     }
     LOG_INF("INFO CRC OK (0x%08X)\n", m->model_info_hdr_crc32);
 
+    /* Select paths: prefer dynamic (name-validated) paths, fall back to index
+     */
+    const char *hdr_path =
+        (dyn_app_slot >= 0) ? dyn_hdr_path : meta_hdr_paths[app_index];
+    const char *info_path =
+        (dyn_app_slot >= 0) ? dyn_info_path : model_info_paths[app_index];
+
     /* --- File 1: write model_meta_t header --- */
     struct fs_file_t hdr_file;
     fs_file_t_init(&hdr_file);
-    int rc = fs_open(&hdr_file, meta_hdr_paths[app_index],
-                     FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
+    int rc =
+        fs_open(&hdr_file, hdr_path, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
     if (rc == 0) {
       fs_write(&hdr_file, m, sizeof(model_meta_t));
       fs_close(&hdr_file);
-      LOG_INF("Header saved to %s (%u bytes)\n", meta_hdr_paths[app_index],
+      LOG_INF("Header saved to %s (%u bytes)\n", hdr_path,
               (unsigned)sizeof(model_meta_t));
     } else {
-      LOG_ERR("Failed to open header file '%s' (err %d)\n",
-              meta_hdr_paths[app_index], rc);
+      LOG_ERR("Failed to open header file '%s' (err %d)\n", hdr_path, rc);
     }
 
     /* --- File 2: write raw program_info from sram_upload_buffer --- */
     struct fs_file_t info_file;
     fs_file_t_init(&info_file);
-    rc = fs_open(&info_file, model_info_paths[app_index],
-                 FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
+    rc = fs_open(&info_file, info_path, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
     if (rc == 0) {
       fs_write(&info_file, sram_upload_buffer, m->info_data_len);
       fs_close(&info_file);
-      LOG_INF("Model info saved to %s (%u bytes)\n",
-              model_info_paths[app_index], m->info_data_len);
+      LOG_INF("Model info saved to %s (%u bytes)\n", info_path,
+              m->info_data_len);
     } else {
-      LOG_ERR("Failed to open info file '%s' (err %d)\n",
-              model_info_paths[app_index], rc);
+      LOG_ERR("Failed to open info file '%s' (err %d)\n", info_path, rc);
     }
 
     total_received = 0;
@@ -641,6 +705,12 @@ ssize_t file_transfer_write(struct bt_conn *conn,
   /* ------------------------------------------------------------------ */
   /* Accumulate running CRC over each incoming chunk */
   data_crc_state = crc32_ieee_update(data_crc_state, (const uint8_t *)buf, len);
+
+  /* Capture first 4 bytes of model_data on the very first chunk */
+  if (total_received == (uint32_t)len && len >= 4) {
+    memcpy(&data_first_4_bytes, buf, 4);
+    LOG_INF("First 4 bytes of model_data: 0x%08X\n", data_first_4_bytes);
+  }
 
   memcpy(&sram_upload_buffer[ble_pgm_offset], buf, len);
   ble_pgm_offset += len;
@@ -674,6 +744,33 @@ ssize_t file_transfer_write(struct bt_conn *conn,
         return len;
       }
       LOG_INF("DATA CRC OK (0x%08X)\n", data_crc);
+
+      /* --- File 3: write model_data_meta_t to LittleFS --- */
+      {
+        model_data_meta_t dm;
+        dm.data_crc32 = data_crc;
+        dm.first_4_bytes = data_first_4_bytes;
+        dm.data_length = (uint32_t)total_pgm_size;
+        /* model_name is now stored in model_meta_t (file 1), not here */
+
+        const char *data_path = (dyn_app_slot >= 0)
+                                    ? dyn_data_path
+                                    : model_data_meta_paths[app_index];
+        struct fs_file_t dm_file;
+        fs_file_t_init(&dm_file);
+        int rc =
+            fs_open(&dm_file, data_path, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
+        if (rc == 0) {
+          fs_write(&dm_file, &dm, sizeof(model_data_meta_t));
+          fs_close(&dm_file);
+          LOG_INF("Data meta saved: path=%s crc=0x%08X len=%u first4=0x%08X\n",
+                  data_path, dm.data_crc32, dm.data_length, dm.first_4_bytes);
+        } else {
+          LOG_ERR("Failed to open data meta file '%s' (err %d)\n", data_path,
+                  rc);
+        }
+      }
+
       /* Success: release buffer — unblocks */
       k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
       k_event_post(&sram_buf_event, BUF_EVENT_FREE);
@@ -824,4 +921,145 @@ void shared_buf_init(void) {
   k_event_post(&sram_buf_event, BUF_EVENT_FREE);
 
   printk("sram_buf: initialized, buffer is FREE\n");
+}
+
+/* -------------------------------------------------------------------------
+ * file_transfer_read_meta_hdr_only
+ *
+ * Reads only the model_meta_t header struct from LittleFS without loading
+ * program_info into sram_upload_buffer.  Used at boot before flash CRC
+ * validation so the buffer is not clobbered before program_info is loaded.
+ * ---------------------------------------------------------------------- */
+int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out) {
+  if (app_idx < 0 || app_idx > 1 || meta_out == NULL) {
+    return -1;
+  }
+
+  struct fs_file_t file;
+  fs_file_t_init(&file);
+  int rc = fs_open(&file, meta_hdr_paths[app_idx], FS_O_READ);
+  if (rc != 0) {
+    LOG_INF("No header file for app %d ('%s', err %d)\n", app_idx,
+            meta_hdr_paths[app_idx], rc);
+    return 1;
+  }
+
+  ssize_t bytes = fs_read(&file, meta_out, sizeof(model_meta_t));
+  fs_close(&file);
+
+  if (bytes != (ssize_t)sizeof(model_meta_t)) {
+    LOG_ERR("Header read error: got %d, expected %u\n", (int)bytes,
+            (unsigned)sizeof(model_meta_t));
+    return -1;
+  }
+  return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * file_transfer_load_data_meta
+ *
+ * Reads the model_data_meta_t file (3rd LittleFS file) for the given slot.
+ * ---------------------------------------------------------------------- */
+int file_transfer_load_data_meta(int app_idx, model_data_meta_t *dm_out) {
+  if (app_idx < 0 || app_idx > 1 || dm_out == NULL) {
+    return -1;
+  }
+
+  struct fs_file_t file;
+  fs_file_t_init(&file);
+  int rc = fs_open(&file, model_data_meta_paths[app_idx], FS_O_READ);
+  if (rc != 0) {
+    LOG_INF("No data meta file for app %d ('%s', err %d)\n", app_idx,
+            model_data_meta_paths[app_idx], rc);
+    return 1;
+  }
+
+  ssize_t bytes = fs_read(&file, dm_out, sizeof(model_data_meta_t));
+  fs_close(&file);
+
+  if (bytes != (ssize_t)sizeof(model_data_meta_t)) {
+    LOG_ERR("Data meta read error: got %d, expected %u\n", (int)bytes,
+            (unsigned)sizeof(model_data_meta_t));
+    return -1;
+  }
+  LOG_INF("Data meta loaded: crc=0x%08X len=%u first4=0x%08X\n",
+          dm_out->data_crc32, dm_out->data_length, dm_out->first_4_bytes);
+  return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * file_transfer_validate_flash_data
+ *
+ * Validates model data in SPI flash against the stored model_data_meta_t.
+ * Reads dm->data_length bytes from flash in BUFFER_SIZE chunks using
+ * sram_upload_buffer as scratch.
+ *
+ * WARNING: overwrites sram_upload_buffer — caller must reload program_info
+ * via file_transfer_load_meta() before calling akida_program_flash().
+ * ---------------------------------------------------------------------- */
+int file_transfer_validate_flash_data(uint32_t flash_addr,
+                                      const model_data_meta_t *dm) {
+  if (dm == NULL || dm->data_length == 0) {
+    LOG_ERR("Invalid data meta (NULL or zero length)\n");
+    return -1;
+  }
+
+  /* Check 1: first 4 bytes */
+  uint32_t flash_first4 = 0;
+  spi_flash_read_helper_func((uint8_t *)&flash_first4, flash_addr, 4);
+  if (flash_first4 != dm->first_4_bytes) {
+    LOG_ERR("First-4-bytes MISMATCH: flash=0x%08X stored=0x%08X\n",
+            flash_first4, dm->first_4_bytes);
+    return -1;
+  }
+  LOG_INF("First 4 bytes OK (0x%08X)\n", flash_first4);
+
+  /* Check 2: full CRC32 over data_length bytes from SPI flash */
+  uint32_t crc_state = 0xFFFFFFFF;
+  uint32_t remaining = dm->data_length;
+  uint32_t offset = flash_addr;
+  uint64_t t0 = k_uptime_get();
+
+  while (remaining > 0) {
+    uint32_t chunk =
+        (remaining > (uint32_t)BUFFER_SIZE) ? (uint32_t)BUFFER_SIZE : remaining;
+    spi_flash_read_helper_func(sram_upload_buffer, offset, chunk);
+    crc_state = crc32_ieee_update(crc_state, sram_upload_buffer, chunk);
+    offset += chunk;
+    remaining -= chunk;
+  }
+
+  uint32_t computed_crc = crc_state ^ 0xFFFFFFFF;
+  LOG_INF("Flash CRC validation took %lld ms\n",
+          (long long)(k_uptime_get() - t0));
+
+  if (computed_crc != dm->data_crc32) {
+    LOG_ERR("Data CRC MISMATCH: computed=0x%08X stored=0x%08X\n", computed_crc,
+            dm->data_crc32);
+    return -1;
+  }
+  LOG_INF("Data CRC OK (0x%08X) over %u bytes\n", computed_crc,
+          dm->data_length);
+  return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * file_transfer_check_model_name
+ *
+ * Constructs "/ext/{model_name}_model_hdr" and checks it equals the
+ * hardcoded path for app_idx.  Returns 0 if valid, -1 otherwise.
+ * ---------------------------------------------------------------------- */
+int file_transfer_check_model_name(int app_idx, const char *model_name) {
+  if (app_idx < 0 || app_idx > 1 || model_name == NULL ||
+      model_name[0] == '\0') {
+    return -1;
+  }
+  char constructed[80];
+  snprintf(constructed, sizeof(constructed), "/ext/%s_model_hdr", model_name);
+  if (strcmp(constructed, meta_hdr_paths[app_idx]) == 0) {
+    return 0;
+  }
+  LOG_ERR("Name check FAIL: constructed='%s' expected='%s'\n", constructed,
+          meta_hdr_paths[app_idx]);
+  return -1;
 }

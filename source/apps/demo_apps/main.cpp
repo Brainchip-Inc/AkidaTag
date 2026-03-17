@@ -32,6 +32,7 @@
 #include "io_objects.h"
 #include "nrf_spi.h"
 #include "sample_input/kws/kws_inputs.h"
+#include "sample_input/mnist/mnist_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <cmath>
 #include <hardware_device_impl.h>
@@ -324,7 +325,7 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 #define VALID_PROGRAM_DATA_KWS 0x24D20000 // 0xF4020100 // 0x64d70000
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
-const unsigned char *inputs[] = {kws_inputs};
+const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
 uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
                                  VALID_PROGRAM_DATA_KWS};
 
@@ -896,55 +897,93 @@ int main(void) {
   /* Load model metadata from LittleFS (written there by a previous BLE upload).
    * The metadata contains the flash address and program_info binary so we do
    * not need to rely on compile-time flash_offsets[] or hardcoded program_info
-   * arrays. */
+   * arrays.
+   *
+   * Boot validation sequence:
+   *   1. Read header only (no sram_upload_buffer usage) to get flash_address.
+   *   2. Load model_data meta (3rd file): CRC, first 4 bytes, length, name.
+   *   3. Validate model_name against expected slot (whitelist check).
+   *   4. Full SPI flash CRC validation (overwrites sram_upload_buffer).
+   *   5. Reload full meta + program_info into sram_upload_buffer.
+   *   6. Program Akida.
+   */
   model_meta_t kws_meta;
-  int meta_ret = file_transfer_load_meta(1, &kws_meta);
+  model_data_meta_t kws_data_meta;
 
+  /* Step 1: read header struct only to get flash_address */
+  int hdr_ret = file_transfer_read_meta_hdr_only(1, &kws_meta);
+  if (hdr_ret != 0) {
+    printk("Metadata header unavailable (err %d)\n", hdr_ret);
+    return -1;
+  }
+  uint32_t kws_flash_addr = kws_meta.flash_address;
+
+  /* Step 3: validate model name from the header (model_meta_t.model_name) */
+  if (file_transfer_check_model_name(1, kws_meta.model_name) != 0) {
+    printk("Model name mismatch: stored='%s', expected for slot 1='kws'\n",
+           kws_meta.model_name);
+    kws_model_present = false;
+    return -1;
+  }
+  printk("Model name: stored='%s', \n", kws_meta.model_name);
+  /* Step 2&4: load data meta and validate flash contents */
+  int dm_ret = file_transfer_load_data_meta(1, &kws_data_meta);
+  if (dm_ret == 0) {
+    /* Step 4: full SPI flash CRC validation */
+    akida_config_spi(1);
+    int val_ret =
+        file_transfer_validate_flash_data(kws_flash_addr, &kws_data_meta);
+    akida_config_spi(0);
+    if (val_ret != 0) {
+      printk("Model data validation FAILED will not program Akida\n");
+      kws_model_present = false;
+      return -1;
+    }
+  } else {
+    /* No 3rd file yet (legacy upload) – fall back to 4-byte check */
+    printk("No data meta file (err %d) using legacy 4-byte check\n", dm_ret);
+    akida_config_spi(1);
+    bool ok = check_program_data(kws_flash_addr, 4, 1);
+    akida_config_spi(0);
+    if (!ok) {
+      printk("Model data not present in SPI Flash please upload model\n");
+      kws_model_present = false;
+      return -1;
+    }
+  }
+
+  /* Step 5: reload full meta + program_info into sram_upload_buffer.
+   * This is necessary because file_transfer_validate_flash_data() may have
+   * overwritten sram_upload_buffer during the CRC read loop. */
+  int meta_ret = file_transfer_load_meta(1, &kws_meta);
   if (meta_ret != 0) {
-    /* CRC or file-not-found – fall back to compiled defaults */
-    printk("Metadata unavailable (err %d) using compiled defaults\n", meta_ret);
+    printk("Metadata reload failed (err %d)\n", meta_ret);
     return -1;
   }
 
-  uint32_t kws_flash_addr = kws_meta.flash_address;
+  /* Step 6: program Akida */
+  printk("Model data found at 0x%08X\n", kws_flash_addr);
+  akd_device.toggle_clock_counter(true);
+  printk("Programming model info into AKD1500\n");
 
-  akida_config_spi(1);
-  int ret = check_program_data(kws_flash_addr, 4, 1);
-  akida_config_spi(0);
+  uint32_t s_dma_cycls = akd_device.read_clock_counter();
+  uint64_t start_time = time_ms();
 
-  if (ret == false) {
-    printk("Model data not present in SPI Flash please upload model\n");
-    kws_model_present = false;
-  } else {
-    printk("Model data found at 0x%08X\n", kws_flash_addr);
+  akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len,
+                      kws_meta.flash_address);
 
-    akd_device.toggle_clock_counter(true);
-    printk("Programming model info into AKD1500\n");
+  uint32_t prog_time = (uint32_t)(time_ms() - start_time);
+  uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+  uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
+  printk("\nModel program: %u dma cycles, %u us dma, %u ms cpu\n", delta_cycle,
+         dma_time, prog_time);
 
-    uint32_t s_dma_cycls = akd_device.read_clock_counter();
-    uint64_t start_time = time_ms();
+  akd_device.set_batch_size(1, true);
+  kws_model_present = true;
+  update_model_params(kws_meta);
 
-    /* CRC verified by file_transfer_load_meta –
-     * sram_upload_buffer holds program_info; flash_address from FS header */
-    akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len,
-                        kws_meta.flash_address);
-
-    uint32_t prog_time = (uint32_t)(time_ms() - start_time);
-    uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
-    uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
-    printk("\nModel program: %u dma cycles, %u us dma, %u ms cpu\n",
-           delta_cycle, dma_time, prog_time);
-
-    akd_device.set_batch_size(1, true);
-    kws_model_present = true;
-
-    update_model_params(kws_meta);
-  }
-
-  if (kws_model_present) {
-    initiate_kws_inference();
-    is_kws_inference_started = true;
-  }
+  initiate_kws_inference();
+  is_kws_inference_started = true;
 
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
   start_imu_proc();
@@ -1336,24 +1375,59 @@ extern "C" int infer(int app_index_l) {
     return -1;
   }
 
-  /* Load metadata from LittleFS; fall back to compile-time defaults on error */
+  /* Step 1: read header only to get flash_address without touching
+   * sram_upload_buffer */
   model_meta_t infer_meta;
-  int meta_ret = file_transfer_load_meta(app_index_l, &infer_meta);
+  int hdr_ret = file_transfer_read_meta_hdr_only(app_index_l, &infer_meta);
+  if (hdr_ret != 0) {
+    printk("Metadata header unavailable (err %d)\n", hdr_ret);
+    return -1;
+  }
   uint32_t use_flash_addr = infer_meta.flash_address;
-  update_model_params(infer_meta);
 
-  akida_config_spi(1);
-  int ret = check_program_data(use_flash_addr, 4, app_index_l);
-  akida_config_spi(0);
-
-  if (ret == false) {
-    printk("Model data not present at 0x%08X – upload the model\n",
-           use_flash_addr);
+  /* Step 3: validate model name from the header (model_meta_t.model_name) */
+  if (file_transfer_check_model_name(app_index_l, infer_meta.model_name) != 0) {
+    printk("Model name mismatch for slot %d: '%s'\n", app_index_l,
+           infer_meta.model_name);
     return -1;
   }
 
-  /* CRC verified by file_transfer_load_meta –
-   * sram_upload_buffer holds program_info; flash_address from FS header */
+  /* Step 2&4: load data meta and validate flash contents */
+  model_data_meta_t infer_data_meta;
+  int dm_ret = file_transfer_load_data_meta(app_index_l, &infer_data_meta);
+  if (dm_ret == 0) {
+    /* Step 4: full SPI flash CRC validation */
+    akida_config_spi(1);
+    int val_ret =
+        file_transfer_validate_flash_data(use_flash_addr, &infer_data_meta);
+    akida_config_spi(0);
+    if (val_ret != 0) {
+      printk("Flash data validation FAILED for slot %d\n", app_index_l);
+      return -1;
+    }
+  } else {
+    /* Legacy fallback: 4-byte check only */
+    printk("No data meta file (err %d) – using legacy 4-byte check\n", dm_ret);
+    akida_config_spi(1);
+    bool ok = check_program_data(use_flash_addr, 4, app_index_l);
+    akida_config_spi(0);
+    if (!ok) {
+      printk("Model data not present at 0x%08X – upload the model\n",
+             use_flash_addr);
+      return -1;
+    }
+  }
+
+  /* Step 5: reload full meta + program_info into sram_upload_buffer.
+   * file_transfer_validate_flash_data() may have overwritten it. */
+  int meta_ret = file_transfer_load_meta(app_index_l, &infer_meta);
+  if (meta_ret != 0) {
+    printk("Metadata reload failed (err %d)\n", meta_ret);
+    return -1;
+  }
+  update_model_params(infer_meta);
+
+  /* Step 6: program Akida */
   akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
                       infer_meta.flash_address);
 
@@ -1371,16 +1445,16 @@ extern "C" int infer(int app_index_l) {
   int num_classes = 10;
   int num_neurons_per_class = 1;
 
-  auto shape = kws_inputs_shape;
   num_classes = g_num_classes;
   num_neurons_per_class = g_num_neurons_per_class;
 
   int class_id = -1;
-  uint32_t inp_shap[] = {shape[0], shape[1], shape[2]};
+  uint32_t inp_shap[] = {infer_meta.input_shape[0], infer_meta.input_shape[1],
+                         infer_meta.input_shape[2]};
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
-  ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
-                      (uint8_t *)akida_output, akd_op_size);
+  int ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
+                          (uint8_t *)akida_output, akd_op_size);
   e_tick = time_ms();
   e_dma_cycls = akd_device.read_clock_counter();
   delta_cycle = e_dma_cycls - s_dma_cycls;
@@ -1396,10 +1470,12 @@ extern "C" int infer(int app_index_l) {
   }
   if (app_index_l == 0) { // mnist
     printk("Predicted Digit : %d\n", class_id);
-
-    k_thread_suspend(capture_tid);
-    k_thread_suspend(process_tid);
-    kws_threads_suspended = true;
+    if (kws_model_present) {
+      k_thread_suspend(capture_tid);
+      k_thread_suspend(process_tid);
+      kws_model_present = false;
+      kws_threads_suspended = true;
+    }
   } else if (app_index_l == 1) { // kws
     printk("\nClass : %d\n", class_id);
     printk("Word : %s\n", kws_new_tags[class_id]);
