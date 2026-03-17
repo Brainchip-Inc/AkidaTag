@@ -30,21 +30,24 @@ def compute_data_crc32(data_path):
 
 def compute_combined_crc32(total_length, input_shape, output_shape,
                            flash_address, is_edge_learned, num_edge_classes,
-                           info_path):
-    """CRC32 over header fields [total_length..info_data_len] + info file bytes.
+                           info_path, model_name=""):
+    """CRC32 over header fields [total_length..model_name] + info file bytes.
 
     Matches the firmware's model_info_hdr_crc32 computation in file_transfer.c.
     The struct fields are packed in the same layout as model_meta_t
     (all uint32_t, little-endian; shape arrays zero-padded to 3 elements).
     Layout: total_length, input_shape[3], output_shape[3],
-            flash_address, is_edge_learned, num_edge_classes, info_data_len
+            flash_address, is_edge_learned, num_edge_classes, info_data_len,
+            model_name[64]  (null-padded to MAX_FS_NAME_LEN bytes)
     """
     MAX_DIMS = 3
+    MAX_FS_NAME_LEN = 64
     info_data_len = Path(info_path).stat().st_size
     in_pad  = list(input_shape)  + [0] * (MAX_DIMS - len(input_shape))
     out_pad = list(output_shape) + [0] * (MAX_DIMS - len(output_shape))
-    # Pack: total_length, input_shape[3], output_shape[3],
-    #       flash_address, is_edge_learned, num_edge_classes, info_data_len
+    # Pack uint32_t fields: total_length, input_shape[3], output_shape[3],
+    #                       flash_address, is_edge_learned, num_edge_classes,
+    #                       info_data_len
     header_bytes = struct.pack(
         "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 4),
         total_length,
@@ -55,6 +58,11 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
         num_edge_classes,
         info_data_len,
     )
+    # Append model_name as MAX_FS_NAME_LEN bytes, null-padded
+    name_bytes = model_name.encode("utf-8")[:MAX_FS_NAME_LEN]
+    name_bytes = name_bytes + b'\x00' * (MAX_FS_NAME_LEN - len(name_bytes))
+    header_bytes += name_bytes
+
     crc = 0xFFFFFFFF
     crc = zlib.crc32(header_bytes, crc)
     with open(info_path, "rb") as f:
@@ -297,7 +305,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
                     input_shape=None, output_shape=None,
                     flash_address=0x1000,
                     is_edge_learned=False, num_edge_classes=None,
-                    fs_name=None):
+                    fs_name=None, model_name=""):
     source_file = filepath or info_path
     try:
         APP = detect_app_index(source_file)
@@ -321,6 +329,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
             is_edge_learned=is_edge_learned,
             num_edge_classes=num_edge_classes if num_edge_classes is not None else 0,
             info_path=info_path,
+            model_name=model_name,
         )
     elif info_path and Path(info_path).exists():
         # Shapes not available – warn; CRC will be 0 (skipped at load time)
@@ -392,6 +401,7 @@ def _load_info_yaml(yaml_path):
 
     el = data.get("edge_learning", {})
     return {
+        "model_name":       str(data.get("model_name", "")),
         "flash_address":    flash_address,
         "input_shape":      tuple(data.get("input_shape",  [])) or None,
         "output_shape":     tuple(data.get("output_shape", [])) or None,
@@ -484,6 +494,9 @@ async def main(args):
     if yaml_meta and flash_address_str == "0x1000":
         flash_address_str = hex(yaml_meta["flash_address"])
 
+    # model_name: from YAML field (e.g. "kws"), falls back to empty string
+    model_name = yaml_meta["model_name"] if yaml_meta else ""
+
     # Optional: still support --model to generate bins on-the-fly (no bash wrapper)
     if args.model and not (info_path and bin_path):
         prefix = args.prefix or args.model
@@ -562,6 +575,7 @@ async def main(args):
         is_edge_learned=is_edge_learned,
         num_edge_classes=packed_classes,
         fs_name=fs_name,
+        model_name=model_name,
     )
 
 
