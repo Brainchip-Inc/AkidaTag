@@ -198,7 +198,7 @@ dmic_dev: &pdm0 {
     pinctrl-0 = <&spi3_default>;
     pinctrl-1 = <&spi3_sleep>;
     pinctrl-names = "default", "sleep";
-    cs-gpios = <&gpio0 25 GPIO_ACTIVE_LOW>,  /* CS for CAMERA */
+    cs-gpios = <&gpio1 7 GPIO_ACTIVE_LOW>,  /* CS for CAMERA */
                <&gpio0 18 GPIO_ACTIVE_LOW>;  /* CS for W25Q128 flash */
 
     /* camera device at index 0 */
