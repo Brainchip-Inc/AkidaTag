@@ -13,12 +13,6 @@ import sys
 import yaml
 import zlib
 
-# Allow importing fetch_model from the same directory
-_utils_dir = os.path.dirname(os.path.abspath(__file__))
-if _utils_dir not in sys.path:
-    sys.path.insert(0, _utils_dir)
-
-
 def compute_data_crc32(data_path):
     """CRC32 over raw model data binary file bytes."""
     crc = 0xFFFFFFFF
@@ -411,44 +405,6 @@ def _load_info_yaml(yaml_path):
     }
 
 
-def fetch_model_bins(model_name, prefix, output_dir,
-                     model_path=None, neurons_per_class=None, akida_version="v1",
-                     flash_address="0x1000", map_mode=1):
-    """Call fetch_model.fetch_and_convert to generate info/data .bin files.
-
-    Returns (info_bin_path, data_bin_path, input_shape, output_shape).
-    input_shape/output_shape are None when the files already existed.
-    """
-    from fetch_model import fetch_and_convert
-
-    class FetchArgs:
-        pass
-
-    fetch_args = FetchArgs()
-    fetch_args.model = model_name
-    fetch_args.prefix = prefix
-    fetch_args.output_dir = output_dir
-    fetch_args.model_path = model_path
-    fetch_args.neurons_per_class = neurons_per_class
-    fetch_args.akida_version = akida_version
-    fetch_args.flash_address = flash_address
-    fetch_args.map_mode = map_mode
-    fetch_args.vars_file = None
-
-    result = fetch_and_convert(fetch_args)
-    input_shape, output_shape = result if result else (None, None)
-
-    info_bin = os.path.join(output_dir, f"{prefix}_program_info.bin")
-    data_bin = os.path.join(output_dir, f"{prefix}_program_data.bin")
-
-    if not os.path.exists(info_bin):
-        raise FileNotFoundError(f"Expected info bin not found: {info_bin}")
-    if not os.path.exists(data_bin):
-        raise FileNotFoundError(f"Expected data bin not found: {data_bin}")
-
-    return info_bin, data_bin, input_shape, output_shape
-
-
 def _parse_shape_arg(value):
     """Parse a comma-separated shape string like '49,10,1' into a tuple of ints."""
     if not value:
@@ -496,33 +452,6 @@ async def main(args):
 
     # model_name: from YAML field (e.g. "kws"), falls back to empty string
     model_name = yaml_meta["model_name"] if yaml_meta else ""
-
-    # Optional: still support --model to generate bins on-the-fly (no bash wrapper)
-    if args.model and not (info_path and bin_path):
-        prefix = args.prefix or args.model
-        output_dir = args.output_dir or os.path.join(os.getcwd(), "model_output", prefix)
-        print(f"Fetching model '{args.model}' → prefix '{prefix}' → '{output_dir}'")
-        try:
-            info_path, bin_path, fetched_input, fetched_output = fetch_model_bins(
-                model_name=args.model,
-                prefix=prefix,
-                output_dir=output_dir,
-                model_path=args.model_path,
-                neurons_per_class=args.neurons_per_class,
-                akida_version=args.akida_version,
-                flash_address=flash_address_str,
-                map_mode=getattr(args, "map_mode", 1),
-            )
-            # Only use fetched shapes when not overridden by CLI args or YAML
-            if input_shape  is None: input_shape  = fetched_input
-            if output_shape is None: output_shape = fetched_output
-        except Exception as e:
-            print(f"Error fetching model: {e}")
-            sys.exit(1)
-
-    if not info_path and not bin_path:
-        print("Error: no bin files available. Provide --info/--bin or --model.")
-        sys.exit(1)
 
     # Default fs_name derived from prefix when not supplied
     fs_name = args.fs_name
@@ -582,33 +511,22 @@ async def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BLE Model Transfer Tool")
 
-    # Direct bin file arguments (used when not fetching from URL)
-    parser.add_argument("--bin", default=None,
+    # Required bin file arguments
+    parser.add_argument("--bin", required=True,
                         help="Path to pre-generated _program_data.bin")
-    parser.add_argument("--info", default=None,
+    parser.add_argument("--info", required=True,
                         help="Path to pre-generated _program_info.bin")
+    parser.add_argument("--yaml", required=True,
+                        help="Path to info.yaml with model metadata "
+                             "(flash_address, input_shape, output_shape, edge_learning). "
+                             "Explicit CLI args override values from this file.")
     parser.add_argument("--wc", default=True,
                         help="Write chunks to SRAM (default: True)")
-
-    # Model fetch / generation arguments
-    parser.add_argument("--model", default=None,
-                        help="Model name (e.g. kws, mnist). Calls fetch_model.py to generate bins.")
-    parser.add_argument("--model_path", default=None,
-                        help="Direct URL or local path to .fbz file "
-                             "(overrides models.conf lookup). "
-                             "If the filename contains '_el', edge-learning fields are auto-enabled.")
-    parser.add_argument("--prefix", default=None,
-                        help="Output file prefix (defaults to model name; use e.g. kws_el for EL models)")
-    parser.add_argument("--output_dir", default=None,
-                        help="Directory for generated .bin files (default: ./model_output/<prefix>)")
     parser.add_argument("--neurons_per_class", type=int, default=None,
-                        help="Neurons per class – triggers KWS macro injection in program_info.h")
-    parser.add_argument("--akida_version", default="v1", choices=["v1", "v2"],
-                        help="Akida version for model conversion (default: v1)")
+                        help="Neurons per class for edge-learning models")
 
     # Shape arguments (comma-separated, e.g. "49,10,1" / "10,1")
-    # Used when shapes are passed explicitly by the bash wrapper instead of
-    # being derived from a live fetch_model run.
+    # Used when shapes are passed explicitly instead of from YAML.
     parser.add_argument("--input_shape", default=None,
                         help="Model input shape as comma-separated dims (e.g. 49,10,1 or 96,96,3)")
     parser.add_argument("--output_shape", default=None,
@@ -625,14 +543,7 @@ if __name__ == "__main__":
     parser.add_argument("--fs_name", default=None,
                         help="LittleFS path for model metadata "
                              "(default: /model_meta/<prefix>, e.g. /model_meta/kws_el)")
-    parser.add_argument("--yaml", default=None,
-                        help="Path to info.yaml with model metadata "
-                             "(flash_address, input_shape, output_shape, edge_learning). "
-                             "Explicit CLI args override values from this file.")
 
     args = parser.parse_args()
-
-    if not args.bin and not args.info and not args.model:
-        parser.error("At least one of --bin, --info, or --model must be provided.")
 
     asyncio.run(main(args))
