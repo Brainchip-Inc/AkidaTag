@@ -47,12 +47,16 @@ extern "C" {
 int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
 void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
                                  size_t size);
+/**
+ * Read @p size bytes from SPI flash at @p offset into @p buf.
+ * Handles SPI master switching (MCU↔AKD1500) internally.
+ */
+void spi_flash_read_helper_func(uint8_t *buf, uint32_t offset, uint32_t size);
 
 int akida_program_infer();
 
 #ifdef __cplusplus
 }
 #endif
-int infer(int app_index_l);
 
 #endif // AKD_SPI_FLASH_HANDLER_H
