@@ -19,7 +19,6 @@
 #include <zephyr/sys_clock.h>
 
 #include "ble_services/ble_initialization.h"
-#include <stdint.h>
 atomic_t is_dmic_start;
 
 K_MEM_SLAB_DEFINE(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 32);
@@ -36,10 +35,6 @@ typedef struct {
 
 dc_block_t dc_state;
 
-void dc_block_init(dc_block_t *s) {
-  s->prev_x = 0;
-  s->prev_y = 0;
-}
 /**
  * @brief Calculate RMS value of audio samples after removing DC offset.
  * Computes the mean of the samples to remove DC bias and then calculates
@@ -49,13 +44,11 @@ static int16_t calculate_rms_dc_removed(int16_t *samples, uint32_t count) {
   int64_t mean = 0;
   uint64_t sum = 0;
 
-  /* Calculate DC offset */
   for (uint32_t i = 0; i < count; i++) {
     mean += samples[i];
   }
   mean /= (int64_t)count;
 
-  /* RMS after DC removal */
   for (uint32_t i = 0; i < count; i++) {
     int32_t s = (int32_t)samples[i] - (int32_t)mean;
     sum += (uint64_t)(s * s);
@@ -63,6 +56,11 @@ static int16_t calculate_rms_dc_removed(int16_t *samples, uint32_t count) {
 
   float rms = sqrtf((float)sum / (float)count);
   return (int16_t)rms;
+}
+
+void dc_block_init(dc_block_t *s) {
+  s->prev_x = 0;
+  s->prev_y = 0;
 }
 /*
 Applies a DC blocking (high-pass) filter to a block of 16-bit PCM samples and

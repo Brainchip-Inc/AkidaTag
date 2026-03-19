@@ -4,9 +4,6 @@
 #include <zephyr/drivers/spi.h>
 #include <zephyr/logging/log.h>
 
-#include <string.h>
-#include <zephyr/drivers/gpio.h>
-
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
