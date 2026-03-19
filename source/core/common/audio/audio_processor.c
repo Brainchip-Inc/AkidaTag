@@ -282,110 +282,112 @@ void audio_process_thread(void *a, void *b, void *c) {
     /* Mark thread as healthy */
     atomic_set(&thread_health[AUDIO_PROCESS], 1);
 #endif
+    /* Wait for message with timeout to prevent thread from blocking forever,
+     * allowing periodic WDT feeding even when no data is received */
+    if (k_msgq_get(&audio_msgq, &blk, READ_TIMEOUT) == 0) {
 
-    k_msgq_get(&audio_msgq, &blk, K_FOREVER);
-
-    samples = blk.size / sizeof(int16_t);
+      samples = blk.size / sizeof(int16_t);
 
 #ifdef CONFIG_AUDIO_CAPTURE_TEST
-    capture_raw_samples(blk.size);
+      capture_raw_samples(blk.size);
 #else
 
-    if (!is_kws_debounce_complete()) {
-      // debounce period, dont do anything
-      speech_state = SPEECH_IDLE;
-      if (verbose_on) {
-        printk("state idle \n\r");
-      }
-    }
-
-    /* remove DC offset and compute RMS based on compute_rms, flag */
-    else if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
-      /* ok to lose fraction part resolution, comparing with int value only */
-      if (((int)rms_val >= rms_threshold)) {
-        speech_state = SPEECH_ACTIVE;
-
-        speech_start_time = time_ms();
-        if (verbose_on) {
-          printk("rms_threshold %f\n\r", rms_val);
-        }
-
-      } else if (speech_state == SPEECH_IDLE) {
-
-        /* do not process as state is idle */
-        continue;
-      } else if ((time_ms() - speech_start_time) > speech_active_time_ms) {
-        /* If the speech state is active and control reaches this point, it
-         * means that the rms_val has remained below the threshold for
-         * speech_active_time_ms. This indicates that no valid speech command
-         * was detected. Therefore, the system transitions back to the IDLE
-         * state and clears any stale inference data */
+      if (!is_kws_debounce_complete()) {
+        // debounce period, dont do anything
         speech_state = SPEECH_IDLE;
-        reset_stale_inference_data();
-        continue;
+        if (verbose_on) {
+          printk("state idle \n\r");
+        }
       }
-      /* */
-      audio_processor();
-    }
 
-    audio_process_thread_cntr++;
-  }
+      /* remove DC offset and compute RMS based on compute_rms, flag */
+      else if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
+        /* ok to lose fraction part resolution, comparing with int value only */
+        if (((int)rms_val >= rms_threshold)) {
+          speech_state = SPEECH_ACTIVE;
+
+          speech_start_time = time_ms();
+          if (verbose_on) {
+            printk("rms_threshold %f\n\r", rms_val);
+          }
+
+        } else if (speech_state == SPEECH_IDLE) {
+
+          /* do not process as state is idle */
+          continue;
+        } else if ((time_ms() - speech_start_time) > speech_active_time_ms) {
+          /* If the speech state is active and control reaches this point, it
+           * means that the rms_val has remained below the threshold for
+           * speech_active_time_ms. This indicates that no valid speech command
+           * was detected. Therefore, the system transitions back to the IDLE
+           * state and clears any stale inference data */
+          speech_state = SPEECH_IDLE;
+          reset_stale_inference_data();
+          continue;
+        }
+        /* */
+        audio_processor();
+      }
+
+      audio_process_thread_cntr++;
 #endif
-  }
-
-  int cmd_inf_period(const struct shell *shell, size_t argc, char **argv) {
-    if (argc > 1) {
-
-      char *endptr;
-      errno = 0;
-
-      uint32_t val1 = strtol(argv[1], &endptr, 10);
-      if (*endptr != '\0' || errno == ERANGE || val1 > 3 || val1 < 1) {
-        shell_error(shell, "Invalid input: ");
-        return -EINVAL;
-      }
-      g_inference_period = val1;
-      printk("g_inference_period %d \n\r", val1);
-    } else {
-      printk("incorrect command \n\r");
     }
-    return 0;
   }
+}
+
+int cmd_inf_period(const struct shell *shell, size_t argc, char **argv) {
+  if (argc > 1) {
+
+    char *endptr;
+    errno = 0;
+
+    uint32_t val1 = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || errno == ERANGE || val1 > 3 || val1 < 1) {
+      shell_error(shell, "Invalid input: ");
+      return -EINVAL;
+    }
+    g_inference_period = val1;
+    printk("g_inference_period %d \n\r", val1);
+  } else {
+    printk("incorrect command \n\r");
+  }
+  return 0;
+}
 
 #ifdef CONFIG_AUDIO_CAPTURE_TEST
-  int cmd_cap_start(const struct shell *shell, size_t argc, char **argv) {
-    if (argc > 1) {
-      printk("invalid command ");
-      return -EINVAL;
-    }
-    printk("cap started ");
-    is_capture_start = 1;
-    return 0;
+int cmd_cap_start(const struct shell *shell, size_t argc, char **argv) {
+  if (argc > 1) {
+    printk("invalid command ");
+    return -EINVAL;
   }
+  printk("cap started ");
+  is_capture_start = 1;
+  return 0;
+}
 
-  int cmd_cap_stop(const struct shell *shell, size_t argc, char **argv) {
-    if (argc > 1) {
-      printk("invalid command ");
-      return -EINVAL;
-    }
-    printk("cap stopped ");
-    is_capture_start = 0;
-    return 0;
+int cmd_cap_stop(const struct shell *shell, size_t argc, char **argv) {
+  if (argc > 1) {
+    printk("invalid command ");
+    return -EINVAL;
   }
+  printk("cap stopped ");
+  is_capture_start = 0;
+  return 0;
+}
 
-  int cmd_dump_uart(const struct shell *shell, size_t argc, char **argv) {
-    if (argc > 1) {
-      printk("invalid command ");
-      return -EINVAL;
-    }
-    uart_send_pcm((int16_t *)sram_upload_buffer, TOTAL_BUFFER_BYTES / 2);
-    printk("\n\rdump completed\n\r ");
-    return 0;
+int cmd_dump_uart(const struct shell *shell, size_t argc, char **argv) {
+  if (argc > 1) {
+    printk("invalid command ");
+    return -EINVAL;
   }
+  uart_send_pcm((int16_t *)sram_upload_buffer, TOTAL_BUFFER_BYTES / 2);
+  printk("\n\rdump completed\n\r ");
+  return 0;
+}
 
-  SHELL_CMD_REGISTER(cap_start, NULL, "cap_start", cmd_cap_start);
-  SHELL_CMD_REGISTER(cap_stop, NULL, "cap_stop", cmd_cap_stop);
-  SHELL_CMD_REGISTER(dump_uart, NULL, "dump_uart", cmd_dump_uart);
+SHELL_CMD_REGISTER(cap_start, NULL, "cap_start", cmd_cap_start);
+SHELL_CMD_REGISTER(cap_stop, NULL, "cap_stop", cmd_cap_stop);
+SHELL_CMD_REGISTER(dump_uart, NULL, "dump_uart", cmd_dump_uart);
 #endif
 
-  SHELL_CMD_REGISTER(inf_period, NULL, "inf_period", cmd_inf_period);
+SHELL_CMD_REGISTER(inf_period, NULL, "inf_period", cmd_inf_period);
