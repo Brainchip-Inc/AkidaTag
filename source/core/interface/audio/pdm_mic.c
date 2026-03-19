@@ -207,6 +207,8 @@ void dmic_capture_thread(void *a, void *b, void *c) {
       dmic_capture_thread_cntr++;
       // printk ("dmic %d\n", dmic_capture_thread_cntr);
     }
+/* Feed WDT regardless of dmic_read() result to avoid trigger when DMIC is
+ * stopped */
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
     /* Mark thread as healthy */
     atomic_set(&thread_health[DMIC_CAPTURE], 1);
