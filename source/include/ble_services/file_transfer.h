@@ -27,7 +27,7 @@ extern struct k_event sram_buf_event;
 #define MAX_MODEL_INP_SHAPE_DIMS 3
 #define MAX_MODEL_OUTP_SHAPE_DIMS 3
 /* Maximum size of the program_info binary stored in LittleFS */
-#define MAX_MODEL_INFO_SIZE 1024
+#define MAX_MODEL_INFO_SIZE 2300
 /* Maximum length of the model name string (including null terminator) */
 #define MAX_FS_NAME_LEN 64
 

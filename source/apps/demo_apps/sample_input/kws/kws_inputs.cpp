@@ -70,6 +70,8 @@ const char *const kws_tags[] = {
 };
 
 const char *const kws_new_tags[] = {
-    "down",  "go",   "left", "no",  "off",     "on",      // 0-5
-    "right", "stop", "up",   "yes", "silence", "unknown", // 6-11
+    "down",   "go",     "left",  "no",  "off",     "on",      // 0-5
+    "right",  "stop",   "up",    "yes", "silence", "unknown", // 6-11
+    "cls_12", "cls_13", "cls_14" // 12-14 (edge learning classes)
 };
+const int kws_new_tags_count = sizeof(kws_new_tags) / sizeof(kws_new_tags[0]);

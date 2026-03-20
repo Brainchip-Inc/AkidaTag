@@ -119,9 +119,9 @@ static void reset_kws_spectrogram(void);
 /** No operation mode */
 #define STATE_STOPPED (3)
 
-/** Indexes of novel classes ranges from 33-35 */
-#define KWS_EDGE_NOVEL_CLASS_BASE_ID 33
-#define KWS_EDGE_MAX_NOVEL_CLASS_ID 35
+/** Indexes of novel classes ranges from 12-14 */
+#define KWS_EDGE_NOVEL_CLASS_BASE_ID 12
+#define KWS_EDGE_MAX_NOVEL_CLASS_ID 14
 
 /** long button pressed event */
 #define LONG_PRESS_EVENT 0
@@ -741,29 +741,28 @@ static void read_learn_weights_from_flash(void) {
 
 static int initiate_kws_inference() {
 
-  /*  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
-    mesh_learn_weights_size = akida_learn_mem_size();
+  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
+  mesh_learn_weights_size = akida_learn_mem_size();
 
-    printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
+  printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
 
-    // allocating memory for structure (this will hold crc, size etc ) + learn
-    // weights data together to place them in contiguous locations
-    saved_learn_weights_ptr = (saved_learn_weights *)malloc(
-        sizeof(saved_learn_weights) + mesh_learn_weights_size);
+  // allocating memory for structure (this will hold crc, size etc ) + learn
+  // weights data together to place them in contiguous locations
+  saved_learn_weights_ptr = (saved_learn_weights *)malloc(
+      sizeof(saved_learn_weights) + mesh_learn_weights_size);
 
-    base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
+  base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
 
-    if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
-      printk("dynamic memory allocation failed for weights data and hence "
-             "application is not "
-             "running ");
-      return -EFAILURE;
-    }
-    // initialize the learn_weights_mem structure
-    reset_saved_weights();
-    // init_learn_weights_mem(mesh_learn_weights_size);
+  if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
+    printk("dynamic memory allocation failed for weights data and hence "
+           "application is not "
+           "running ");
+    return -EFAILURE;
+  }
+  // initialize the learn_weights_mem structure
+  reset_saved_weights();
 
-    read_learn_weights_from_flash();*/
+  read_learn_weights_from_flash();
 
   cur_kws_edge_state = STATE_INFERENCE;
 
@@ -834,8 +833,13 @@ static void update_model_params(model_meta_t kws_meta) {
                  kws_meta.input_shape[2];
   g_num_classes = kws_meta.output_shape[0] * kws_meta.output_shape[1] *
                   kws_meta.output_shape[2];
-  printk("kws_meta.num_edge_classes %d \n\r", kws_meta.num_edge_classes);
+
+  printk("kws_meta.num_edge_classes %x \n\r", kws_meta.num_edge_classes);
   g_num_neurons_per_class = (kws_meta.num_edge_classes & 0xFFFF0000) >> 16;
+
+  if (g_num_neurons_per_class) {
+    g_num_classes = g_num_classes / g_num_neurons_per_class;
+  }
   g_num_edge_learn_classes = (kws_meta.num_edge_classes & 0xFFFF);
 
   printk("kws_meta.input_shape[0] %d, kws_meta.input_shape[1] %d, "
@@ -853,8 +857,9 @@ static void update_model_params(model_meta_t kws_meta) {
          g_input_size, g_num_classes, g_num_neurons_per_class,
          g_num_edge_learn_classes);
 
+  delete[] akida_output;
   akida_output = new int32_t[g_num_classes * g_num_neurons_per_class];
-  akd_op_size = sizeof(akida_output) * g_num_classes * g_num_neurons_per_class;
+  akd_op_size = sizeof(int32_t) * g_num_classes * g_num_neurons_per_class;
 }
 
 int main(void) {
@@ -1079,8 +1084,26 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                "= %u ms\n\r",
                delta_cycle, dma_time, inf_time);
       }
-      int found = get_inferred_class(akida_output, g_num_classes,
-                                     g_num_neurons_per_class);
+
+      int32_t max_val = 0;
+      int32_t akida_output_l[g_num_classes] = {0};
+      for (int num_cls = 0; num_cls < g_num_classes; num_cls++) {
+        max_val = 0;
+        for (int i = 0; i < g_num_neurons_per_class; i++) {
+          /* identify the biggest value within the g_num_neurons_per_class and
+          use the max value for that class */
+          int32_t current_val =
+              akida_output[(num_cls * g_num_neurons_per_class) + i];
+          if (current_val > max_val) {
+            max_val = current_val;
+          }
+        }
+
+        /* copy the max value per class */
+        akida_output_l[num_cls] = max_val;
+      }
+
+      int found = get_inferred_class(akida_output_l, g_num_classes, 1);
 
       if (found == -1) {
         if (verbose_on) {
@@ -1091,7 +1114,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
 
       if (found == KWS_SILENCE_CLASS || found == KWS_UNKNOWN_CLASS) {
         if (verbose_on) {
-          printk("suppressed: %s\n\r", kws_new_tags[found]);
+          printk("suppressed: %s\n\r",
+                 (found < kws_new_tags_count) ? kws_new_tags[found] : "?");
         }
         return 0;
       }
@@ -1109,14 +1133,19 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       float score = (float)match_count / score_window_size;
 
       if (verbose_on) {
-        printk("class=%d (%s) score=%.2f\n\r", found, kws_new_tags[found],
-               score);
+        printk("class=%d (%s) score=%.2f\n\r", found,
+               (found < kws_new_tags_count) ? kws_new_tags[found] : "?", score);
       }
 
       if (score >= score_threshold) {
         current_class = found;
         // Compute softmax confidence over class-level spike sums
-        float class_sums[g_num_classes] = {0};
+#define MAX_NUM_CLASSES 15
+        float class_sums[MAX_NUM_CLASSES] = {0};
+        if ((int)g_num_classes > MAX_NUM_CLASSES) {
+          printk("g_num_classes %d exceeds MAX_NUM_CLASSES\n\r", g_num_classes);
+          return 0;
+        }
         for (int c = 0; c < g_num_classes; c++)
           for (int n = 0; n < g_num_neurons_per_class; n++)
             class_sums[c] +=
@@ -1132,7 +1161,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                                ? expf(class_sums[found] - max_sum) / exp_sum
                                : 0.0f;
 
-        printk("\nKeyword Detected: %s\n\r", kws_new_tags[found]);
+        printk("\nKeyword Detected: %s\n\r",
+               (found < kws_new_tags_count) ? kws_new_tags[found] : "?");
         if (metrics_on) {
           printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
                  confidence * 100.0f, score, inf_time, dma_time);
@@ -1410,7 +1440,7 @@ extern "C" int infer(int app_index_l) {
     }
   } else {
     /* Legacy fallback: 4-byte check only */
-    printk("No data meta file (err %d) – using legacy 4-byte check\n", dm_ret);
+    printk("No data meta file (err %d) using legacy 4-byte check\n", dm_ret);
     akida_config_spi(1);
     bool ok = check_program_data(use_flash_addr, 4, app_index_l);
     akida_config_spi(0);
@@ -1481,7 +1511,9 @@ extern "C" int infer(int app_index_l) {
     }
   } else if (app_index_l == 1) { // kws
     printk("\nClass : %d\n", class_id);
-    printk("Word : %s\n", kws_new_tags[class_id]);
+    printk("Word : %s\n", (class_id >= 0 && class_id < kws_new_tags_count)
+                              ? kws_new_tags[class_id]
+                              : "?");
     kws_model_present = true;
     if (!is_kws_inference_started) {
       initiate_kws_inference();
