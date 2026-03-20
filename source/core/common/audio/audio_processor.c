@@ -284,7 +284,7 @@ void audio_process_thread(void *a, void *b, void *c) {
 #endif
     /* Wait for message with timeout to prevent thread from blocking forever,
      * allowing periodic WDT feeding even when no data is received */
-    if (k_msgq_get(&audio_msgq, &blk, READ_TIMEOUT) == 0) {
+    if (k_msgq_get(&audio_msgq, &blk, K_MSEC(READ_TIMEOUT)) == 0) {
 
       samples = blk.size / sizeof(int16_t);
 
