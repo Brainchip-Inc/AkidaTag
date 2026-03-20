@@ -402,6 +402,7 @@ def _load_info_yaml(yaml_path):
         "is_el":            bool(el.get("enabled",     False)),
         "num_classes":      int(el.get("num_classes",  0)),
         "neurons_per_class": int(el.get("num_neurons", 1)),
+        "num_el_classes":   int(el.get("num_el_classes", 0)),
     }
 
 
@@ -444,7 +445,8 @@ async def main(args):
             args.num_classes = yaml_meta["num_classes"]
         if args.neurons_per_class is None:
             args.neurons_per_class = yaml_meta["neurons_per_class"]
-
+        if args.num_el_classes is None and yaml_meta["num_el_classes"] > 0:
+            args.num_el_classes = yaml_meta["num_el_classes"]
     # flash_address: explicit CLI (non-default) > YAML > default "0x1000"
     flash_address_str = args.flash_address
     if yaml_meta and flash_address_str == "0x1000":
@@ -484,12 +486,12 @@ async def main(args):
         print("Invalid selection.")
         return
 
-    # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_classes
+    # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_el_classes
     packed_classes = None
-    if args.num_classes is not None:
+    if args.num_el_classes is not None:
         neurons = args.neurons_per_class if args.neurons_per_class is not None else 1
-        packed_classes = ((neurons & 0xFFFF) << 16) | (args.num_classes & 0xFFFF)
-        print(f"num_edge_classes packed: neurons={neurons} classes={args.num_classes} "
+        packed_classes = ((neurons & 0xFFFF) << 16) | (args.num_el_classes & 0xFFFF)
+        print(f"num_edge_classes packed: neurons={neurons} classes={args.num_el_classes} "
               f"→ 0x{packed_classes:08X}")
     else:
         neurons = 1;
@@ -539,6 +541,8 @@ if __name__ == "__main__":
     parser.add_argument("--is_el", action="store_true",
                         help="Mark model as edge-learned (auto-detected from _el in filename)")
     parser.add_argument("--num_classes", type=int, default=None,
+                        help="Number of classes ")
+    parser.add_argument("--num_el_classes", type=int, default=None,
                         help="Number of edge-learning classes (required when --is_el)")
     parser.add_argument("--fs_name", default=None,
                         help="LittleFS path for model metadata "
