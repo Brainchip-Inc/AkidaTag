@@ -89,7 +89,7 @@ This allows the LED logic to operate in two modes:
 | UPDATE_FAILED   | Green OFF, Red ON |
 
 ### PDM MIC 
-This application uses the DMIC (PDM microphone) interface with PDM_CLK on P0.26 and PDM_DIN on P0.25.
+This application uses the DMIC (PDM microphone) interface with PDM_CLK on P1.9 and PDM_DIN on P1.10.
 The DMIC peripheral is enabled via DeviceTree using the dmic_dev node and pinctrl configuration.
 Required Zephyr flags: CONFIG_AUDIO=y, CONFIG_DMIC=y, CONFIG_MEM_SLAB=y, CONFIG_PRINTK=y.
 Audio is captured at 16 kHz, 16-bit mono and RMS is calculated after DC offset removal.
@@ -448,6 +448,13 @@ The sysbuild system generates a combined image that includes both MCUBoot and th
 ```
 ./scripts/run.sh -d -b --app demo_apps
 ```
+### Build the demo_apps Sample with spark board overlay file.
+After compiling the project, MCUBoot is automatically built along with the application.
+The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
+
+```
+./scripts/run.sh -d -b --spark --app demo_apps
+```
 
 ### Flash the demo_apps Sample.
 This flashes both mcuboot and demo_apps application together
@@ -489,6 +496,18 @@ Firmware images are uploaded from the host PC using AuTerm over the configured U
 - The watchdog pauses automatically when the CPU is halted by a debugger or while CPU sleeps to prevent unintended resets during debugging.
 - The wdt_disable CLI command is implemented for watchdog validation testing. It performs an invalid memory access to generate a system fault. As watchdog feeding stops after the crash, the watchdog timeout occurs and forces a system reset, confirming correct watchdog functionality.
 - An additional CLI command (threads_stop) is available to terminate all running threads for testing purposes, allowing validation of watchdog recovery behavior when the system becomes unresponsive.
+
+### External SPI NOR Flash Integration
+Added DeviceTree configuration for the external flash (ext_flash) to enable access through Zephyr flash APIs.
+
+## Board-specific Overlay Configuration
+
+Different pin configurations are used for the DK board and the Spark board due to pin availability and hardware connections.
+
+The overlay file is selected during the build using the `--spark` flag.
+
+- **DK board overlay file:** `nrf5340dk_nrf5340_cpuapp.overlay`
+- **Spark board overlay file:** `nrf5340_cpuapp_spark.overlay`
 
 ### Model Generation and BLE Transfer
 
