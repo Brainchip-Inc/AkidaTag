@@ -30,7 +30,7 @@ Options:
   --key              | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
   -r, --reset        | (flag) | Do Board Reset
   -h, --help         | (flag) | Show this help message
-  --spark            | (flag) | Select spark board pin configuration overlay file.
+  --dk               | (flag) | Select dk board pin configuration overlay file.
 
 ###################################################################################################
 Run the script from project root.
@@ -44,8 +44,8 @@ How to use script - Examples runs:
   # Build akida_spi_flash_app inside Docker
   $SCRIPT_INVOCATION -d -b --app demo_apps
 
-  # Build demo_apps with spark overlay file inside Docker
-  $SCRIPT_INVOCATION -d -b --spark --app demo_apps
+  # Build demo_apps with dk board overlay file inside Docker
+  $SCRIPT_INVOCATION -d -b --dk --app demo_apps
 
   # Flash locally using west flash
   $SCRIPT_INVOCATION -f --app demo_apps
@@ -129,7 +129,7 @@ MODEL_TRANSFER_NAME="kws"
 MODEL_TRANSFER_FLASH_ADDR="0x1000"
 MODEL_TRANSFER_MAP_MODE=1
 SEND_BLE=false
-SPARK_OVERLAY=false
+DK_OVERLAY=false
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
 DO_SHELL=false
@@ -226,8 +226,8 @@ while [[ $# -gt 0 ]]; do
             DO_KEY=true
             shift
             ;;
-        --spark)
-            SPARK_OVERLAY=true
+        --dk)
+            DK_OVERLAY=true
             shift
             ;;
         -r|--reset) DO_RESET=true; shift;;
@@ -429,10 +429,10 @@ if [[ -n "$APP" ]]; then
 
 	  CMAKE_EXTRA_ARGS+=(-DCONFIG_AUDIO_CAPTURE_TEST=n)
       # Overlay selection using USE_AUDIO
-      if $SPARK_OVERLAY; then
-        CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_spark.overlay")
-      else
+      if $DK_OVERLAY; then
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
+      else
+        CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_spark.overlay")
       fi
       ;;
   esac

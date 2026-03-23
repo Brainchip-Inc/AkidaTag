@@ -448,12 +448,12 @@ The sysbuild system generates a combined image that includes both MCUBoot and th
 ```
 ./scripts/run.sh -d -b --app demo_apps
 ```
-### Build the demo_apps Sample with spark board overlay file.
+### Build the demo_apps Sample with dk board overlay file.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
 
 ```
-./scripts/run.sh -d -b --spark --app demo_apps
+./scripts/run.sh -d -b --dk --app demo_apps
 ```
 
 ### Flash the demo_apps Sample.
@@ -504,7 +504,7 @@ Added DeviceTree configuration for the external flash (ext_flash) to enable acce
 
 Different pin configurations are used for the DK board and the Spark board due to pin availability and hardware connections.
 
-The overlay file is selected during the build using the `--spark` flag.
+The overlay file is selected during the build using the `--dk` flag.
 
 - **DK board overlay file:** `nrf5340dk_nrf5340_cpuapp.overlay`
 - **Spark board overlay file:** `nrf5340_cpuapp_spark.overlay`
