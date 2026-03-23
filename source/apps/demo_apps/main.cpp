@@ -177,7 +177,7 @@ static bool kws_threads_suspended = false;
 static uint32_t mesh_learn_weights_size = 0;
 
 /** Timestamp of last sample enqueued for learning */
-static uint32_t last_learn_ts = 0;
+static uint64_t last_learn_ts = 0;
 
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 /** Handle for the watchdog device  */
@@ -411,6 +411,32 @@ float score_threshold = SCORE_THRESHOLD;
 // Metrics mode: show confidence and timing details on keyword detection
 int metrics_on = 0;
 
+static void learn_to_ls(void) {
+  if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
+    uint64_t cur_ts = time_ms();
+    switch_mode(STATE_LEARN_SELECT);
+    printk("learning -> learn_select\n\r");
+    akida_learn_mode(true);
+    if (SUCCESS ==
+        save_weights_from_mesh(
+            learn_weights_buff_ptr,
+            saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
+      saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
+          1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
+      learning_completed();
+      printk("Save Weights from MESH->MEM \n\r");
+    } else {
+      printk("Sync:akida_save_learn_weights function has failed for label %d ",
+             cur_kws_edge_novel_class);
+    }
+    akida_learn_mode(false);
+    uint32_t duration_ms = (uint32_t)(time_ms() - cur_ts);
+    if (verbose_on) {
+      printk("mesh_mem = % lu ms\n", duration_ms);
+    }
+  }
+}
+
 void do_inference(int spectrogram_index) {
   __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
   /*q7_t min = 127;
@@ -470,35 +496,6 @@ void do_inference(int spectrogram_index) {
     // printk ("do_inference cur_kws_edge_state %d \n", cur_kws_edge_state);
     kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
                                                       (uint32_t *)dims);
-  }
-
-  if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
-    uint32_t cur_ts = k_cycle_get_32();
-    uint32_t last_learn_duration = (uint32_t)(cur_ts - last_learn_ts);
-    uint64_t duration_us = k_cyc_to_us_floor64(last_learn_duration);
-    if (duration_us >= GET_SEC_TO_USEC(5)) {
-      switch_mode(STATE_LEARN_SELECT);
-      printk("learning -> learn_select\n\r");
-      akida_learn_mode(true);
-      if (SUCCESS ==
-          save_weights_from_mesh(
-              learn_weights_buff_ptr,
-              saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
-        saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
-            1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
-        learning_completed();
-        printk("Save Weights from MESH->MEM \n\r");
-      } else {
-        printk(
-            "Sync:akida_save_learn_weights function has failed for label %d ",
-            cur_kws_edge_novel_class);
-      }
-      akida_learn_mode(false);
-      uint64_t duration_us = k_cyc_to_us_floor64(k_cycle_get_32() - cur_ts);
-      if (verbose_on) {
-        printk("mesh_mem = %" PRIu64 " us\n", duration_us);
-      }
-    }
   }
 }
 
@@ -611,13 +608,18 @@ static void init_learn_weights_mem(uint32_t layer_mem_size) {
 }
 
 static struct k_work_delayable switch_delayed_work;
-
 static void switch_learning_delayed(struct k_work *work) {
   ARG_UNUSED(work);
-  memset(spectrogram, -127, SPECTROGRAM_COUNT * SPECTROGRAM_RES);
-  cur_kws_edge_state = STATE_LEARNING;
-  printk("learn_select -> learning");
-  last_learn_ts = k_cycle_get_32();
+
+  if (cur_kws_edge_state == STATE_LEARN_SELECT) {
+    memset(spectrogram, -127, SPECTROGRAM_COUNT * SPECTROGRAM_RES);
+    cur_kws_edge_state = STATE_LEARNING;
+    printk("learn_select -> learning");
+    last_learn_ts = time_ms();
+    k_work_schedule(&switch_delayed_work, K_SECONDS(5));
+  } else if (cur_kws_edge_state == STATE_LEARNING) {
+    learn_to_ls();
+  }
 }
 
 static void switch_mode(int mode) {
@@ -640,7 +642,6 @@ static void switch_mode(int mode) {
 
       akida_learn_mode(true);
       k_work_schedule(&switch_delayed_work, K_SECONDS(1));
-      //  switch_learning_delayed();
     }
     break;
   case STATE_LEARNING:
@@ -739,30 +740,32 @@ static void read_learn_weights_from_flash(void) {
   }
 }
 
-static int initiate_kws_inference() {
+static int initiate_kws_inference(uint8_t is_el_model) {
 
-  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
-  mesh_learn_weights_size = akida_learn_mem_size();
+  if (is_el_model) {
+    k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
+    mesh_learn_weights_size = akida_learn_mem_size();
 
-  printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
+    printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
 
-  // allocating memory for structure (this will hold crc, size etc ) + learn
-  // weights data together to place them in contiguous locations
-  saved_learn_weights_ptr = (saved_learn_weights *)malloc(
-      sizeof(saved_learn_weights) + mesh_learn_weights_size);
+    // allocating memory for structure (this will hold crc, size etc ) + learn
+    // weights data together to place them in contiguous locations
+    saved_learn_weights_ptr = (saved_learn_weights *)malloc(
+        sizeof(saved_learn_weights) + mesh_learn_weights_size);
 
-  base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
+    base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
 
-  if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
-    printk("dynamic memory allocation failed for weights data and hence "
-           "application is not "
-           "running ");
-    return -EFAILURE;
+    if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
+      printk("dynamic memory allocation failed for weights data and hence "
+             "application is not "
+             "running ");
+      return -EFAILURE;
+    }
+    // initialize the learn_weights_mem structure
+    reset_saved_weights();
+
+    read_learn_weights_from_flash();
   }
-  // initialize the learn_weights_mem structure
-  reset_saved_weights();
-
-  read_learn_weights_from_flash();
 
   cur_kws_edge_state = STATE_INFERENCE;
 
@@ -974,11 +977,12 @@ int main(void) {
   akd_device.toggle_clock_counter(true);
   printk("Programming model info into AKD1500\n");
 
+  uint8_t is_el_model = 0;
   uint32_t s_dma_cycls = akd_device.read_clock_counter();
   uint64_t start_time = time_ms();
 
   akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len,
-                      kws_meta.flash_address);
+                      kws_meta.flash_address, &is_el_model);
 
   uint32_t prog_time = (uint32_t)(time_ms() - start_time);
   uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
@@ -990,7 +994,17 @@ int main(void) {
   kws_model_present = true;
   update_model_params(kws_meta);
 
-  initiate_kws_inference();
+  if (is_el_model) {
+    if (kws_meta.is_edge_learned) {
+      printk("model is edhe learn capable\n\r");
+    } else {
+      printk(
+          "model in-compatability, FS and model to be updated correctly\n\r");
+      return -1;
+    }
+  }
+
+  initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
 
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
@@ -1337,7 +1351,7 @@ static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     } while (ret);
   }
 
-  last_learn_ts = k_cycle_get_32();
+  last_learn_ts = time_ms();
   return ret;
 }
 
@@ -1460,9 +1474,10 @@ extern "C" int infer(int app_index_l) {
   }
   update_model_params(infer_meta);
 
+  uint8_t is_el_model = 0;
   /* Step 6: program Akida */
   akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
-                      infer_meta.flash_address);
+                      infer_meta.flash_address, &is_el_model);
 
   akd_device.set_batch_size(1, true);
   app_index = app_index_l;
@@ -1516,7 +1531,7 @@ extern "C" int infer(int app_index_l) {
                               : "?");
     kws_model_present = true;
     if (!is_kws_inference_started) {
-      initiate_kws_inference();
+      initiate_kws_inference(is_el_model);
     } else if (kws_threads_suspended) {
       k_thread_resume(capture_tid);
       k_thread_resume(process_tid);
@@ -1603,6 +1618,11 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
     } else if (!strcmp(argv[1], "evt")) {
       if (argc > 2) {
         printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
+        if (cur_kws_edge_state == STATE_STOPPED) {
+          printk(
+              " cur_kws_edge_state is STATE_STOPPED user input not possible\n");
+          return 0;
+        }
         kws_edge_state[cur_kws_edge_state].on_user_input(atoi(argv[2]));
       }
     } else if (argc > 2 && !strcmp(argv[1], "rms")) {
