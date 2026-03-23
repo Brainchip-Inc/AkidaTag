@@ -36,5 +36,5 @@ void send_pdm_data(uint32_t data);
  * Send a keyword spotting (KWS) detection event to the phone.
  * Includes the detected keyword and its confidence score.
  */
-void send_kws_event(const char *word, uint8_t strength);
+void send_kws_event(const char *word, float strength);
 #endif /* BLE_INITIALIZATION_H */

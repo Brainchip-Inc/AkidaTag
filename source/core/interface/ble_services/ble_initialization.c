@@ -352,14 +352,14 @@ void send_pdm_data(uint32_t data) {
  * @param word Detected keyword string (e.g., "hello", "stop")
  * @param strength Confidence percentage (0-100)
  */
-void send_kws_event(const char *word, uint8_t strength) {
+void send_kws_event(const char *word, float strength) {
 
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
 
   /* Format: CMD_KWS_EVENT:<word>,<strength>\r
    * Example: "11:cat,91\r" */
-  snprintf(data_part, sizeof(data_part), "%d:%s,%d\r", CMD_DEPLOY_START, word,
+  snprintf(data_part, sizeof(data_part), "%d:%s,%f\r", CMD_DEPLOY_START, word,
            strength);
   int data_len = strlen(data_part);
 
@@ -370,7 +370,7 @@ void send_kws_event(const char *word, uint8_t strength) {
   if (err) {
     LOG_ERR("Failed to send KWS event (err=%d)", err);
   } else {
-    LOG_INF("KWS Event: word=\"%s\" strength=%d%%", word, strength);
+    LOG_INF("KWS Event: word=\"%s\" strength=%f", word, strength);
     LOG_INF("KWS event sent successfully");
   }
 }

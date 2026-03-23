@@ -1183,6 +1183,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
           printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
                  confidence * 100.0f, score, inf_time, dma_time);
         }
+        send_kws_event(kws_new_tags[found],score);
+
         // Clear history so next word starts fresh
         memset(class_history, -1, sizeof(class_history));
         history_idx = 0;
