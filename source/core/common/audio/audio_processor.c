@@ -17,11 +17,6 @@
 
 #include "ble_services/file_transfer.h"
 
-#include "akd_spi_flash_handler.h"
-#include "ble_services/file_transfer.h"
-#include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
-
 #define RMS_THRESHOLD 550
 int rms_threshold = RMS_THRESHOLD;
 #define SPEECH_IDLE 0
@@ -127,7 +122,7 @@ static int spectrogram_push(float *data, int spectrogram_index) {
 
 #define MFCC_PER_BLOCK 3
 
-static void mfcc_process_input(const q15_t *input, int16_t *mfcc_input) {
+static void mfcc_process_input(const int16_t *input, int16_t *mfcc_input) {
 
   // make sure the mfcc_input pointer should have space for 320+960 samples
   // 1. Copy NEW 960 samples into the rest of the buffer
@@ -161,7 +156,7 @@ static void mfcc_process_input(const q15_t *input, int16_t *mfcc_input) {
 
 int audio_processor(void) {
 
-  __aligned(32) static q15_t input[MAX_MFCC_LEN];
+  __aligned(32) static int16_t input[MAX_MFCC_LEN];
 
   int min = 128000;
   int max = -128000;
