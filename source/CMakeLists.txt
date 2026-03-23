@@ -34,14 +34,6 @@ message(STATUS "Top-level FEAT_NAME = ${FEATURE}")
 include(core/cmake/akida_engine_setup.cmake)
 setup_akida_engine(core/cmake/)
 
-# ------------------------------------------------------------------------------
-# External dependencies
-# ------------------------------------------------------------------------------
-include(core/cmake/cmsis_dsp.cmake)
-
-fetch_cmsis_dsp()
-add_cmsis_dsp(app)	
-
 #
 # -------------------------------------------------------------
 #  APP SOURCES
@@ -54,8 +46,6 @@ target_include_directories(app PRIVATE include
 	include/audio
     include/camera
     include/led
-    ${CMSIS_DSP_DIR}/CMSIS/DSP/Include
-    ${ZEPHYR_BASE}/modules/hal/cmsis/CMSIS/Core/Include
 )	
 
 target_sources(app PRIVATE
@@ -111,6 +101,26 @@ set(EXTERNAL_GEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external)
 
 
 target_compile_definitions(app PRIVATE FLASH_READ_BACK_CHECK=0)
+
+#
+# -------------------------------------------------------------
+#  COMPILER FLAGS
+# -------------------------------------------------------------
+#
+target_compile_options(app PRIVATE
+    $<$<COMPILE_LANGUAGE:C>:
+        -Wno-strict-aliasing
+        -Wno-unused-parameter
+    >
+    $<$<COMPILE_LANGUAGE:CXX>:
+        -Wno-strict-aliasing
+        -Wno-unused-parameter
+        -Wno-stringop-overread
+    >
+    -ffunction-sections
+    -fdata-sections
+    -fno-common
+)
 
 #
 # -------------------------------------------------------------

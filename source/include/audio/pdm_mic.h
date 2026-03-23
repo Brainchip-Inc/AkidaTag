@@ -2,7 +2,6 @@
 #define __PDM_MIC_H__
 #include <stdint.h>
 #include <zephyr/kernel.h>
-// int pdm_read(uint32_t *buffer, uint32_t * size);
 int dmic_process(uint16_t *passed_buffer, uint32_t passed_size,
                  float *p_rms_val);
 int dmic_start(void);
@@ -11,8 +10,6 @@ void dmic_capture_thread(void *a, void *b, void *c);
 void stop_dmic(void);
 
 /* ================= CONFIG ================= */
-#define SLEEP_PDM_TIME_MS 50
-
 #define SAMPLE_RATE CONFIG_SAMPLING_RATE
 #define SAMPLE_BIT_WIDTH 16
 #define BYTES_PER_SAMPLE sizeof(int16_t)

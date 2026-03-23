@@ -24,7 +24,6 @@
 
 #include "mfcc.h"
 #include "error.h"
-#include "string.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -164,9 +163,7 @@ float *create_dct_matrix(int32_t input_length, int32_t coefficient_count) {
 float **create_mel_fbank() {
   int32_t bin, i;
 
-  // int32_t num_fft_bins = frame_len_padded / 2;
-  // float fft_bin_width = ((float)samplerate) / frame_len_padded;
-  int32_t num_fft_bins = frame_len_padded / 2;                  // now 320
+  int32_t num_fft_bins = frame_len_padded / 2;
   float fft_bin_width = ((float)samplerate) / frame_len_padded; // now 25.0 Hz
   float mel_low_freq = MelScale(MEL_LOW_FREQ);
   float mel_high_freq = MelScale(MEL_HIGH_FREQ);
@@ -250,22 +247,11 @@ void mfcc_compute(const int16_t *audio_data, float *mfcc_out) {
   kiss_fft_cpx cpx_out[frame_len_padded / 2 + 1];
   kiss_fftr(kiss_cfg, frame, cpx_out);
 
-  // Convert to power spectrum
-  // frame is stored as [real0, realN/2-1, real1, im1, real2, im2, ...]
-  /*int32_t half_dim = frame_len_padded / 2;
-  float first_energy = buffer[0] * buffer[0],
-        last_energy = buffer[1] * buffer[1]; // handle this special case
-  for (i = 1; i < half_dim; i++) {
-    float real = buffer[i * 2], im = buffer[i * 2 + 1];
-    buffer[i] = real * real + im * im;
-  }*/
-  // NEW: KissFFT output is already kiss_fft_cpx array
+  // Convert to power spectrum (KissFFT output is kiss_fft_cpx array)
   int num_bins = frame_len_padded / 2 + 1; // 321
   for (i = 0; i < num_bins; i++) {
     buffer[i] = cpx_out[i].r * cpx_out[i].r + cpx_out[i].i * cpx_out[i].i;
   }
-  // buffer[0] = first_energy;
-  // buffer[half_dim] = last_energy;
 
   // Apply mel filterbanks
   for (bin = 0; bin < NUM_FBANK_BINS; bin++) {
@@ -286,12 +272,7 @@ void mfcc_compute(const int16_t *audio_data, float *mfcc_out) {
 
   // Take log
   for (bin = 0; bin < NUM_FBANK_BINS; bin++) {
-    // mel_energies[bin] = logf(mel_energies[bin]);
     mel_energies[bin] = logf(mel_energies[bin] + 1e-6f);
-#if 0
-        if (mel_energies[bin] < 1e-12)
-            mel_energies[bin] = 1e-12;
-#endif
   }
   // Take DCT. Uses matrix mul.
   for (i = 0; i < num_mfcc_features; i++) {
