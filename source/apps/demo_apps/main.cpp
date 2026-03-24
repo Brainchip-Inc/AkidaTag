@@ -163,6 +163,7 @@ static struct kws_demo_params {
             DEFAULT_LEARNING_DELAY, DEFAULT_API_SELECTION_ASYNC,
             DEFAULT_INFERENCE_SAMPLE_THRESHOLD};
 
+static uint64_t last_trigger_time_ms = 0ULL;
 int verbose_on = 0;
 /** Current state of the application */
 static uint32_t cur_kws_edge_state = STATE_STOPPED;
@@ -612,7 +613,6 @@ static void switch_learning_delayed(struct k_work *work) {
   ARG_UNUSED(work);
 
   if (cur_kws_edge_state == STATE_LEARN_SELECT) {
-    memset(spectrogram, -127, SPECTROGRAM_COUNT * SPECTROGRAM_RES);
     cur_kws_edge_state = STATE_LEARNING;
     printk("learn_select -> learning");
     last_learn_ts = time_ms();
@@ -768,7 +768,9 @@ static int initiate_kws_inference(uint8_t is_el_model) {
   }
 
   cur_kws_edge_state = STATE_INFERENCE;
-
+  /* adding additional 1200ms to last_trigger_time_ms to increase the debouce
+   * time at during the initialization to suppress any noise from dmic */
+  last_trigger_time_ms = time_ms() + 1200ULL;
   start_dmic_audio_proc();
   return SUCCESS;
 }
@@ -1051,7 +1053,7 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
 
 uint32_t kws_debounce_time = DEBOUNCE_COOLDOWN_MS;
 bool feature_buff_full = false;
-uint64_t last_trigger_time_ms = 0ULL;
+
 extern "C" void reset_stale_inference_data(void) {
   reset_kws_spectrogram();
   if (verbose_on) {
@@ -1063,7 +1065,7 @@ extern "C" void reset_stale_inference_data(void) {
 extern "C" uint8_t is_kws_debounce_complete(void) {
   uint8_t is_debounce = 0;
   /* DEBOUNCING (Preventing multiple rapid triggers)*/
-  if ((time_ms() - last_trigger_time_ms) > kws_debounce_time)
+  if ((time_ms()) > last_trigger_time_ms + kws_debounce_time)
     is_debounce = 1;
 
   return is_debounce;
