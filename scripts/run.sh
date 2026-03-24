@@ -578,7 +578,7 @@ if $DOCKER; then
         for c in "${LOCAL_STEPS[@]}"; do
             echo
             echo ">>> $c"
-            bash -lc "$c"
+            bash -c "$c"
         done
     fi
 else
@@ -586,6 +586,6 @@ else
     for c in "${all_steps[@]}"; do
         echo
         echo ">>> $c"
-        bash -lc "$c"
+        bash -c "$c"
     done
 fi
