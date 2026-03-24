@@ -877,12 +877,16 @@ int main(void) {
   ble_init();
   akida_spiflash_init();
 
-  const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
+  /* Get the SPI NOR flash device defined in the device tree (node label:
+   * ext_flash) and verify that the driver has initialized successfully before
+   * using it.
+   */
+  const struct device *spi_flash = DEVICE_DT_GET(DT_NODELABEL(ext_flash));
 
-  if (!device_is_ready(qspi)) {
-    printk("QSPI not ready\n");
+  if (!device_is_ready(spi_flash)) {
+    printk("SPI flash not ready\n");
   } else {
-    printk("QSPI device ready: %s \n", qspi->name);
+    printk("SPI flash device ready: %s\n", spi_flash->name);
   }
   int err = storage_init();
   if (err != 0) {
