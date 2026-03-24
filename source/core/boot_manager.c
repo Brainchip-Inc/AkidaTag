@@ -1,12 +1,17 @@
 #include "boot_manager.h"
 #include <stdint.h>
+#include <string.h>
 #include <zephyr/dfu/mcuboot.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
 
 LOG_MODULE_REGISTER(boot_manager, LOG_LEVEL_INF);
+
+#define BUILD_ID (__DATE__ " " __TIME__) /* changes on every rebuild */
+
 static uint32_t boot_count = 0;
+static char stored_build_id[24] = {0};
 
 /* In an MCUboot-based system, a new image is often booted in a "test" mode.
 If the application does not confirm itself during this first boot,
@@ -35,11 +40,19 @@ static int boot_handler_set(const char *name, uint32_t len,
   if (settings_name_steq(name, "count", &next) && !next) {
     if (len == sizeof(boot_count)) {
       read_cb(cb_arg, &boot_count, sizeof(boot_count));
-      return 0; // Success
+      return 0;
     }
-    return -EINVAL; // Data in flash is wrong size
+    return -EINVAL;
   }
-  return -ENOENT; // Key not recognized by this handler
+  if (settings_name_steq(name, "build_id", &next) && !next) {
+    if (len < sizeof(stored_build_id)) {
+      read_cb(cb_arg, stored_build_id, len);
+      stored_build_id[len] = '\0';
+      return 0;
+    }
+    return -EINVAL;
+  }
+  return -ENOENT;
 }
 
 /* Define the structure for the 'boot' settings subtree */
@@ -67,11 +80,17 @@ int init_setting_sub_system(void) {
 /*
 This function manages the persistence of a boot cycle counter.
 It increments the current runtime counter and commits the updated value to
-non-volatile storage (Flash).
+non-volatile storage (Flash).  Resets the counter when a new firmware build
+is detected (compile-time BUILD_ID changes on every rebuild).
 */
 int init_boot_count(void) {
+  if (strcmp(stored_build_id, BUILD_ID) != 0) {
+    LOG_INF("New build detected: '%s' -> '%s'. Resetting boot count.",
+            stored_build_id, BUILD_ID);
+    boot_count = 0;
+    settings_save_one("boot/build_id", BUILD_ID, strlen(BUILD_ID));
+  }
 
-  /* 1. Increment and save the new count */
   boot_count++;
   LOG_INF("--- Device Bootup Count: %u ---", boot_count);
 
