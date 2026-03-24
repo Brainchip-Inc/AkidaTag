@@ -55,7 +55,7 @@ def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
         num_classes = int(output_shape[-1] / npc)
 
     data = {
-        "model_name":   prefix,
+        "app":   prefix,
         "flash_address": str(flash_address),
         "input_shape":  list(input_shape)  if input_shape  else [],
         "output_shape": list(output_shape) if output_shape else [],
