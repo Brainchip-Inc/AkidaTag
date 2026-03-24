@@ -30,16 +30,26 @@
 	chosen {
         nordic,pm-ext-flash = &ext_flash;
     };
-   aliases {
-        mcuboot-button0 = &button1;
-		mcuboot-led0 = &led_1;
+    aliases {
+        mcuboot-button0 = &dfu_button;
+        mcuboot-led0 = &led_1;
+    };
+
+    /* DFU trigger button on P1.01 */
+    dfu_buttons {
+        compatible = "gpio-keys";
+
+        dfu_button: dfu_button_0 {
+            label = "DFU Button";
+            gpios = <&gpio1 1 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+        };
     };
  
     leds {
         compatible = "gpio-keys";
  
         led_1: led_1 {
-            label = "DFU Button";
+            label = "DFU LED";
             gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>;
  
         };

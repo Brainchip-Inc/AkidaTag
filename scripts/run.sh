@@ -460,8 +460,10 @@ if [[ -n "$APP" ]]; then
 	  CMAKE_EXTRA_ARGS+=(-DCONFIG_AUDIO_CAPTURE_TEST=n)
       # Overlay selection using USE_AUDIO
       if $DK_OVERLAY; then
+        CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=n)
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
       else
+        CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=y)
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_spark.overlay")
       fi
       ;;

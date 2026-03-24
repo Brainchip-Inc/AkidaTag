@@ -215,7 +215,7 @@ dmic_dev: &pdm0 {
     /* camera device at index 0 */
     camera: camera@0 {
         compatible = "spi-device";
-        reg = <0>;  /* Uses first CS pin (P0.11) */
+        reg = <0>;  /* Uses first CS pin (P0.25) */
         spi-max-frequency = <16000000>;
         label = "CAMERA";
     };
@@ -250,11 +250,33 @@ dmic_dev: &pdm0 {
 	
         imui: imui {
 			gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
-		};		
+		};
+        akd_enb: akd_enb {
+            gpios = <&gpio0 19 GPIO_ACTIVE_HIGH>;
+        };
+        acc_enb: acc_enb {
+            gpios = <&gpio0 20 GPIO_ACTIVE_HIGH>;
+        };
+        pdm_enb: pdm_enb {
+            gpios = <&gpio0 21 GPIO_ACTIVE_HIGH>;
+        };
+        akd_0v_enb: akd_0v_enb {
+            gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
+        };
 		
 	};
 
-    leds {
+        /* ---------- Buttons ---------- */
+    custom_buttons {
+        compatible = "gpio-keys";
+
+        user_btn: user_btn {
+            gpios = <&gpio0 26 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "User Button";
+        };
+    };
+
+    custom_leds {
         compatible = "gpio-leds";
 
         led_red: led_red {
@@ -271,5 +293,10 @@ dmic_dev: &pdm0 {
         akdreset = &akdreset;
         spi2 = &spi2;
         imui = &imui;
+        akd-enb    = &akd_enb;
+        acc-enb    = &acc_enb;
+        pdm-enb    = &pdm_enb;
+        akd-0v-enb = &akd_0v_enb;
+        user-button = &user_btn;
     };
 };
