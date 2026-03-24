@@ -51,8 +51,11 @@ def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
     """Write info.yaml metadata alongside the bin files."""
     npc = int(neurons_per_class) if neurons_per_class else 1
     num_classes = 0
-    if is_el and output_shape is not None and npc > 0:
-        num_classes = int(output_shape[-1] / npc)
+    if output_shape is not None:
+        if is_el and npc > 0:
+            num_classes = int(output_shape[-1] / npc)
+        else:
+            num_classes = int(output_shape[-1])
 
     data = {
         "app":   prefix,

@@ -155,6 +155,16 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
     )
     print(f"[{label}] Transfer type set (0x{transfer_type_byte:02X})")
 
+    # 1b. Send fs_name BEFORE file_size so firmware has meta_fs_name set
+    #     when get_file_size triggers build_fs_paths_from_name.
+    if transfer_type_byte == TRANSFER_TYPE_INFO and fs_name:
+        await client.write_gatt_char(
+            FS_NAME_CHAR_UUID,
+            fs_name.encode("utf-8"),
+            response=True,
+        )
+        print(f"[{label}] Sent fs_name (early): '{fs_name}'")
+
     # 2. Send this file's size (32-bit) → triggers flash erase on firmware side
     ack_event.clear()
     await client.write_gatt_char(
@@ -225,14 +235,14 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent flash address: 0x{flash_address:08X}")
 
-        # 8. Edge-learning fields (only present when model has _el suffix)
-        if is_edge_learned:
-            await client.write_gatt_char(
-                IS_EDGE_LEARNED_CHAR_UUID,
-                (1).to_bytes(4, byteorder="little"),
-                response=True,
-            )
-            print(f"[{label}] Sent is_edge_learned: 1")
+        # 8. is_edge_learned – always sent (0 or 1) to avoid stale firmware value
+        is_el_val = 1 if is_edge_learned else 0
+        await client.write_gatt_char(
+            IS_EDGE_LEARNED_CHAR_UUID,
+            is_el_val.to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent is_edge_learned: {is_el_val}")
 
         classes = num_edge_classes if num_edge_classes is not None else 0
         await client.write_gatt_char(
@@ -242,14 +252,7 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent neurons in higher order 16 bites and num_edge_classes in lower 16bits: {classes}")
 
-        # 9. Optional: LittleFS metadata file name
-        if fs_name:
-            await client.write_gatt_char(
-                FS_NAME_CHAR_UUID,
-                fs_name.encode("utf-8"),
-                response=True,
-            )
-            print(f"[{label}] Sent fs_name: '{fs_name}'")
+        # (fs_name already sent before file_size – see step 1b above)
 
     # Stream file data in chunks
     chunk_limit = BUFFER_SIZE if write_to_sram else file_size

@@ -654,9 +654,9 @@ ssize_t file_transfer_write(struct bt_conn *conn,
 
     /* Select paths: prefer dynamic (name-validated) paths, fall back to index
      */
-    const char *hdr_path = (dyn_app_slot >= 0) ? dyn_hdr_path : meta_hdr_paths;
+    const char *hdr_path = (dyn_app_slot >= 0) ? dyn_hdr_path : meta_hdr_paths[0];
     const char *info_path =
-        (dyn_app_slot >= 0) ? dyn_info_path : model_info_paths;
+        (dyn_app_slot >= 0) ? dyn_info_path : model_info_paths[0];
 
     /* --- File 1: write model_meta_t header --- */
     struct fs_file_t hdr_file;
@@ -750,7 +750,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
         /* model_name is now stored in model_meta_t (file 1), not here */
 
         const char *data_path =
-            (dyn_app_slot >= 0) ? dyn_data_path : model_data_meta_paths;
+            (dyn_app_slot >= 0) ? dyn_data_path : model_data_meta_paths[0];
         struct fs_file_t dm_file;
         fs_file_t_init(&dm_file);
         int rc =

@@ -330,6 +330,7 @@ uint32_t g_input_size = 0;
 // int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
 int32_t *akida_output;
 uint32_t akd_op_size = 0;
+static uint8_t is_el_model = 0;
 
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 /* IMU thread variables*/
@@ -719,9 +720,9 @@ static void read_learn_weights_from_flash(void) {
   }
 }
 
-static int initiate_kws_inference(uint8_t is_el_model) {
+static int initiate_kws_inference(uint8_t is_el_model_l) {
 
-  if (is_el_model) {
+  if (is_el_model_l) {
     k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
     mesh_learn_weights_size = akida_learn_mem_size();
 
@@ -950,7 +951,7 @@ int main(void) {
   akd_device.toggle_clock_counter(true);
   printk("Programming model info into AKD1500\n");
 
-  uint8_t is_el_model = 0;
+
   uint32_t s_dma_cycls = akd_device.read_clock_counter();
   uint64_t start_time = time_ms();
 
@@ -1573,6 +1574,12 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
     } else if (!strcmp(argv[1], "evt")) {
       if (argc > 2) {
         printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
+        if (is_el_model == 0)
+        {
+          printk(" illegal request, this is not an edge learning model\n");
+          return 0;
+        }
+
         if (cur_kws_edge_state == STATE_STOPPED) {
           printk(
               " cur_kws_edge_state is STATE_STOPPED user input not possible\n");
