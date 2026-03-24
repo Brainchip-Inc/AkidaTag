@@ -34,6 +34,16 @@
         mcuboot-button0 = &button1;
         mcuboot-led0 = &led_1;
     };
+
+    /* DFU trigger button on P1.01 */
+    dfu_buttons {
+        compatible = "gpio-keys";
+
+        dfu_button: dfu_button_0 {
+            label = "DFU Button";
+            gpios = <&gpio1 1 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+        };
+    };
  
     leds {
         compatible = "gpio-keys";
