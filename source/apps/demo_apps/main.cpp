@@ -32,7 +32,6 @@
 #include "io_objects.h"
 #include "nrf_spi.h"
 #include "sample_input/kws/kws_inputs.h"
-#include "sample_input/mnist/mnist_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <cmath>
 #include <hardware_device_impl.h>
@@ -87,8 +86,7 @@ int infer(int app_index_l);
 void cli_worker_proc_thread(void *a, void *b, void *c);
 /*
 FLash offset indices
-KWS - 1
-MNIST - 0
+KWS - 0
 */
 
 static void reset_kws_spectrogram(void);
@@ -321,13 +319,9 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
     [STATE_LEARNING] = {learning_on_mfcc_output, learning_on_user_input},
 };
 
-#define VALID_PROGRAM_DATA_MNIST 0xD8130700
-#define VALID_PROGRAM_DATA_KWS 0x24D20000 // 0xF4020100 // 0x64d70000
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
-const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
-uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
-                                 VALID_PROGRAM_DATA_KWS};
+const unsigned char *inputs[] = {kws_inputs};
 
 uint32_t g_num_classes = 0;
 uint32_t g_num_neurons_per_class = 1;
@@ -356,21 +350,6 @@ void kick_watchdog(void) {
 uint32_t swap_endian(uint32_t value) {
   return ((value >> 24) & 0x000000FF) | ((value >> 8) & 0x0000FF00) |
          ((value << 8) & 0x00FF0000) | ((value << 24) & 0xFF000000);
-}
-
-/* function to read 1st 4 bytes of model data from the flash_offsets[app_index]
- * and validate with the VALID_PROGRAM_DATA, once model is uploaded to the
- * spi-flash via external applications (BLE or Jlink)  */
-bool check_program_data(int offset, int len, int app_index_l) {
-  uint32_t data;
-  spi_flash_read(spi_driver, offset, (uint8_t *)&data, 4);
-  if (swap_endian(data) == valid_program_data[app_index_l]) {
-    printk("program data @%x: %x is same as the expected one\n", offset,
-           valid_program_data[app_index_l]);
-    return true;
-  }
-  printk("program data @%x: %x is not the expected one\n", offset, data);
-  return false;
 }
 
 // int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
@@ -924,23 +903,23 @@ int main(void) {
   model_data_meta_t kws_data_meta;
 
   /* Step 1: read header struct only to get flash_address */
-  int hdr_ret = file_transfer_read_meta_hdr_only(1, &kws_meta);
+  int hdr_ret = file_transfer_read_meta_hdr_only(0, &kws_meta);
   if (hdr_ret != 0) {
-    printk("Metadata header unavailable (err %d)\n", hdr_ret);
+    printk("E: Metadata header unavailable (err %d)\n", hdr_ret);
     return -1;
   }
   uint32_t kws_flash_addr = kws_meta.flash_address;
 
   /* Step 3: validate model name from the header (model_meta_t.model_name) */
-  if (file_transfer_check_model_name(1, kws_meta.model_name) != 0) {
-    printk("Model name mismatch: stored='%s', expected for slot 1='kws'\n",
+  if (file_transfer_check_model_name(0, kws_meta.model_name) != 0) {
+    printk("E: Model name mismatch: stored='%s', expected for slot 1='kws'\n",
            kws_meta.model_name);
     kws_model_present = false;
     return -1;
   }
   printk("Model name: stored='%s', \n", kws_meta.model_name);
   /* Step 2&4: load data meta and validate flash contents */
-  int dm_ret = file_transfer_load_data_meta(1, &kws_data_meta);
+  int dm_ret = file_transfer_load_data_meta(0, &kws_data_meta);
   if (dm_ret == 0) {
     /* Step 4: full SPI flash CRC validation */
     akida_config_spi(1);
@@ -948,29 +927,21 @@ int main(void) {
         file_transfer_validate_flash_data(kws_flash_addr, &kws_data_meta);
     akida_config_spi(0);
     if (val_ret != 0) {
-      printk("Model data validation FAILED will not program Akida\n");
+      printk("E: Model data validation FAILED will not program Akida\n");
       kws_model_present = false;
       return -1;
     }
   } else {
-    /* No 3rd file yet (legacy upload) – fall back to 4-byte check */
-    printk("No data meta file (err %d) using legacy 4-byte check\n", dm_ret);
-    akida_config_spi(1);
-    bool ok = check_program_data(kws_flash_addr, 4, 1);
-    akida_config_spi(0);
-    if (!ok) {
-      printk("Model data not present in SPI Flash please upload model\n");
-      kws_model_present = false;
-      return -1;
-    }
+    printk("E: model_data file is not present and returning\n");
+    return -1;
   }
 
   /* Step 5: reload full meta + program_info into sram_upload_buffer.
    * This is necessary because file_transfer_validate_flash_data() may have
    * overwritten sram_upload_buffer during the CRC read loop. */
-  int meta_ret = file_transfer_load_meta(1, &kws_meta);
+  int meta_ret = file_transfer_load_meta(0, &kws_meta);
   if (meta_ret != 0) {
-    printk("Metadata reload failed (err %d)\n", meta_ret);
+    printk("E: Metadata reload failed (err %d)\n", meta_ret);
     return -1;
   }
 
@@ -1000,8 +971,8 @@ int main(void) {
     if (kws_meta.is_edge_learned) {
       printk("model is edhe learn capable\n\r");
     } else {
-      printk(
-          "model in-compatability, FS and model to be updated correctly\n\r");
+      printk("E: model in-compatability, FS and model to be updated "
+             "correctly\n\r");
       return -1;
     }
   }
@@ -1419,7 +1390,7 @@ static void learning_on_user_input(int input_type) {
 
 /* function to run the inference */
 extern "C" int infer(int app_index_l) {
-  if (app_index_l > 1) {
+  if (app_index_l > 0) {
     printk("Illegal model index %d\n", app_index_l);
     return -1;
   }
@@ -1429,14 +1400,14 @@ extern "C" int infer(int app_index_l) {
   model_meta_t infer_meta;
   int hdr_ret = file_transfer_read_meta_hdr_only(app_index_l, &infer_meta);
   if (hdr_ret != 0) {
-    printk("Metadata header unavailable (err %d)\n", hdr_ret);
+    printk("E: Metadata header unavailable (err %d)\n", hdr_ret);
     return -1;
   }
   uint32_t use_flash_addr = infer_meta.flash_address;
 
   /* Step 3: validate model name from the header (model_meta_t.model_name) */
   if (file_transfer_check_model_name(app_index_l, infer_meta.model_name) != 0) {
-    printk("Model name mismatch for slot %d: '%s'\n", app_index_l,
+    printk("E: Model name mismatch for slot %d: '%s'\n", app_index_l,
            infer_meta.model_name);
     return -1;
   }
@@ -1451,20 +1422,13 @@ extern "C" int infer(int app_index_l) {
         file_transfer_validate_flash_data(use_flash_addr, &infer_data_meta);
     akida_config_spi(0);
     if (val_ret != 0) {
-      printk("Flash data validation FAILED for slot %d\n", app_index_l);
+      printk("E: Flash data validation FAILED for slot %d\n", app_index_l);
       return -1;
     }
   } else {
     /* Legacy fallback: 4-byte check only */
-    printk("No data meta file (err %d) using legacy 4-byte check\n", dm_ret);
-    akida_config_spi(1);
-    bool ok = check_program_data(use_flash_addr, 4, app_index_l);
-    akida_config_spi(0);
-    if (!ok) {
-      printk("Model data not present at 0x%08X – upload the model\n",
-             use_flash_addr);
-      return -1;
-    }
+    printk("E: No data meta file (err %d) \n", dm_ret);
+    return -1;
   }
 
   /* Step 5: reload full meta + program_info into sram_upload_buffer.
@@ -1518,15 +1482,7 @@ extern "C" int infer(int app_index_l) {
     printk("\n\r inference failed \n\r");
     return -1;
   }
-  if (app_index_l == 0) { // mnist
-    printk("Predicted Digit : %d\n", class_id);
-    if (kws_model_present) {
-      k_thread_suspend(capture_tid);
-      k_thread_suspend(process_tid);
-      kws_model_present = false;
-      kws_threads_suspended = true;
-    }
-  } else if (app_index_l == 1) { // kws
+  if (app_index_l == 0) { // kws
     printk("\nClass : %d\n", class_id);
     printk("Word : %s\n", (class_id >= 0 && class_id < kws_new_tags_count)
                               ? kws_new_tags[class_id]
@@ -1555,11 +1511,8 @@ static int cmd_infer(const struct shell *shell, size_t argc, char **argv) {
 
   char *string = argv[1];
   if (!strcmp(string, "kws")) {
-    app_index = 1;
-    printk("inference kws requested, app index %d", app_index);
-  } else if (!strcmp(string, "mnist")) {
     app_index = 0;
-    printk("inference mnist requested, app index %d", app_index);
+    printk("inference kws requested, app index %d", app_index);
   } else {
     printk("Illegal model inference request");
     return -EINVAL;

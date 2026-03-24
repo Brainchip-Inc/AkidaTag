@@ -87,9 +87,7 @@ FS_NAME_CHAR_UUID            = "f000aa0e-0451-4000-b000-000000000000"  # LittleF
 TRANSFER_TYPE_INFO = 0x00
 TRANSFER_TYPE_DATA = 0x01
 
-#KWS = 1
-#MNIST = 0
-APP = 0  # default MNIST
+APP = 0  # default KWS
 
 CHUNK_SIZE = 244
 BUFFER_SIZE = 102236  # 419 * 244 chunks
@@ -108,14 +106,12 @@ last_ack_code = 0
 def detect_app_index(bin_path):
     filename = os.path.basename(bin_path).lower()
 
-    if "mnist" in filename:
+    if "kws" in filename:
         return 0
-    elif "kws" in filename:
-        return 1
     else:
         raise ValueError(
             f"Unknown model type in file '{filename}'. "
-            f"Expected filename to contain 'mnist' or 'kws'."
+            f"Expected filename to contain 'kws'."
         )
 
 
@@ -341,7 +337,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
         print(f"Connected to {address}")
         await client.start_notify(ACK_CHAR_UUID, handle_ack)
 
-        print("Selected app:", "MNIST" if APP == 0 else "KWS")
+        print("Selected app:", "KWS")
         await client.write_gatt_char(APP_CHAR_UUID, APP.to_bytes(1, byteorder="little"), response=True)
         print(f"Sent APP index ({APP})")
 
@@ -395,7 +391,7 @@ def _load_info_yaml(yaml_path):
 
     el = data.get("edge_learning", {})
     return {
-        "model_name":       str(data.get("model_name", "")),
+        "model_name":       str(data.get("app", data.get("model_name", ""))),
         "flash_address":    flash_address,
         "input_shape":      tuple(data.get("input_shape",  [])) or None,
         "output_shape":     tuple(data.get("output_shape", [])) or None,
