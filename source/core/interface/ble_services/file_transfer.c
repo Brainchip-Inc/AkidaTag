@@ -654,7 +654,8 @@ ssize_t file_transfer_write(struct bt_conn *conn,
 
     /* Select paths: prefer dynamic (name-validated) paths, fall back to index
      */
-    const char *hdr_path = (dyn_app_slot >= 0) ? dyn_hdr_path : meta_hdr_paths[0];
+    const char *hdr_path =
+        (dyn_app_slot >= 0) ? dyn_hdr_path : meta_hdr_paths[0];
     const char *info_path =
         (dyn_app_slot >= 0) ? dyn_info_path : model_info_paths[0];
 

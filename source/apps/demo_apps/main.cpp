@@ -951,7 +951,6 @@ int main(void) {
   akd_device.toggle_clock_counter(true);
   printk("Programming model info into AKD1500\n");
 
-
   uint32_t s_dma_cycls = akd_device.read_clock_counter();
   uint64_t start_time = time_ms();
 
@@ -1574,8 +1573,7 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
     } else if (!strcmp(argv[1], "evt")) {
       if (argc > 2) {
         printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
-        if (is_el_model == 0)
-        {
+        if (is_el_model == 0) {
           printk(" illegal request, this is not an edge learning model\n");
           return 0;
         }
