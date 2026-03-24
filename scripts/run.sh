@@ -14,11 +14,11 @@ Options:
   -b, --build        | (flag) | Do Build
   -f, --flash        | (flag) | Do Flash
   -jf, --jlink_flash | (flag) | Do Flash using Jlink. Also pass -f for flash.
-  --info             | (str)  | Path to program_info .bin file (used with --bin and --yaml for BLE send)
-  --bin              | (str)  | Path to program_data .bin file (used with --info and --yaml for BLE send)
-  --yaml             | (str)  | Path to info.yaml metadata file (used with --info and --bin for BLE send)
+  --info             | (str)  | Path to program_info .bin file (use with --send_ble)
+  --bin              | (str)  | Path to program_data .bin file (use with --send_ble)
+  --yaml             | (str)  | Path to info.yaml metadata file (use with --send_ble)
   --model_transfer   | (str)  | URL or local path to .fbz – fetch and convert (generate bins + info.yaml)
-  --send_ble         | (flag) | After --model_transfer fetch, also send via BLE (default: off)
+  --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (cannot be used with --model_transfer)
   --model_name       | (str)  | Model name for --model_transfer (default: kws)
   --model_flash_addr | (str)  | Flash address for --model_transfer (default: 0x1000)
   --map_mode         | (int)  | Akida MapMode value for --model_transfer (default: 1)
@@ -65,11 +65,9 @@ How to use script - Examples runs:
   # Fetch .fbz inside Docker (akida SDK) → generate bins + info.yaml only (no BLE send)
   $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1
 
-  # Fetch inside Docker + send via BLE (outside of docker) on the host (add --send_ble to enable BLE step)
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1 --send_ble
-
   # Send pre-generated model files via BLE using info.yaml (no Docker needed)
-  $SCRIPT_INVOCATION --info source/external/model_files/kws/kws_program_info.bin \
+  $SCRIPT_INVOCATION --send_ble \
+      --info source/external/model_files/kws/kws_program_info.bin \
       --bin source/external/model_files/kws/kws_program_data.bin \
       --yaml source/external/model_files/kws/info.yaml
 
@@ -245,9 +243,9 @@ if $DO_SHELL && ! $DOCKER; then
     exit 1
 fi
 
-# If not shell/minicom, require at least one action: build/flash/info+bin+yaml/model_transfer
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_INFO" ]] && [[ -z "$MODEL_TRANSFER_PATH" ]]; then
-    echo "Nothing to do: pass --build and/or --flash and/or --info/--bin/--yaml and/or --model_transfer, and/or --key or use --shell / --minicom"
+# If not shell/minicom, require at least one action: build/flash/send_ble/model_transfer
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE && [[ -z "$MODEL_TRANSFER_PATH" ]]; then
+    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --model_transfer, and/or --key or use --shell / --minicom"
     exit 1
 fi
 
@@ -282,21 +280,31 @@ if [[ -n "$MODEL_YAML" && ! -f "$MODEL_YAML" ]]; then
     exit 1
 fi
 
-# --info, --bin, and --yaml must all be provided together
-if [[ -n "$MODEL_INFO" || -n "$MODEL_BIN" || -n "$MODEL_YAML" ]]; then
-    if [[ -z "$MODEL_INFO" || -z "$MODEL_BIN" || -z "$MODEL_YAML" ]]; then
-        echo "Error: --info, --bin, and --yaml must all be provided together for BLE send"
-        exit 1
-    fi
+# --send_ble cannot be used with --model_transfer
+if $SEND_BLE && [[ -n "$MODEL_TRANSFER_PATH" ]]; then
+    echo "Error: --send_ble cannot be used with --model_transfer"
+    exit 1
+fi
+
+# --info/--bin/--yaml require --send_ble
+if [[ -n "$MODEL_INFO" || -n "$MODEL_BIN" || -n "$MODEL_YAML" ]] && ! $SEND_BLE; then
+    echo "Error: --info/--bin/--yaml require --send_ble"
+    exit 1
+fi
+
+# --send_ble requires all three file args
+if $SEND_BLE && [[ -z "$MODEL_INFO" || -z "$MODEL_BIN" || -z "$MODEL_YAML" ]]; then
+    echo "Error: --send_ble requires --info, --bin, and --yaml"
+    exit 1
 fi
 
 # -----------------------------------------------------------------------------
 # BLE needed?
-#   - if --info/--bin/--yaml present (sending model via BLE), OR
+#   - if --send_ble requested (sending model via BLE), OR
 #   - if --shell requested (BLE access in shell)
 # -----------------------------------------------------------------------------
 BLE_NEEDED=false
-if [[ -n "$MODEL_INFO" ]] || $DO_SHELL; then
+if $SEND_BLE || $DO_SHELL; then
     BLE_NEEDED=true
 fi
 # Note: --model_transfer BLE send (send_model_via_ble.py) always runs on the host,
@@ -490,24 +498,20 @@ if [[ -n "$APP" ]]; then
   fi
 fi
 
-# --info + --bin + --yaml: BLE send using info.yaml metadata (always runs on host)
+# --send_ble + --info + --bin + --yaml: BLE send using info.yaml metadata (always runs on host)
 SEND_YAML_CMD=""
-if [[ -n "$MODEL_INFO" && -n "$MODEL_BIN" && -n "$MODEL_YAML" ]]; then
+if $SEND_BLE; then
   SEND_YAML_CMD="python source/utils/send_model_via_ble.py \
 --info \"${MODEL_INFO}\" \
 --bin \"${MODEL_BIN}\" \
 --yaml \"${MODEL_YAML}\""
 fi
 
-# --model_transfer: two-step fetch + BLE send via info.yaml bridge
+# --model_transfer: fetch + convert only (no BLE send)
 FETCH_MODEL_CMD=""
-SEND_MODEL_YAML_CMD=""
 if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
   MT_PREFIX="$MODEL_TRANSFER_NAME"
   MT_OUTPUT_DIR="source/external/model_files/${MT_PREFIX}"
-  MT_YAML="${MT_OUTPUT_DIR}/info.yaml"
-  MT_INFO_BIN="${MT_OUTPUT_DIR}/${MT_PREFIX}_program_info.bin"
-  MT_DATA_BIN="${MT_OUTPUT_DIR}/${MT_PREFIX}_program_data.bin"
 
   FETCH_MODEL_CMD="python source/utils/fetch_model.py \
 --model \"${MODEL_TRANSFER_NAME}\" \
@@ -516,30 +520,21 @@ if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
 --model_path \"${MODEL_TRANSFER_PATH}\" \
 --flash_address \"${MODEL_TRANSFER_FLASH_ADDR}\" \
 --map_mode \"${MODEL_TRANSFER_MAP_MODE}\""
-
-  if $SEND_BLE; then
-    SEND_MODEL_YAML_CMD="python source/utils/send_model_via_ble.py \
---info \"${MT_INFO_BIN}\" \
---bin \"${MT_DATA_BIN}\" \
---yaml \"${MT_YAML}\""
-  fi
 fi
 
 # -----------------------------------------------------------------------------
 # Assemble ordered steps:
 #   DOCKER_STEPS – run inside Docker when -d is set (build, flash, fetch_model)
-#   LOCAL_STEPS  – always run on the host (send_model_via_ble for --model_transfer)
+#   LOCAL_STEPS  – always run on the host (BLE send via --send_ble)
 # -----------------------------------------------------------------------------
 declare -a DOCKER_STEPS=()
 declare -a LOCAL_STEPS=()
 
 $DO_BUILD && DOCKER_STEPS+=("$BUILD_CMD")
 $DO_FLASH && DOCKER_STEPS+=("$FLASH_CMD")
-[[ -n "$FETCH_MODEL_CMD"     ]] && DOCKER_STEPS+=("$FETCH_MODEL_CMD")
+[[ -n "$FETCH_MODEL_CMD" ]] && DOCKER_STEPS+=("$FETCH_MODEL_CMD")
 # BLE send always runs on the host (needs direct BLE hardware access)
-[[ -n "$SEND_MODEL_YAML_CMD" ]] && LOCAL_STEPS+=("$SEND_MODEL_YAML_CMD")
-# Standalone BLE send via --info/--bin/--yaml (always runs on host)
-[[ -n "$SEND_YAML_CMD"       ]] && LOCAL_STEPS+=("$SEND_YAML_CMD")
+[[ -n "$SEND_YAML_CMD"   ]] && LOCAL_STEPS+=("$SEND_YAML_CMD")
 
 if [[ ${#DOCKER_STEPS[@]} -eq 0 && ${#LOCAL_STEPS[@]} -eq 0 ]]; then
   echo "Nothing to do"
