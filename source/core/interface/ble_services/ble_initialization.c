@@ -60,6 +60,20 @@ static const char device_version[] = "5.3";
 static const char device_firmware[] = "1.2.3";
 
 /**
+ * @brief 128-bit unsigned integer using two 64-bit values.
+ *
+ * The 128-bit value is split into:
+ * - high: most significant 64 bits
+ * - low : least significant 64 bits
+ *
+ * Combined value = (high << 64) | low
+ */
+typedef struct {
+  uint64_t high;
+  uint64_t low;
+} uint128_t;
+
+/**
  * Enumeration of supported BLE commands.
  * Used to identify and handle commands received from the mobile application.
  */
@@ -125,7 +139,7 @@ static const uint8_t adv_manufacturer_data[] = {
 /* Stores the unique 64-bit hardware device ID read from the MCU.
  * Used to uniquely identify the device during runtime or communication.
  */
-static uint64_t device_id = 0;
+static uint128_t device_id = {0};
 
 /* BLE advertising data including flags, device name, and manufacturer-specific
  * data */
@@ -404,6 +418,27 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
   }
 }
 
+/**
+ * @brief Sends application information over the communication interface.
+ *
+ * This function prepares and sends a formatted frame containing application
+ * metadata such as application name, description, model details, memory usage,
+ * input shape, and power consumption.
+ *
+ * The information is first formatted into a data payload (`data_part`), then
+ * wrapped into a transmission frame (`frame`) following the defined protocol
+ * format:
+ *
+ *     FRAME_TYPE,FRAME_INDEX,DATA_LENGTH,DATA
+ *
+ * The frame is then transmitted using the `send_frame()` function.
+ *
+ * @note Currently, all the application information values used in this
+ *       function are statically defined (hardcoded). These values may be
+ *       replaced with dynamically retrieved metadata in the future.
+ *
+ * @retval None
+ */
 static void app_info(void) {
   char frame[MTU_FRAME_BUFFER_SIZE];
   char data_part[MAX_NUS_RX_BUFFER_SIZE];
@@ -431,14 +466,26 @@ static void app_info(void) {
  */
 static void restart_device(void) { sys_reboot(SYS_REBOOT_COLD); }
 
-/* Reads the unique hardware device identifier from the nRF FICR registers
- * and combines the two 32-bit values into a single 64-bit device ID.
- * This ID is unique for every chip and can be used for device tracking.
+/**
+ * @brief Retrieve device ID from FICR.
+ *
+ * Reads the hardware DEVICEID registers and combines them into a
+ * 128-bit structure. The 64-bit device identifier is stored in the
+ * high field, while the low field is set to 0.
+ *
+ * @return uint128_t Device identifier.
  */
-static uint64_t get_device_id(void) {
+static uint128_t get_device_id(void) {
   uint32_t id0 = NRF_FICR->INFO.DEVICEID[0];
   uint32_t id1 = NRF_FICR->INFO.DEVICEID[1];
-  return ((uint64_t)id1 << 32) | id0;
+
+  uint128_t device_id;
+
+  device_id.high = ((uint64_t)id1 << 32) |
+                   id0; // upper 64 bits (can add other info if needed)
+  device_id.low = 0;
+
+  return device_id;
 }
 
 /**
