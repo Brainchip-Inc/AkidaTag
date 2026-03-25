@@ -392,6 +392,29 @@ float score_threshold = SCORE_THRESHOLD;
 // Metrics mode: show confidence and timing details on keyword detection
 int metrics_on = 0;
 
+static int check_model_compatibility(uint8_t is_el_model_l,
+                                     model_meta_t kws_meta) {
+
+  if (is_el_model_l) {
+    if (kws_meta.is_edge_learned) {
+      printk("\n\r model is edge learn capable\n\r");
+    } else {
+      printk("E: model in-compatability, FS and model to be updated "
+             "correctly\n\r");
+      return -1;
+    }
+  } else {
+    if (kws_meta.is_edge_learned == 0) {
+      printk("\n\r model is not edge learn capable\n\r");
+    } else {
+      printk("E: model in-compatability, FS and model to be updated "
+             "correctly\n\r");
+      return -1;
+    }
+  }
+  return SUCCESS;
+}
+
 static void learn_to_ls(void) {
   if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
     uint64_t cur_ts = time_ms();
@@ -967,14 +990,8 @@ int main(void) {
   kws_model_present = true;
   update_model_params(kws_meta);
 
-  if (is_el_model) {
-    if (kws_meta.is_edge_learned) {
-      printk("model is edhe learn capable\n\r");
-    } else {
-      printk("E: model in-compatability, FS and model to be updated "
-             "correctly\n\r");
-      return -1;
-    }
+  if (check_model_compatibility(is_el_model, kws_meta) != SUCCESS) {
+    return -1;
   }
 
   initiate_kws_inference(is_el_model);
@@ -1440,13 +1457,16 @@ extern "C" int infer(int app_index_l) {
   }
   update_model_params(infer_meta);
 
-  uint8_t is_el_model = 0;
   /* Step 6: program Akida */
   akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
                       infer_meta.flash_address, &is_el_model);
 
   akd_device.set_batch_size(1, true);
   app_index = app_index_l;
+
+  if (check_model_compatibility(is_el_model, infer_meta) != SUCCESS) {
+    return -1;
+  }
 
   akd_device.toggle_clock_counter(true);
 
