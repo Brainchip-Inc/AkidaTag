@@ -751,12 +751,23 @@ static int initiate_kws_inference(uint8_t is_el_model_l) {
 
     printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
 
+    // Free any prior allocation to avoid memory leak on re-init
+    if (saved_learn_weights_ptr) {
+      delete[] reinterpret_cast<uint8_t *>(saved_learn_weights_ptr);
+      saved_learn_weights_ptr = NULL;
+      learn_weights_buff_ptr = NULL;
+    }
+    if (base_labels_wts_ptr) {
+      delete[] base_labels_wts_ptr;
+      base_labels_wts_ptr = NULL;
+    }
+
     // allocating memory for structure (this will hold crc, size etc ) + learn
     // weights data together to place them in contiguous locations
-    saved_learn_weights_ptr = (saved_learn_weights *)malloc(
-        sizeof(saved_learn_weights) + mesh_learn_weights_size);
+    saved_learn_weights_ptr = reinterpret_cast<saved_learn_weights *>(
+        new uint8_t[sizeof(saved_learn_weights) + mesh_learn_weights_size]);
 
-    base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
+    base_labels_wts_ptr = new uint8_t[mesh_learn_weights_size];
 
     if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
       printk("dynamic memory allocation failed for weights data and hence "
@@ -844,10 +855,11 @@ static void update_model_params(model_meta_t kws_meta) {
 
   printk("kws_meta.num_edge_classes %x \n\r", kws_meta.num_edge_classes);
   g_num_neurons_per_class = (kws_meta.num_edge_classes & 0xFFFF0000) >> 16;
-
-  if (g_num_neurons_per_class) {
-    g_num_classes = g_num_classes / g_num_neurons_per_class;
+  if (g_num_neurons_per_class == 0) {
+    g_num_neurons_per_class = 1;
   }
+
+  g_num_classes = g_num_classes / g_num_neurons_per_class;
   g_num_edge_learn_classes = (kws_meta.num_edge_classes & 0xFFFF);
 
   printk("kws_meta.input_shape[0] %d, kws_meta.input_shape[1] %d, "
@@ -1144,23 +1156,25 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       if (score >= score_threshold) {
         current_class = found;
         // Compute softmax confidence over class-level spike sums
-#define MAX_NUM_CLASSES 15
-        float class_sums[MAX_NUM_CLASSES] = {0};
-        if ((int)g_num_classes > MAX_NUM_CLASSES) {
-          printk("g_num_classes %d exceeds MAX_NUM_CLASSES\n\r", g_num_classes);
-          return 0;
-        }
-        for (int c = 0; c < g_num_classes; c++)
-          for (int n = 0; n < g_num_neurons_per_class; n++)
+
+        float class_sums[g_num_classes] = {0};
+
+        for (int c = 0; c < g_num_classes; c++) {
+          for (int n = 0; n < g_num_neurons_per_class; n++) {
             class_sums[c] +=
                 (float)akida_output[c * g_num_neurons_per_class + n];
+          }
+        }
         float max_sum = class_sums[0];
-        for (int c = 1; c < g_num_classes; c++)
-          if (class_sums[c] > max_sum)
+        for (int c = 1; c < g_num_classes; c++) {
+          if (class_sums[c] > max_sum) {
             max_sum = class_sums[c];
+          }
+        }
         float exp_sum = 0.0f;
-        for (int c = 0; c < g_num_classes; c++)
+        for (int c = 0; c < g_num_classes; c++) {
           exp_sum += expf(class_sums[c] - max_sum);
+        }
         float confidence = (exp_sum > 0.0f)
                                ? expf(class_sums[found] - max_sum) / exp_sum
                                : 0.0f;
