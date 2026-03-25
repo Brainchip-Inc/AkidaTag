@@ -649,34 +649,20 @@ cd spark
     --model_name kws \
     --model_flash_addr 0x101000
 
-# Fetch inside Docker + also send via BLE on the host (add --send_ble)
-./scripts/run.sh -d \
-    --model_transfer http://server/akida_model.fbz \
-    --model_name kws \
-    --model_flash_addr 0x101000 \
-    --send_ble
-
-# Build + flash inside Docker, fetch model, then send via BLE on the host
-./scripts/run.sh -d -b -f \
-    --app demo_apps \
-    --model_transfer http://server/akida_model.fbz \
-    --model_name kws \
-    --model_flash_addr 0x101000 \
-    --map_mode 1 \
-    --send_ble
 ```
 
 **Flags for `run.sh` model transfer:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--model_transfer <url/path>` | — | Fetch `.fbz`, generate bins + `info.yaml` (fetch only by default) |
-| `--send_ble` | off | Also send generated bins via BLE after fetch (requires `--model_transfer`) |
+| `--model_transfer <url/path>` | — | Fetch `.fbz`, generate bins + `info.yaml` (fetch only) |
+| `--send_ble` | off | Send model via BLE; requires `--info`, `--bin`, and `--yaml` (cannot be used with `--model_transfer`) |
 | `--model_name <name>` | `kws` | Model name prefix for output files |
 | `--model_flash_addr <addr>` | `0x1000` | Flash address passed to `fetch_model.py` |
 | `--map_mode <int>` | `1` | Akida `MapMode` value |
-| `--info <path>` | — | Path to `_program_info.bin` for standalone BLE send |
-| `--yaml <path>` | — | Path to `info.yaml` for standalone BLE send (use with `--info` + `--bin`) |
+| `--info <path>` | — | Path to `_program_info.bin` (use with `--send_ble`) |
+| `--bin <path>` | — | Path to `_program_data.bin` (use with `--send_ble`) |
+| `--yaml <path>` | — | Path to `info.yaml` (use with `--send_ble`) |
 
 Output files are written to `source/external/model_files/<model_name>/`.
 
@@ -697,7 +683,7 @@ cd spark
     --map_mode 1
 
 # Step 2: Send pre-generated files via BLE on the host (no Docker)
-./scripts/run.sh \
+./scripts/run.sh --send_ble \
     --info source/external/model_files/kws/kws_program_info.bin \
     --bin  source/external/model_files/kws/kws_program_data.bin \
     --yaml source/external/model_files/kws/info.yaml
