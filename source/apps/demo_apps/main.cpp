@@ -619,7 +619,7 @@ static void switch_learning_delayed(struct k_work *work) {
     cur_kws_edge_state = STATE_LEARNING;
     printk("learn_select -> learning");
     last_learn_ts = time_ms();
-    k_work_schedule(&switch_delayed_work, K_SECONDS(5));
+    k_work_reschedule(&switch_delayed_work, K_SECONDS(5));
   } else if (cur_kws_edge_state == STATE_LEARNING) {
     learn_to_ls();
   }
@@ -637,18 +637,18 @@ static void switch_mode(int mode) {
     break;
   case STATE_LEARN_SELECT:
     if (STATE_INFERENCE == mode) {
-
+      k_work_cancel_delayable(&switch_delayed_work);
       akida_learn_mode(false);
 
       cur_kws_edge_state = mode;
     } else if (STATE_LEARNING == mode) {
 
       akida_learn_mode(true);
-      k_work_schedule(&switch_delayed_work, K_SECONDS(1));
+      k_work_reschedule(&switch_delayed_work, K_SECONDS(1));
     }
     break;
   case STATE_LEARNING:
-
+    k_work_cancel_delayable(&switch_delayed_work);
     akida_learn_mode(false);
     // printk(" STATE_LEARNING mode %d, cur_kws_edge_state %d \n\r", mode,
     // cur_kws_edge_state);
