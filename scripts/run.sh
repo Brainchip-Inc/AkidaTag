@@ -274,9 +274,9 @@ if $DO_SHELL && ! $DOCKER; then
     exit 1
 fi
 
-# If not shell/minicom, require at least one action: build/flash/info+bin+yaml/model_transfer
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && [[ -z "$MODEL_INFO" ]] && [[ -z "$MODEL_TRANSFER_PATH" ]] && ! $DO_CLI_TEST; then
-    echo "Nothing to do: pass --build and/or --flash and/or --info/--bin/--yaml and/or --model_transfer, and/or --key or use --shell / --minicom"
+# If not shell/minicom, require at least one action: build/flash/send_ble/model_transfer
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && [[ -z "$MODEL_TRANSFER_PATH" ]] && ! $DO_CLI_TEST; then
+    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --model_transfer, and/or --key or use --shell / --minicom"
     exit 1
 fi
 
