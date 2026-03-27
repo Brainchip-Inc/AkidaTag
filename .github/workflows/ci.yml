@@ -27,7 +27,7 @@ jobs:
       - name: Build and Flash
         run: |
           chmod +x scripts/run.sh
-          ./scripts/run.sh -d -b -f --app demo_apps
+          ./scripts/run.sh -d -b -f --dk --app demo_apps
 
       - name: Run CLI Test
         run: |

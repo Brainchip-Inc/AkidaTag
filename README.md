@@ -25,28 +25,58 @@ This project works with the following devices:
 
 ---
 
-### Hardware-in-the-Loop (HIL) CI Testing
+### Implemented Test Cases
 
-- This repository uses a self-hosted GitHub Actions runner to perform automated Hardware-in-the-Loop (HIL) validation during pull requests.
-- When a pull request is raised against the `main` branch, the CI pipeline automatically triggers the following steps:
-  - Build the firmware using the provided build environment.
-  - Flash the generated firmware to the connected hardware board.
-  - Execute CLI-based validation tests.
+#### Testcase 1 — AKIDA Device ID
+* Monitors boot logs and verifies the expected device ID:
+```
+Word 0: 0x0903a1bc
+```
+#### Testcase 2 — AKIDA SRAM
+* Waits for the SRAM self-test message:
+```
+Sanity test of 1 MB SRAM passed
+```
+#### Testcase 3 — IMU CLI Validation
+* Sends the command:
+```
+imu_start 5 3 5 1 5 5 8
+```
+* Waits for the response:
+```
+IMU started
+```
+* Stops the IMU using:
+```
+imu_stop
+```
+#### Testcase 4 — Watchdog Disable
+* Sends the command:
+```
+wdt_disable
+```
+* Verifies the reboot message:
+```
+Booting nRF Connect SDK
+```
+---
 
-### IMU CLI Validation
+### Test Result Behavior
+* If all testcases pass:
+```
+ALL TESTCASES PASSED
+```
+* If any testcase fails or times out, the CI pipeline fails.
+---
 
-- The CLI test is executed using a Python script.
-- The script opens the serial interface (e.g., `/dev/ttyUSB0`) connected to the device.
-- The following command is sent to the device:
+### CI Trigger
 
-  `imu_start 5 3 5 1 5 5 8`
+The Hardware-in-the-Loop (HIL) CI pipeline runs automatically when:
 
-- The script waits for the expected response from the device:
+* A **pull request is opened**
+* A **pull request is updated**
 
-  `imu_start done`
-
-- If the expected response is received within the defined timeout, the test is marked as **PASS**.
-- If the response is not received, the test is marked as **FAIL**, and the CI pipeline fails.
+against the **`main` branch**, ensuring firmware changes are validated on **real hardware before merging**.
 
 ### Requirements
 
