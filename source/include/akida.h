@@ -45,11 +45,13 @@ int akida_program_only(uint8_t *programm, int len);
  * memory
  * @param len length of the program data
  * @param flash_address address of the program data
+ * @param is_el_model is model edge learn capable
  *
  * @return error code in case of failure else SUCCESS
  */
 
-int akida_program_flash(uint8_t *program_info, int len, uint32_t flash_address);
+int akida_program_flash(uint8_t *program_info, int len, uint32_t flash_address,
+                        uint8_t *is_el_model);
 
 /**
  * Set input batch size.

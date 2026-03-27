@@ -38,8 +38,8 @@ int akida_program_only(uint8_t *buffer, int size) {
   return -EFAILURE;
 }
 
-int akida_program_flash(uint8_t *program_info, int len,
-                        uint32_t flash_address) {
+int akida_program_flash(uint8_t *program_info, int len, uint32_t flash_address,
+                        uint8_t *is_el_model) {
   current_program = program_info;
   auto info = akd_device.program_external_data(
       program_info, len, flash_address + FLASH_BASE_ADDRESS);
@@ -47,6 +47,11 @@ int akida_program_flash(uint8_t *program_info, int len,
     auto inputsz = info.input_dims();
     printk("input size: (%d, %d, %d)", inputsz[0], inputsz[1], inputsz[2]);
     (void)inputsz;
+
+    if (info.can_learn())
+      *is_el_model = 1;
+    else
+      *is_el_model = 0;
     return SUCCESS;
   }
   return -EFAILURE;

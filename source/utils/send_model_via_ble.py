@@ -87,9 +87,7 @@ FS_NAME_CHAR_UUID            = "f000aa0e-0451-4000-b000-000000000000"  # LittleF
 TRANSFER_TYPE_INFO = 0x00
 TRANSFER_TYPE_DATA = 0x01
 
-#KWS = 1
-#MNIST = 0
-APP = 0  # default MNIST
+APP = 0  # default KWS
 
 CHUNK_SIZE = 244
 BUFFER_SIZE = 102236  # 419 * 244 chunks
@@ -108,14 +106,12 @@ last_ack_code = 0
 def detect_app_index(bin_path):
     filename = os.path.basename(bin_path).lower()
 
-    if "mnist" in filename:
+    if "kws" in filename:
         return 0
-    elif "kws" in filename:
-        return 1
     else:
         raise ValueError(
             f"Unknown model type in file '{filename}'. "
-            f"Expected filename to contain 'mnist' or 'kws'."
+            f"Expected filename to contain 'kws'."
         )
 
 
@@ -158,6 +154,16 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         response=True,
     )
     print(f"[{label}] Transfer type set (0x{transfer_type_byte:02X})")
+
+    # 1b. Send fs_name BEFORE file_size so firmware has meta_fs_name set
+    #     when get_file_size triggers build_fs_paths_from_name.
+    if transfer_type_byte == TRANSFER_TYPE_INFO and fs_name:
+        await client.write_gatt_char(
+            FS_NAME_CHAR_UUID,
+            fs_name.encode("utf-8"),
+            response=True,
+        )
+        print(f"[{label}] Sent fs_name (early): '{fs_name}'")
 
     # 2. Send this file's size (32-bit) → triggers flash erase on firmware side
     ack_event.clear()
@@ -229,14 +235,14 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent flash address: 0x{flash_address:08X}")
 
-        # 8. Edge-learning fields (only present when model has _el suffix)
-        if is_edge_learned:
-            await client.write_gatt_char(
-                IS_EDGE_LEARNED_CHAR_UUID,
-                (1).to_bytes(4, byteorder="little"),
-                response=True,
-            )
-            print(f"[{label}] Sent is_edge_learned: 1")
+        # 8. is_edge_learned – always sent (0 or 1) to avoid stale firmware value
+        is_el_val = 1 if is_edge_learned else 0
+        await client.write_gatt_char(
+            IS_EDGE_LEARNED_CHAR_UUID,
+            is_el_val.to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent is_edge_learned: {is_el_val}")
 
         classes = num_edge_classes if num_edge_classes is not None else 0
         await client.write_gatt_char(
@@ -246,14 +252,7 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent neurons in higher order 16 bites and num_edge_classes in lower 16bits: {classes}")
 
-        # 9. Optional: LittleFS metadata file name
-        if fs_name:
-            await client.write_gatt_char(
-                FS_NAME_CHAR_UUID,
-                fs_name.encode("utf-8"),
-                response=True,
-            )
-            print(f"[{label}] Sent fs_name: '{fs_name}'")
+        # (fs_name already sent before file_size – see step 1b above)
 
     # Stream file data in chunks
     chunk_limit = BUFFER_SIZE if write_to_sram else file_size
@@ -341,7 +340,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
         print(f"Connected to {address}")
         await client.start_notify(ACK_CHAR_UUID, handle_ack)
 
-        print("Selected app:", "MNIST" if APP == 0 else "KWS")
+        print("Selected app:", "KWS")
         await client.write_gatt_char(APP_CHAR_UUID, APP.to_bytes(1, byteorder="little"), response=True)
         print(f"Sent APP index ({APP})")
 
@@ -395,13 +394,14 @@ def _load_info_yaml(yaml_path):
 
     el = data.get("edge_learning", {})
     return {
-        "model_name":       str(data.get("model_name", "")),
+        "model_name":       str(data.get("app", data.get("model_name", ""))),
         "flash_address":    flash_address,
         "input_shape":      tuple(data.get("input_shape",  [])) or None,
         "output_shape":     tuple(data.get("output_shape", [])) or None,
         "is_el":            bool(el.get("enabled",     False)),
         "num_classes":      int(el.get("num_classes",  0)),
         "neurons_per_class": int(el.get("num_neurons", 1)),
+        "num_el_classes":   int(el.get("num_el_classes", 0)),
     }
 
 
@@ -444,7 +444,8 @@ async def main(args):
             args.num_classes = yaml_meta["num_classes"]
         if args.neurons_per_class is None:
             args.neurons_per_class = yaml_meta["neurons_per_class"]
-
+        if args.num_el_classes is None and yaml_meta["num_el_classes"] > 0:
+            args.num_el_classes = yaml_meta["num_el_classes"]
     # flash_address: explicit CLI (non-default) > YAML > default "0x1000"
     flash_address_str = args.flash_address
     if yaml_meta and flash_address_str == "0x1000":
@@ -484,12 +485,12 @@ async def main(args):
         print("Invalid selection.")
         return
 
-    # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_classes
+    # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_el_classes
     packed_classes = None
-    if args.num_classes is not None:
+    if args.num_el_classes is not None:
         neurons = args.neurons_per_class if args.neurons_per_class is not None else 1
-        packed_classes = ((neurons & 0xFFFF) << 16) | (args.num_classes & 0xFFFF)
-        print(f"num_edge_classes packed: neurons={neurons} classes={args.num_classes} "
+        packed_classes = ((neurons & 0xFFFF) << 16) | (args.num_el_classes & 0xFFFF)
+        print(f"num_edge_classes packed: neurons={neurons} classes={args.num_el_classes} "
               f"→ 0x{packed_classes:08X}")
     else:
         neurons = 1;
@@ -539,6 +540,8 @@ if __name__ == "__main__":
     parser.add_argument("--is_el", action="store_true",
                         help="Mark model as edge-learned (auto-detected from _el in filename)")
     parser.add_argument("--num_classes", type=int, default=None,
+                        help="Number of classes ")
+    parser.add_argument("--num_el_classes", type=int, default=None,
                         help="Number of edge-learning classes (required when --is_el)")
     parser.add_argument("--fs_name", default=None,
                         help="LittleFS path for model metadata "
