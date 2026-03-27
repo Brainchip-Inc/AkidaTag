@@ -531,7 +531,6 @@ if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
 --output_dir \"${MT_OUTPUT_DIR}\" \
 --model_path \"${MODEL_TRANSFER_PATH}\" \
 --flash_address \"${MODEL_TRANSFER_FLASH_ADDR}\" \
-
 --map_mode \"${MODEL_TRANSFER_MAP_MODE}\" \
 --neurons_per_class \"${MODEL_TRANSFER_NEURONS_PER_CLASS}\" \
 --num_el_classes \"${MODEL_TRANSFER_NUM_EL_CLASSES}\""
