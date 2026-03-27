@@ -523,23 +523,30 @@ pip install -r scripts/requirements.txt
 `fetch_model.py` generates an `info.yaml` alongside the binary files. It is the single source of truth for model metadata consumed by `send_model_via_ble.py`.
 
 ```yaml
+model_name: kws
 flash_address: "0x101000"
 input_shape: [49, 10, 1]
-output_shape: [1, 1, 12]
+output_shape: [1, 1, 225]
 edge_learning:
-  enabled: false
-  num_classes: 0
-  num_neurons: 1
+  enabled: true
+  num_classes: 15
+  num_el_classes: 3
+  num_neurons: 15
 ```
 
 | Field | Description |
 |-------|-------------|
+| `model_name` | Model identifier string (e.g. `kws`, `mnist`) |
 | `flash_address` | Target SPI flash address for the model data segment |
 | `input_shape` | Model input dimensions read from the Akida model |
 | `output_shape` | Model output dimensions read from the Akida model |
 | `edge_learning.enabled` | `true` when the model uses on-device edge learning |
-| `edge_learning.num_classes` | Number of classes for edge learning (0 = disabled) |
-| `edge_learning.num_neurons` | Neurons per class (1 = standard, >1 = EL model) |
+| `edge_learning.num_classes` | Total number of classes in the base model |
+| `edge_learning.num_el_classes` | Number of novel edge-learning classes to learn on-device (packed into lower 16 bits of the `num_edge_classes` metadata field sent over BLE) |
+| `edge_learning.num_neurons` | Neurons per class (packed into upper 16 bits of the `num_edge_classes` metadata field sent over BLE) |
+
+> **Edge learning packing:** `num_edge_classes` (32-bit) = `(num_neurons << 16) | num_el_classes`.
+> The firmware unpacks this into `g_num_neurons_per_class` (bits [31:16]) and `g_num_edge_learn_classes` (bits [15:0]).
 
 ---
 
@@ -675,11 +682,23 @@ Run fetch and BLE transfer as two independent commands — useful when the Akida
 ```bash
 cd spark
 
-# Step 1: Fetch model inside Docker → generates bins + info.yaml (no BLE send)
+# Step 1: Fetch model inside Docker → generates bins + info.yaml (no BLE send) 
+For edge learning model
 ./scripts/run.sh -d \
     --model_transfer http://server/akida_model.fbz \
     --model_name kws \
     --model_flash_addr 0x101000 \
+    --neurons_per_class 15 \
+    --num_el_classes 3 \
+    --map_mode 1
+
+For non-edge learning model
+./scripts/run.sh -d \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000 \
+    --neurons_per_class 1 \
+    --num_el_classes 0 \
     --map_mode 1
 
 # Step 2: Send pre-generated files via BLE on the host (no Docker)

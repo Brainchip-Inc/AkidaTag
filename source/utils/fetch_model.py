@@ -16,63 +16,57 @@ def _shapes_json_path(output_dir, prefix):
     return os.path.join(output_dir, f"{prefix}_shapes.json")
 
 
-def _save_shapes_json(output_dir, prefix, input_shape, output_shape):
+def _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el=False):
     """Persist shapes alongside the bin files for reuse on subsequent runs."""
     path = _shapes_json_path(output_dir, prefix)
     with open(path, "w") as f:
         json.dump({
             "input_shape": list(input_shape),
             "output_shape": list(output_shape),
+            "is_el": bool(is_el),
         }, f)
     print(f"Shapes saved to {path}")
 
 
 def _load_shapes_json(output_dir, prefix):
-    """Return (input_shape, output_shape) tuples from the sidecar JSON, or (None, None)."""
+    """Return (input_shape, output_shape, is_el) from the sidecar JSON, or (None, None, False)."""
     path = _shapes_json_path(output_dir, prefix)
     if not os.path.exists(path):
-        return None, None
+        return None, None, False
     try:
         with open(path) as f:
             d = json.load(f)
         input_shape  = tuple(d["input_shape"])
         output_shape = tuple(d["output_shape"])
-        print(f"Loaded shapes from {path}: input={input_shape} output={output_shape}")
-        return input_shape, output_shape
+        is_el = bool(d.get("is_el", False))
+        print(f"Loaded shapes from {path}: input={input_shape} output={output_shape} is_el={is_el}")
+        return input_shape, output_shape, is_el
     except Exception as e:
         print(f"Warning: could not load shapes from {path}: {e}")
-        return None, None
+        return None, None, False
 
 
 def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                     flash_address, neurons_per_class):
-    """Write info.yaml metadata alongside the bin files.
-
-    Format:
-        flash_address: "0x101000"
-        input_shape: [49, 10, 1]
-        output_shape: [1, 1, 12]
-        edge_learning:
-          enabled: false
-          num_classes: 0
-          num_neurons: 1
-    """
-    npc = int(neurons_per_class) if neurons_per_class is not None else 1
-    is_el = "_el" in prefix.lower() or npc > 1
-
+                     flash_address, is_el, neurons_per_class, num_el_classes):
+    """Write info.yaml metadata alongside the bin files."""
+    npc = int(neurons_per_class) if neurons_per_class else 1
     num_classes = 0
-    if is_el and output_shape is not None and npc > 0:
-        num_classes = int(output_shape[-1] / npc)
+    if output_shape is not None:
+        if is_el and npc > 0:
+            num_classes = int(output_shape[-1] / npc)
+        else:
+            num_classes = int(output_shape[-1])
 
     data = {
-        "model_name":   prefix,
+        "app":   prefix,
         "flash_address": str(flash_address),
         "input_shape":  list(input_shape)  if input_shape  else [],
         "output_shape": list(output_shape) if output_shape else [],
         "edge_learning": {
-            "enabled":     is_el,
-            "num_classes": num_classes,
-            "num_neurons": npc,
+            "enabled":      is_el,
+            "num_classes":  num_classes,
+            "num_el_classes": int(num_el_classes) if is_el else 0,
+            "num_neurons":  npc,
         },
     }
 
@@ -95,9 +89,10 @@ def fetch_and_convert(args):
     data_file = os.path.join(output_dir, f"{prefix}_program_data.cpp")
     if os.path.exists(info_file) and os.path.exists(data_file):
         print(f"Files exist for prefix '{prefix}'. Skipping generation.")
-        input_shape, output_shape = _load_shapes_json(output_dir, prefix)
+        input_shape, output_shape, is_el_cached = _load_shapes_json(output_dir, prefix)
         _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                         flash_address, args.neurons_per_class)
+                         flash_address, is_el_cached,
+                         args.neurons_per_class, args.num_el_classes)
         _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
         return input_shape, output_shape
 
@@ -159,6 +154,14 @@ def fetch_and_convert(args):
         # Extract program parts
         program_parts = model_akida.sequences[0].program_parts
         program = model_akida.sequences[0].program
+        
+       
+        # Detect edge learning from model
+        is_el = bool(model_akida.learning)
+        if is_el:
+            print("Edge learning model detected")
+        
+
 
         # Generate C++ files
         array_to_cpp(output_dir + "/", program, f"{prefix}_model")
@@ -181,7 +184,7 @@ def fetch_and_convert(args):
                 f.write(program_parts.program_info)
 
         # Inject macros into program_info.h (KWS-specific, when neurons_per_class is provided)
-        if args.neurons_per_class is not None and program_parts.program_info is not None:
+        if is_el and program_parts.program_info is not None:
             header_path = os.path.join(output_dir, f"{prefix}_program_info.h")
             neurons = int(args.neurons_per_class)
             num_classes = int(output_shape[2] / neurons)
@@ -207,9 +210,10 @@ def fetch_and_convert(args):
         print(f"Generated program_info and program_data files for prefix '{prefix}'")
 
     # Persist shapes so re-runs can skip regeneration but still supply shapes
-    _save_shapes_json(output_dir, prefix, input_shape, output_shape)
+    _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el)
     _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                     flash_address, args.neurons_per_class)
+                     flash_address, is_el,
+                     args.neurons_per_class, args.num_el_classes)
     _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
     return input_shape, output_shape
 
@@ -258,6 +262,8 @@ if __name__ == "__main__":
                         help="Target flash address embedded in info.yaml (default: 0x1000)")
     parser.add_argument("--map_mode", type=int, default=1,
                         help="Akida MapMode value passed to model.map() (default: 1)")
+    parser.add_argument("--num_el_classes", type=int, default=0,
+                        help="Number of edge learning classes")
 
     args = parser.parse_args()
     fetch_and_convert(args)

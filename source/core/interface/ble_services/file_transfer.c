@@ -197,24 +197,21 @@ extern int infer(int app_index_l);
  * In-RAM metadata – one per app slot.
  * Populated when an INFO BLE transfer completes; also loaded from FS at boot.
  * ---------------------------------------------------------------------- */
-static model_meta_t current_meta[2];
+static model_meta_t current_meta;
 
-/* LittleFS file 1: model_meta_t header struct (app 0 = MNIST, app 1 = KWS/EL)
+/* LittleFS file 1: model_meta_t header struct (app 0 = KWS/EL)
  */
-static const char *meta_hdr_paths[2] = {
-    "/ext/mnist_model_hdr",
+static const char *meta_hdr_paths[] = {
     "/ext/kws_model_hdr",
 };
 
 /* LittleFS file 2: raw program_info binary (loaded into sram_upload_buffer) */
-static const char *model_info_paths[2] = {
-    "/ext/mnist_model_info",
+static const char *model_info_paths[] = {
     "/ext/kws_model_info",
 };
 
-/* LittleFS file 3: model_data_meta_t (CRC, first 4 bytes, length, name) */
-static const char *model_data_meta_paths[2] = {
-    "/ext/mnist_model_data_hdr",
+/* LittleFS file 3: model_data_meta_t (CRC,  length, name) */
+static const char *model_data_meta_paths[] = {
     "/ext/kws_model_data_hdr",
 };
 
@@ -248,14 +245,14 @@ static bool build_fs_paths_from_name(const char *fs_name) {
 
   /* Validate against hardcoded whitelist */
   dyn_app_slot = -1;
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 1; i++) {
     if (strcmp(dyn_hdr_path, meta_hdr_paths[i]) == 0) {
       dyn_app_slot = i;
       LOG_INF("Model name '%s' → slot %d (hdr=%s)\n", name, i, dyn_hdr_path);
       return true;
     }
   }
-  LOG_ERR("Unknown model name '%s' (hdr='%s') – not in whitelist\n", name,
+  LOG_ERR("Unknown model name '%s' (hdr='%s') not in whitelist\n", name,
           dyn_hdr_path);
   return false;
 }
@@ -305,7 +302,7 @@ BT_GATT_SERVICE_DEFINE(
 #endif
                 ),
 
-    /* aa05 – app index (0=MNIST, 1=KWS) */
+    /* aa05 – app index (0KWS) */
     BT_GATT_CHARACTERISTIC(APP_CHAR_UUID_PTR, BT_GATT_CHRC_WRITE, WRITE_PERM,
                            NULL, get_app_index, NULL),
 
@@ -395,7 +392,7 @@ ssize_t get_app_index(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     return -1;
   }
   uint8_t app_index_local = *(const uint8_t *)app;
-  if (app_index_local > 1) {
+  if (app_index_local > 0) {
     LOG_ERR("Illegal app index: %d\n", app_index_local);
     return -1;
   }
@@ -504,7 +501,7 @@ static ssize_t get_fs_name(struct bt_conn *conn,
  * ---------------------------------------------------------------------- */
 int file_transfer_init(void) {
   LOG_INF("File transfer service initialised\n");
-  memset(current_meta, 0, sizeof(current_meta));
+  memset(&current_meta, 0, sizeof(current_meta));
   return 0;
 }
 
@@ -592,7 +589,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
                             const struct bt_gatt_attr *attr, const void *buf,
                             uint16_t len, uint16_t offset, uint8_t flags) {
   total_received += len;
-  LOG_INF("Rx %u / %u bytes\n", (unsigned)total_received,
+  LOG_INF("Rx %u / %u bytes", (unsigned)total_received,
           (unsigned)total_pgm_size);
   led_set_state(LED_STATE_MODEL_RECEIVING);
 
@@ -613,7 +610,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     }
 
     /* All INFO chunks received – populate the in-RAM header */
-    model_meta_t *m = &current_meta[app_index];
+    model_meta_t *m = &current_meta;
     m->total_length = meta_total_length;
     memcpy(m->input_shape, meta_input_shape, sizeof(meta_input_shape));
     memcpy(m->output_shape, meta_output_shape, sizeof(meta_output_shape));
@@ -658,9 +655,9 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     /* Select paths: prefer dynamic (name-validated) paths, fall back to index
      */
     const char *hdr_path =
-        (dyn_app_slot >= 0) ? dyn_hdr_path : meta_hdr_paths[app_index];
+        (dyn_app_slot >= 0) ? dyn_hdr_path : meta_hdr_paths[0];
     const char *info_path =
-        (dyn_app_slot >= 0) ? dyn_info_path : model_info_paths[app_index];
+        (dyn_app_slot >= 0) ? dyn_info_path : model_info_paths[0];
 
     /* --- File 1: write model_meta_t header --- */
     struct fs_file_t hdr_file;
@@ -753,9 +750,8 @@ ssize_t file_transfer_write(struct bt_conn *conn,
         dm.data_length = (uint32_t)total_pgm_size;
         /* model_name is now stored in model_meta_t (file 1), not here */
 
-        const char *data_path = (dyn_app_slot >= 0)
-                                    ? dyn_data_path
-                                    : model_data_meta_paths[app_index];
+        const char *data_path =
+            (dyn_app_slot >= 0) ? dyn_data_path : model_data_meta_paths[0];
         struct fs_file_t dm_file;
         fs_file_t_init(&dm_file);
         int rc =
@@ -815,7 +811,8 @@ ssize_t file_transfer_write(struct bt_conn *conn,
  *   -1  read error or CRC mismatch – caller should use compiled defaults
  * ---------------------------------------------------------------------- */
 int file_transfer_load_meta(int app_idx, model_meta_t *meta_out) {
-  if (app_idx < 0 || app_idx > 1 || meta_out == NULL) {
+  if (app_idx < 0 || app_idx > 0 || meta_out == NULL) {
+    printk("E: incorrect app_idx %d \n\r", app_idx);
     return -1;
   }
 
@@ -826,7 +823,7 @@ int file_transfer_load_meta(int app_idx, model_meta_t *meta_out) {
   fs_file_t_init(&file);
   int rc = fs_open(&file, meta_hdr_paths[app_idx], FS_O_READ);
   if (rc != 0) {
-    LOG_INF("No header file for app %d ('%s', err %d) – using defaults\n",
+    LOG_INF("No header file for app %d ('%s', err %d) using defaults\n",
             app_idx, meta_hdr_paths[app_idx], rc);
     return 1;
   }
@@ -931,7 +928,8 @@ void shared_buf_init(void) {
  * validation so the buffer is not clobbered before program_info is loaded.
  * ---------------------------------------------------------------------- */
 int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out) {
-  if (app_idx < 0 || app_idx > 1 || meta_out == NULL) {
+  if (app_idx < 0 || app_idx > 0 || meta_out == NULL) {
+    printk("E: incorrect app_idx %d \n\r", app_idx);
     return -1;
   }
 
@@ -939,7 +937,7 @@ int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out) {
   fs_file_t_init(&file);
   int rc = fs_open(&file, meta_hdr_paths[app_idx], FS_O_READ);
   if (rc != 0) {
-    LOG_INF("No header file for app %d ('%s', err %d)\n", app_idx,
+    LOG_INF("E: No header file for app %d ('%s', err %d)\n", app_idx,
             meta_hdr_paths[app_idx], rc);
     return 1;
   }
@@ -948,7 +946,7 @@ int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out) {
   fs_close(&file);
 
   if (bytes != (ssize_t)sizeof(model_meta_t)) {
-    LOG_ERR("Header read error: got %d, expected %u\n", (int)bytes,
+    LOG_ERR("E: Header read error: got %d, expected %u\n", (int)bytes,
             (unsigned)sizeof(model_meta_t));
     return -1;
   }
@@ -961,7 +959,7 @@ int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out) {
  * Reads the model_data_meta_t file (3rd LittleFS file) for the given slot.
  * ---------------------------------------------------------------------- */
 int file_transfer_load_data_meta(int app_idx, model_data_meta_t *dm_out) {
-  if (app_idx < 0 || app_idx > 1 || dm_out == NULL) {
+  if (app_idx < 0 || app_idx > 0 || dm_out == NULL) {
     return -1;
   }
 
@@ -1050,7 +1048,7 @@ int file_transfer_validate_flash_data(uint32_t flash_addr,
  * hardcoded path for app_idx.  Returns 0 if valid, -1 otherwise.
  * ---------------------------------------------------------------------- */
 int file_transfer_check_model_name(int app_idx, const char *model_name) {
-  if (app_idx < 0 || app_idx > 1 || model_name == NULL ||
+  if (app_idx < 0 || app_idx > 0 || model_name == NULL ||
       model_name[0] == '\0') {
     return -1;
   }

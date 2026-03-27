@@ -65,6 +65,12 @@ How to use script - Examples runs:
   # Fetch .fbz inside Docker (akida SDK) → generate bins + info.yaml only (no BLE send)
   $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1
 
+  # Fetch inside Docker + send via BLE (outside of docker) on the host (add --send_ble to enable BLE step)
+  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1 --send_ble
+
+  # Fetch inside Docker + send via BLE (outside of docker) on the host (add --send_ble to enable BLE step) with neurons per class
+  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 15 --send_ble
+
   # Send pre-generated model files via BLE using info.yaml (no Docker needed)
   $SCRIPT_INVOCATION --send_ble \
       --info source/external/model_files/kws/kws_program_info.bin \
@@ -128,6 +134,10 @@ MODEL_TRANSFER_FLASH_ADDR="0x1000"
 MODEL_TRANSFER_MAP_MODE=1
 SEND_BLE=false
 DK_OVERLAY=false
+MODEL_TRANSFER_NEURONS_PER_CLASS=1
+MODEL_TRANSFER_NUM_EL_CLASSES=0
+
+
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
 DO_SHELL=false
@@ -193,6 +203,8 @@ while [[ $# -gt 0 ]]; do
         --model_name) MODEL_TRANSFER_NAME="${2:-kws}"; shift 2;;
         --model_flash_addr) MODEL_TRANSFER_FLASH_ADDR="${2:-0x1000}"; shift 2;;
         --map_mode) MODEL_TRANSFER_MAP_MODE="${2:-1}"; shift 2;;
+	--neurons_per_class) MODEL_TRANSFER_NEURONS_PER_CLASS="${2:-1}"; shift 2;;
+	--num_el_classes) MODEL_TRANSFER_NUM_EL_CLASSES="${2:-0}"; shift 2;;
         -d|--docker)
             DOCKER=true
             # Optional image name
@@ -519,7 +531,17 @@ if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
 --output_dir \"${MT_OUTPUT_DIR}\" \
 --model_path \"${MODEL_TRANSFER_PATH}\" \
 --flash_address \"${MODEL_TRANSFER_FLASH_ADDR}\" \
---map_mode \"${MODEL_TRANSFER_MAP_MODE}\""
+--map_mode \"${MODEL_TRANSFER_MAP_MODE}\" \
+--neurons_per_class \"${MODEL_TRANSFER_NEURONS_PER_CLASS}\" \
+--num_el_classes \"${MODEL_TRANSFER_NUM_EL_CLASSES}\""
+
+
+  if $SEND_BLE; then
+    SEND_MODEL_YAML_CMD="python source/utils/send_model_via_ble.py \
+--info \"${MT_INFO_BIN}\" \
+--bin \"${MT_DATA_BIN}\" \
+--yaml \"${MT_YAML}\""
+  fi
 fi
 
 # -----------------------------------------------------------------------------

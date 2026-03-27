@@ -27,7 +27,7 @@ extern struct k_event sram_buf_event;
 #define MAX_MODEL_INP_SHAPE_DIMS 3
 #define MAX_MODEL_OUTP_SHAPE_DIMS 3
 /* Maximum size of the program_info binary stored in LittleFS */
-#define MAX_MODEL_INFO_SIZE 1024
+#define MAX_MODEL_INFO_SIZE 2300
 /* Maximum length of the model name string (including null terminator) */
 #define MAX_FS_NAME_LEN 64
 
@@ -115,7 +115,7 @@ void shared_buf_init(void);
  *                       meta_out->flash_address);
  * @endcode
  *
- * @param app_idx   Application slot (0 = MNIST, 1 = KWS / KWS_EL).
+ * @param app_idx   Application slot.
  * @param meta_out  Receives the model_meta_t header fields.
  * @return  0  success – @p meta_out valid, sram_upload_buffer ready.
  *          1  header file not found – use compiled defaults.
@@ -132,7 +132,7 @@ int file_transfer_load_meta(int app_idx, model_meta_t *meta_out);
  * before file_transfer_validate_flash_data() so the buffer is not clobbered
  * before program_info is loaded.
  *
- * @param app_idx   Application slot (0 = MNIST, 1 = KWS / KWS_EL).
+ * @param app_idx   Application slot.
  * @param meta_out  Receives the model_meta_t header (flash_address, etc.).
  * @return  0  success.
  *          1  header file not found.
@@ -143,7 +143,7 @@ int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out);
 /**
  * @brief Load model_data metadata from LittleFS (3rd file per slot).
  *
- * @param app_idx  Application slot (0 or 1).
+ * @param app_idx  Application slot.
  * @param dm_out   Receives the model_data_meta_t fields.
  * @return  0  success.
  *          1  file not found (no DATA upload for this slot yet).
@@ -177,7 +177,7 @@ int file_transfer_validate_flash_data(uint32_t flash_addr,
  * Constructs "/ext/{model_name}_model_hdr" and compares it against the
  * hardcoded path for app_idx.
  *
- * @param app_idx     Application slot (0 or 1).
+ * @param app_idx     Application slot.
  * @param model_name  Name to validate (e.g. "kws").
  * @return  0  valid for this slot.
  *         -1  mismatch or unknown name.
