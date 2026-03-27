@@ -682,11 +682,23 @@ Run fetch and BLE transfer as two independent commands — useful when the Akida
 ```bash
 cd spark
 
-# Step 1: Fetch model inside Docker → generates bins + info.yaml (no BLE send)
+# Step 1: Fetch model inside Docker → generates bins + info.yaml (no BLE send) 
+For edge learning model
 ./scripts/run.sh -d \
     --model_transfer http://server/akida_model.fbz \
     --model_name kws \
     --model_flash_addr 0x101000 \
+    --neurons_per_class 15 \
+    --num_el_classes 3 \
+    --map_mode 1
+
+For non-edge learning model
+./scripts/run.sh -d \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000 \
+    --neurons_per_class 1 \
+    --num_el_classes 0 \
     --map_mode 1
 
 # Step 2: Send pre-generated files via BLE on the host (no Docker)
