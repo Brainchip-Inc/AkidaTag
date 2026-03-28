@@ -35,29 +35,6 @@ typedef struct {
 
 dc_block_t dc_state;
 
-/**
- * @brief Calculate RMS value of audio samples after removing DC offset.
- * Computes the mean of the samples to remove DC bias and then calculates
- * the RMS amplitude of the centered signal.
- */
-static int16_t calculate_rms_dc_removed(int16_t *samples, uint32_t count) {
-  int64_t mean = 0;
-  uint64_t sum = 0;
-
-  for (uint32_t i = 0; i < count; i++) {
-    mean += samples[i];
-  }
-  mean /= (int64_t)count;
-
-  for (uint32_t i = 0; i < count; i++) {
-    int32_t s = (int32_t)samples[i] - (int32_t)mean;
-    sum += (uint64_t)(s * s);
-  }
-
-  float rms = sqrtf((float)sum / (float)count);
-  return (int16_t)rms;
-}
-
 void dc_block_init(dc_block_t *s) {
   s->prev_x = 0;
   s->prev_y = 0;
@@ -99,7 +76,10 @@ static int dc_block_process(dc_block_t *s, int16_t *x, int N, float *rms) {
   // Compute RMS
   float mean = (float)sum_sq / N;
   *rms = sqrtf(mean);
-
+  if (pdm_stream_flag) {
+    uint32_t send_rms = (uint32_t)*rms;
+    send_pdm_data(send_rms);
+  }
   return SUCCESS;
 }
 
@@ -187,11 +167,6 @@ void dmic_capture_thread(void *a, void *b, void *c) {
         printk("audio_msgq is full");
       }
 
-      if (pdm_stream_flag) {
-        uint16_t rms =
-            calculate_rms_dc_removed((int16_t *)blk.data, blk.size / 16);
-        send_pdm_data(rms);
-      }
       memcpy((void *)orig_buf, blk.data, blk.size);
       k_mem_slab_free(&mem_slab, blk.data);
       /*
