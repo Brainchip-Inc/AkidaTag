@@ -30,7 +30,7 @@ void prcess_led(void);
  * Send PDM audio data to the phone.
  * Used for real-time audio level visualization over BLE.
  */
-void send_pdm_data(uint16_t data);
+void send_pdm_data(uint32_t data);
 /*
  * Send a keyword spotting (KWS) detection event to the phone.
  * Includes the detected keyword and its confidence score.

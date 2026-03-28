@@ -321,7 +321,7 @@ static void send_device_info_response(void) {
  * @param data Pointer to PDM audio data
  * @param size size of the data
  */
-void send_pdm_data(uint16_t data) {
+void send_pdm_data(uint32_t data) {
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
 
