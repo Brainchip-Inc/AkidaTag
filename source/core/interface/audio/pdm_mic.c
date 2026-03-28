@@ -77,7 +77,7 @@ static int dc_block_process(dc_block_t *s, int16_t *x, int N, float *rms) {
   float mean = (float)sum_sq / N;
   *rms = sqrtf(mean);
   if (pdm_stream_flag) {
-    uint16_t send_rms = (uint16_t)*rms;
+    uint32_t send_rms = (uint32_t)*rms;
     send_pdm_data(send_rms);
   }
   return SUCCESS;
