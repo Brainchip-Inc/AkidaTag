@@ -1,6 +1,6 @@
 #include "boot_manager.h"
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 #include <zephyr/dfu/mcuboot.h>
 #include <zephyr/drivers/hwinfo.h>
@@ -121,17 +121,16 @@ int init_boot_count(void) {
   struct mcuboot_img_header header;
   struct mcuboot_img_sem_ver current_ver = {0};
 
-  if (boot_read_bank_header(FLASH_AREA_ID(image_0), &header,
-                            sizeof(header)) == 0) {
+  if (boot_read_bank_header(FLASH_AREA_ID(image_0), &header, sizeof(header)) ==
+      0) {
     current_ver = header.h.v1.sem_ver;
   } else {
     LOG_ERR("Failed to read MCUboot header; version check skipped");
   }
 
   /* 2. Detect firmware version change */
-  bool fw_changed =
-      !fw_ver_loaded ||
-      memcmp(&stored_fw_ver, &current_ver, sizeof(current_ver)) != 0;
+  bool fw_changed = !fw_ver_loaded || memcmp(&stored_fw_ver, &current_ver,
+                                             sizeof(current_ver)) != 0;
 
   if (fw_changed) {
     LOG_INF("Firmware version change detected: %d.%d.%d+%d -> %d.%d.%d+%d",
@@ -167,11 +166,11 @@ int init_boot_count(void) {
 
   /* 5. Persist all counters */
   rc |= settings_save_one("boot/total_count", &total_boot_count,
-                           sizeof(total_boot_count));
-  rc |= settings_save_one("boot/fw_count", &fw_boot_count,
-                           sizeof(fw_boot_count));
+                          sizeof(total_boot_count));
+  rc |=
+      settings_save_one("boot/fw_count", &fw_boot_count, sizeof(fw_boot_count));
   rc |= settings_save_one("boot/wdt_count", &wdt_boot_count,
-                           sizeof(wdt_boot_count));
+                          sizeof(wdt_boot_count));
 
   if (rc) {
     LOG_ERR("Failed to save boot counters: %d", rc);

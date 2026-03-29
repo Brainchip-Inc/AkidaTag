@@ -41,8 +41,8 @@
 #include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/hwinfo.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
