@@ -41,6 +41,7 @@
 #include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
@@ -801,32 +802,29 @@ static int start_imu_proc(void) {
 }
 #endif
 void check_reset_reason(void) {
-  uint32_t reason = NRF_RESET->RESETREAS;
+  uint32_t cause = 0;
 
-  printk("Reset reason raw: 0x%08x\n", reason);
+  if (hwinfo_get_reset_cause(&cause) != 0) {
+    printk("Failed to read reset cause\n");
+    return;
+  }
 
-  if (reason & RESET_RESETREAS_OFF_Msk) {
+  printk("Reset cause: 0x%08x\n", cause);
+
+  if (cause & RESET_LOW_POWER_WAKE) {
     printk("Wakeup from System OFF\n");
   }
-
-  if (reason & RESET_RESETREAS_RESETPIN_Msk) {
+  if (cause & RESET_PIN) {
     printk("Reset from RESET pin\n");
   }
-
-  if (reason & RESET_RESETREAS_DOG0_Msk) {
-    printk("Reset from Watchdog 0\n");
+  if (cause & RESET_WATCHDOG) {
+    printk("Reset from Watchdog\n");
   }
-
-  if (reason & RESET_RESETREAS_DOG1_Msk) {
-    printk("Reset from Watchdog 1\n");
-  }
-
-  if (reason & RESET_RESETREAS_SREQ_Msk) {
+  if (cause & RESET_SOFTWARE) {
     printk("Reset from software reset\n");
   }
 
-  /* Clear reset reason flags */
-  NRF_RESET->RESETREAS = reason;
+  /* Do not clear here — init_boot_count() reads and clears later */
 }
 /**
  * @brief Create and start the LED indication thread.
