@@ -1,17 +1,21 @@
 #include "boot_manager.h"
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <zephyr/dfu/mcuboot.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/storage/flash_map.h>
 
 LOG_MODULE_REGISTER(boot_manager, LOG_LEVEL_INF);
 
-#define BUILD_ID (__DATE__ " " __TIME__) /* changes on every rebuild */
-
-static uint32_t boot_count = 0;
-static char stored_build_id[24] = {0};
+static uint32_t total_boot_count = 0;
+static uint32_t fw_boot_count = 0;
+static uint32_t wdt_boot_count = 0;
+static struct mcuboot_img_sem_ver stored_fw_ver;
+static bool fw_ver_loaded = false;
 
 /* In an MCUboot-based system, a new image is often booted in a "test" mode.
 If the application does not confirm itself during this first boot,
@@ -31,27 +35,51 @@ void confirm_image_if_needed(void) {
 }
 
 /*
-This Callback function is a Settings Handler callback used to retrieve value of
-'boot/count' key from non-volatile storage during system initialization.
+Settings handler callback for the 'boot' subtree.
+Loads persisted boot counters and firmware version from NVS.
 */
-static int boot_handler_set(const char *name, uint32_t len,
+static int boot_handler_set(const char *name, size_t len,
                             settings_read_cb read_cb, void *cb_arg) {
   const char *next;
-  if (settings_name_steq(name, "count", &next) && !next) {
-    if (len == sizeof(boot_count)) {
-      read_cb(cb_arg, &boot_count, sizeof(boot_count));
-      return 0;
+
+  if (settings_name_steq(name, "total_count", &next) && !next) {
+    if (len != sizeof(total_boot_count)) {
+      return -EINVAL;
     }
-    return -EINVAL;
+    read_cb(cb_arg, &total_boot_count, sizeof(total_boot_count));
+    return 0;
+  }
+  if (settings_name_steq(name, "fw_count", &next) && !next) {
+    if (len != sizeof(fw_boot_count)) {
+      return -EINVAL;
+    }
+    read_cb(cb_arg, &fw_boot_count, sizeof(fw_boot_count));
+    return 0;
+  }
+  if (settings_name_steq(name, "wdt_count", &next) && !next) {
+    if (len != sizeof(wdt_boot_count)) {
+      return -EINVAL;
+    }
+    read_cb(cb_arg, &wdt_boot_count, sizeof(wdt_boot_count));
+    return 0;
+  }
+  if (settings_name_steq(name, "fw_ver", &next) && !next) {
+    if (len != sizeof(stored_fw_ver)) {
+      return -EINVAL;
+    }
+    read_cb(cb_arg, &stored_fw_ver, sizeof(stored_fw_ver));
+    fw_ver_loaded = true;
+    return 0;
+  }
+
+  /* Legacy keys from previous implementation — accept silently */
+  if (settings_name_steq(name, "count", &next) && !next) {
+    return 0;
   }
   if (settings_name_steq(name, "build_id", &next) && !next) {
-    if (len < sizeof(stored_build_id)) {
-      read_cb(cb_arg, stored_build_id, len);
-      stored_build_id[len] = '\0';
-      return 0;
-    }
-    return -EINVAL;
+    return 0;
   }
+
   return -ENOENT;
 }
 
@@ -77,26 +105,76 @@ int init_setting_sub_system(void) {
 
   return rc;
 }
+
 /*
-This function manages the persistence of a boot cycle counter.
-It increments the current runtime counter and commits the updated value to
-non-volatile storage (Flash).  Resets the counter when a new firmware build
-is detected (compile-time BUILD_ID changes on every rebuild).
+Manages three persistent boot counters:
+  - total_boot_count:  lifetime counter, never resets
+  - fw_boot_count:     per-firmware counter, resets on version change
+  - wdt_boot_count:    per-firmware watchdog reset counter
+Firmware version changes are detected via MCUboot image header semver.
+Watchdog resets are detected via Zephyr hwinfo API.
 */
 int init_boot_count(void) {
-  if (strcmp(stored_build_id, BUILD_ID) != 0) {
-    LOG_INF("New build detected: '%s' -> '%s'. Resetting boot count.",
-            stored_build_id, BUILD_ID);
-    boot_count = 0;
-    settings_save_one("boot/build_id", BUILD_ID, strlen(BUILD_ID));
+  int rc = 0;
+
+  /* 1. Read current firmware version from MCUboot image header */
+  struct mcuboot_img_header header;
+  struct mcuboot_img_sem_ver current_ver = {0};
+
+  if (boot_read_bank_header(FLASH_AREA_ID(image_0), &header,
+                            sizeof(header)) == 0) {
+    current_ver = header.h.v1.sem_ver;
+  } else {
+    LOG_ERR("Failed to read MCUboot header; version check skipped");
   }
 
-  boot_count++;
-  LOG_INF("--- Device Bootup Count: %u ---", boot_count);
+  /* 2. Detect firmware version change */
+  bool fw_changed =
+      !fw_ver_loaded ||
+      memcmp(&stored_fw_ver, &current_ver, sizeof(current_ver)) != 0;
 
-  int rc = settings_save_one("boot/count", &boot_count, sizeof(boot_count));
+  if (fw_changed) {
+    LOG_INF("Firmware version change detected: %d.%d.%d+%d -> %d.%d.%d+%d",
+            stored_fw_ver.major, stored_fw_ver.minor, stored_fw_ver.revision,
+            stored_fw_ver.build_num, current_ver.major, current_ver.minor,
+            current_ver.revision, current_ver.build_num);
+    fw_boot_count = 0;
+    wdt_boot_count = 0;
+    stored_fw_ver = current_ver;
+    fw_ver_loaded = true;
+    settings_save_one("boot/fw_ver", &stored_fw_ver, sizeof(stored_fw_ver));
+  }
+
+  /* 3. Check if this boot was caused by a watchdog reset */
+  uint32_t reset_cause = 0;
+
+  if (hwinfo_get_reset_cause(&reset_cause) == 0) {
+    if (reset_cause & RESET_WATCHDOG) {
+      wdt_boot_count++;
+      LOG_INF("Watchdog reset detected (cause: 0x%08x)", reset_cause);
+    }
+    hwinfo_clear_reset_cause();
+  } else {
+    LOG_WRN("hwinfo_get_reset_cause() failed");
+  }
+
+  /* 4. Increment boot counters */
+  total_boot_count++;
+  fw_boot_count++;
+
+  LOG_INF("Boot counts — total: %u, firmware: %u, watchdog: %u",
+          total_boot_count, fw_boot_count, wdt_boot_count);
+
+  /* 5. Persist all counters */
+  rc |= settings_save_one("boot/total_count", &total_boot_count,
+                           sizeof(total_boot_count));
+  rc |= settings_save_one("boot/fw_count", &fw_boot_count,
+                           sizeof(fw_boot_count));
+  rc |= settings_save_one("boot/wdt_count", &wdt_boot_count,
+                           sizeof(wdt_boot_count));
+
   if (rc) {
-    LOG_ERR("Save failed: %d", rc);
+    LOG_ERR("Failed to save boot counters: %d", rc);
   }
 
   return rc;
@@ -113,3 +191,7 @@ void print_image_version(uint8_t area_id, const char *name) {
     LOG_ERR("Failed to read %s image header\n", name);
   }
 }
+
+uint32_t boot_count_get_total(void) { return total_boot_count; }
+uint32_t boot_count_get_firmware(void) { return fw_boot_count; }
+uint32_t boot_count_get_watchdog(void) { return wdt_boot_count; }
