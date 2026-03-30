@@ -14,16 +14,15 @@
     pinctrl-names = "default", "sleep";
     cs-gpios = <&gpio0 18 GPIO_ACTIVE_LOW>;
  
-    mcuboot_ext_flash: mx25r6435f@0 {
+    mcuboot_ext_flash: mt25qu128aba@0 {
         compatible = "jedec,spi-nor";
         reg = <0>;
         spi-max-frequency = <8000000>;
         size = <DT_SIZE_M(64)>;
-        jedec-id = [c2 28 17];
+        jedec-id = [20 bb 18];
         has-dpd;
         t-enter-dpd = <10000>;
         t-exit-dpd = <35000>;
-        mxicy,mx25r-power-mode = "low-power";
     };
 };
 / {

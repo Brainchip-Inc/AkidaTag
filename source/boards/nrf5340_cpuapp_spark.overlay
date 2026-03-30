@@ -58,6 +58,8 @@
             psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
                     <NRF_PSEL(SPIM_MISO, 0, 10)>,
                     <NRF_PSEL(SPIM_MOSI, 0, 9)>;
+                    /* ADD THIS - disable trace function on these pins */
+                    nordic,drive-mode = <NRF_DRIVE_S0S1>;
         };
     };
 
@@ -185,12 +187,16 @@ dmic_dev: &pdm0 {
         label = "AKD";
     };
 
-    /* W25Q128 Flash device at index 1 */
-    akd_flash: akd_flash@1 {
-        compatible = "spi-device";  /* Use spi-device for manual control */
-        reg = <1>;  /* Uses second CS pin (P0.12) */
+    /* mt25qu128aba Flash device at index 1 */
+    akd_flash: mt25qu128aba@1 {        /* ← @1 to match reg = <1> */
+        compatible = "jedec,spi-nor";
+        reg = <1>;
         spi-max-frequency = <8000000>;
-        label = "AKD_FLASH";
+        size = <DT_SIZE_M(16)>;
+        jedec-id = [20 bb 18];
+        has-dpd;
+        t-enter-dpd = <10000>;
+        t-exit-dpd = <35000>;
     };
 };
 
@@ -216,19 +222,19 @@ dmic_dev: &pdm0 {
     camera: camera@0 {
         compatible = "spi-device";
         reg = <0>;  /* Uses first CS pin (P0.25) */
-        spi-max-frequency = <16000000>;
+        spi-max-frequency = <8000000>;
         label = "CAMERA";
     };
-    /* NRF Flash device at index 1 */
-    ext_flash: flash@1 {
+    /* NRF Flash device at index 1 mt25qu128aba*/
+    ext_flash: flash@0 {
         compatible = "jedec,spi-nor";
         reg = <1>;
-        spi-max-frequency = <16000000>;
-        label = "SPI_FLASH";
-
-        /* REQUIRED properties */
-        size = <DT_SIZE_M(64)>; /* 8MB example */
-        jedec-id = [c2 28 17]; /* example JEDEC ID */
+        spi-max-frequency = <8000000>;
+        size = <DT_SIZE_M(16)>;
+        jedec-id = [20 bb 18];
+        has-dpd;
+        t-enter-dpd = <10000>;
+        t-exit-dpd = <35000>;
     };
 };
 / {
@@ -263,7 +269,9 @@ dmic_dev: &pdm0 {
         akd_0v_enb: akd_0v_enb {
             gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
         };
-		
+		cam_enb: cam_enb {
+            gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
+        };
 	};
 
         /* ---------- Buttons ---------- */
@@ -297,6 +305,7 @@ dmic_dev: &pdm0 {
         acc-enb    = &acc_enb;
         pdm-enb    = &pdm_enb;
         akd-0v-enb = &akd_0v_enb;
+        cam-enb = &cam_enb;
         user-button = &user_btn;
     };
 };

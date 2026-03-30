@@ -461,7 +461,7 @@ MOBILE APP                    BLE STACK                    FIRMWARE
      │    [CMD=3] Select Next Class │                             │
      │                              │                             │
 
-### Build the demo_apps Sample.
+### Build the demo_apps Sample with spark board overlay file.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
 
@@ -526,10 +526,15 @@ Added DeviceTree configuration for the external flash (ext_flash) to enable acce
 
 Different pin configurations are used for the DK board and the Spark board due to pin availability and hardware connections.
 
-The overlay file is selected during the build using the `--dk` flag.
+Both the **application overlay** and the **MCUboot overlay** are selected during the build using the `--dk` flag.
 
-- **DK board overlay file:** `nrf5340dk_nrf5340_cpuapp.overlay`
-- **Spark board overlay file:** `nrf5340_cpuapp_spark.overlay`
+### DK Board
+- **Application overlay:** `boards/nrf5340dk_nrf5340_cpuapp.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot.overlay`
+
+### Spark Board
+- **Application overlay:** `boards/nrf5340_cpuapp_spark.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot_spark.overlay`
 
 ### Model Generation and BLE Transfer
 
@@ -858,7 +863,20 @@ kws_el debounce 200
 ```
 kws_el min_frames 10  (detection ~200ms instead of ~320ms)
 ```
+### Additional GPIO Configuration
 
+The following GPIOs are added in the board overlay to control **power enabling for onboard sensors and peripherals on the Spark board**.
+
+| GPIO Label   | Pin   | Description |
+|---------------|-------|-------------|
+| `imui`        | P0.31 | IMU interrupt signal |
+| `akd_enb`     | P0.19 | Enable pin for the AKIDA device |
+| `acc_enb`     | P0.20 | Enable pin for the accelerometer |
+| `pdm_enb`     | P0.21 | Enable pin for the PDM microphone |
+| `akd_0v_enb`  | P0.22 | Enable control for AKIDA 0V supply |
+| `cam_enb`     | P1.15 | Enable pin for the camera module |
+
+These GPIOs are defined in the **DeviceTree overlay** and are used to manage power enabling of onboard components in the Spark board.
 
 
 

@@ -158,6 +158,7 @@ static void reset_kws_spectrogram(void);
 #define ACC_ENB_NODE     DT_NODELABEL(acc_enb)
 #define PDM_ENB_NODE     DT_NODELABEL(pdm_enb)
 #define AKD_0V_ENB_NODE  DT_NODELABEL(akd_0v_enb)
+#define CAM_ENB_NODE  DT_NODELABEL(cam_enb)
 
 static const struct gpio_dt_spec enable_akd =
     GPIO_DT_SPEC_GET(AKD_ENB_NODE, gpios);
@@ -170,7 +171,9 @@ static const struct gpio_dt_spec enable_pdm =
 
 static const struct gpio_dt_spec enable_akd_0V =
     GPIO_DT_SPEC_GET(AKD_0V_ENB_NODE, gpios);
-
+  
+static const struct gpio_dt_spec enable_camera =
+    GPIO_DT_SPEC_GET(CAM_ENB_NODE, gpios);
 /* ---------- Buttons ---------- */
 #define USER_BTN_NODE DT_ALIAS(user_button)
 
@@ -955,6 +958,10 @@ static int gpio_init(void)
         printf("AKD 0V enable GPIO not ready\n");
         return -ENODEV;
     }
+    if (!gpio_is_ready_dt(&enable_camera)) {
+        printk("Camera enable GPIO not ready\n");
+        return -ENODEV;
+    }
     if (!gpio_is_ready_dt(&user_btn)) {
         printf("User button GPIO not ready\n");
         return -ENODEV;
@@ -984,6 +991,11 @@ static int gpio_init(void)
         printf("Failed to configure AKD 0V enable pin (err %d)\n", err);
         return err;
     }
+    err = gpio_pin_configure_dt(&enable_camera, GPIO_OUTPUT_INACTIVE);
+    if (err) {
+        printk("Failed to configure camera enable pin (err %d)\n", err);
+        return err;
+    }
 
     /* --- Configure buttons as input --- */
     err = gpio_pin_configure_dt(&user_btn, GPIO_INPUT);
@@ -1010,6 +1022,32 @@ static int gpio_init(void)
     printf("GPIO + Buttons initialized\n");
     return 0;
 }
+/**
+ * @brief Enable power for onboard sensors and peripherals on the Spark board.
+ *
+ * This function enables the required power rails and peripherals in the
+ * correct order with appropriate delays to ensure stable startup.
+ *
+ * Sequence:
+ * 1. Enable AKD 0V rail
+ * 2. Enable AKD1500 device
+ * 3. Enable accelerometer
+ * 4. Enable PDM microphone
+ * 5. Enable camera module
+ */
+static void spark_peripherals_power_enable(void)
+{
+    gpio_pin_set_dt(&enable_akd_0V, GPIO_ENABLE);
+    k_msleep(2);   /* 0V rail settle time */
+    gpio_pin_set_dt(&enable_akd, GPIO_ENABLE);
+    k_msleep(2);    /* AKD1500 power-up time */
+    gpio_pin_set_dt(&enable_acc, GPIO_ENABLE);
+    k_msleep(2); 
+    gpio_pin_set_dt(&enable_pdm, GPIO_ENABLE);
+    k_msleep(2); 
+    gpio_pin_set_dt(&enable_camera, GPIO_ENABLE);
+    k_msleep(2); 
+}
 #endif
 int main(void) {
 
@@ -1029,6 +1067,7 @@ int main(void) {
     printf("GPIO init failed (err %d)\n", err_gpio);
     return -1;
   }
+  spark_peripherals_power_enable();
   #endif
   uart_init();
   start_led_ind();
