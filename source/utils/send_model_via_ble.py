@@ -12,7 +12,7 @@ import os
 import sys
 import yaml
 import zlib
-
+DEVICE_NAME = "Akida_Tag"
 def compute_data_crc32(data_path):
     """CRC32 over raw model data binary file bytes."""
     crc = 0xFFFFFFFF
@@ -471,19 +471,25 @@ async def main(args):
 
     print("\nScanning for BLE devices...")
     devices = await BleakScanner.discover(timeout=5.0)
+
     if not devices:
         print("No BLE devices found.")
         return
 
-    for i, d in enumerate(devices):
-        print(f"[{i}] {d.name or 'Unknown'} - {d.address}")
+    target_device = None
 
-    try:
-        index = int(input("Select device index: "))
-        address = devices[index].address
-    except (IndexError, ValueError):
-        print("Invalid selection.")
+    for d in devices:
+        print(f"{d.name or 'Unknown'} - {d.address}")
+        if d.name == DEVICE_NAME:
+            target_device = d
+            break
+
+    if not target_device:
+        print(f"{DEVICE_NAME} not found.")
         return
+
+    address = target_device.address
+    print(f"Connecting to {DEVICE_NAME} ({address})...")
 
     # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_el_classes
     packed_classes = None

@@ -9,8 +9,8 @@ extern "C" {
 #include "io_objects.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <hardware_device_impl.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/types.h>
-
 #if FLASH_READ_BACK_CHECK
 uint8_t read_back_flash[HALF_OF_SRAM_BUFFER_SIZE];
 #endif
@@ -232,3 +232,81 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
     printk("Flash Write Successful\n");
   akida_config_spi(0);
 }
+
+static int cmd_akida_device_id(const struct shell *shell, size_t argc,
+                               char **argv) {
+  uint8_t read_data[READ_LEN];
+  akida_config_spi(1);
+
+  akd1500.read(0xFCC00000, read_data, READ_LEN);
+
+  shell_print(shell, "Akida Device ID:");
+
+  for (int i = 0; i < READ_LEN; i += WORD_SIZE) {
+    shell_print(shell, "Word %d: 0x%02X%02X%02X%02X", i / WORD_SIZE,
+                read_data[i], read_data[i + 1], read_data[i + 2],
+                read_data[i + 3]);
+  }
+  return 0;
+}
+
+static int cmd_akida_sram_test(const struct shell *shell, size_t argc,
+                               char **argv) {
+  akida_config_spi(1);
+  static uint8_t msg[SRAM_128_BYTES_LEN] =
+      "Hello world!!! This is a test for writing and reading 128 bytes of data "
+      "to and from 1MB of RAM within Brainchip's AKD1500 chip";
+
+  uint8_t sram_read_data[SRAM_128_BYTES_LEN] = "kkkkkkkkk";
+  uint32_t fail_cnt = 0;
+
+  // Write and read 1 MB RAM in Akida in 128-byte chunks (Currently it is tested
+  // for 128 Bytes). To check complete 1MB replace offset < 1 with offset <
+  // ONE_MB in the below for loop
+
+  for (uint32_t offset = 0; offset < 1; offset += SRAM_128_BYTES_LEN) {
+    uint32_t addr = ONE_MB_SRAM_ADDR + offset;
+
+    // Write
+    akd1500.write(addr, msg, SRAM_128_BYTES_LEN);
+
+    akd1500.read(addr, sram_read_data, SRAM_128_BYTES_LEN);
+
+    // Compare
+    if (memcmp(msg, sram_read_data, SRAM_128_BYTES_LEN) != 0) {
+      fail_cnt++;
+      printk("Data mismatch at address 0x%08X (offset: %u bytes)\n", addr,
+             offset);
+      for (int i = 0; i < SRAM_128_BYTES_LEN; ++i) {
+        printk("%c", sram_read_data[i]);
+      }
+    }
+    // Clear the read data
+    memset(sram_read_data, 0, SRAM_128_BYTES_LEN);
+  }
+  if (fail_cnt == 0) {
+    printk("Sanity test of 1 MB SRAM is passed\n");
+    return 0;
+  } else {
+    printk("Sanity test of 1 MB SRAM is failed\n");
+    return -1;
+  }
+}
+static int cmd_flash_id(const struct shell *shell, size_t argc, char **argv) {
+  init_akd_1500_spi_flash();
+
+  spi_flash_read_id(spi_driver);
+
+  shell_print(shell, "SPI Flash ID read completed");
+
+  return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+    akida_cmds,
+    SHELL_CMD(device_id, NULL, "Read Akida device ID", cmd_akida_device_id),
+    SHELL_CMD(sram_test, NULL, "Run SRAM test", cmd_akida_sram_test),
+    SHELL_CMD(flash_id, NULL, "Read Flash ID", cmd_flash_id),
+    SHELL_SUBCMD_SET_END);
+
+SHELL_CMD_REGISTER(akida, &akida_cmds, "Akida commands", NULL);

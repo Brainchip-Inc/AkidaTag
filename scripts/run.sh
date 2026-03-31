@@ -33,7 +33,7 @@ Options:
   -h, --help         | (flag) | Show this help message
   --dk               | (flag) | Select dk board pin configuration overlay file.
   -t, --test-cli     | (flag) | Run CLI-based hardware validation test (Python)
-
+  -t --infer-test, --test-cli --infer-test   | (flag) | Run CLI-based hardware validation test (Python) only for inference test of kws
 ###################################################################################################
 Run the script from project root.
 
@@ -145,7 +145,7 @@ CLI_TEST_CMD=""
 DK_OVERLAY=false
 MODEL_TRANSFER_NEURONS_PER_CLASS=1
 MODEL_TRANSFER_NUM_EL_CLASSES=0
-
+DO_INFER_TEST=false
 
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
@@ -259,6 +259,10 @@ while [[ $# -gt 0 ]]; do
         -h|--help) print_help; exit 0;;
         -t|--test-cli)
             DO_CLI_TEST=true
+            shift
+            ;;
+        --infer-test)
+            DO_INFER_TEST=true
             shift
             ;;
         *) echo "Unknown option $1"; shift;;
@@ -411,6 +415,10 @@ fi
 # Build the CLI hardware validation test command when -t is enabled, using the configured serial port
 if $DO_CLI_TEST; then
     CLI_TEST_CMD="python source/utils/hil_test.py --port ${CLI_PORT}"
+
+    if $DO_INFER_TEST; then
+        CLI_TEST_CMD="${CLI_TEST_CMD} --only-infer"
+    fi
 fi
 # -----------------------------------------------------------------------------
 # SHELL MODE (interactive)

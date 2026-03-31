@@ -32,3 +32,15 @@ jobs:
       - name: Run CLI Test
         run: |
           ./scripts/run.sh -d -t
+      
+      - name: Upload Model
+        run: |
+          chmod +x scripts/run.sh
+          ./scripts/run.sh --send_ble \
+          --info source/external/model_files/kws/kws_program_info.bin \
+          --bin source/external/model_files/kws/kws_program_data.bin \
+          --yaml source/external/model_files/kws/info.yaml
+
+      - name: Run inference CLI Test
+        run: |
+          ./scripts/run.sh -d -t --infer-test

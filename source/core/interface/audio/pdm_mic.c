@@ -231,5 +231,65 @@ static int cmd_dmic_start(const struct shell *shell, size_t argc, char **argv) {
   return 0;
 }
 
+static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
+  if (argc > 1) {
+    printk("Invalid command\n");
+    return -EINVAL;
+  }
+
+  if (dmic_init() < 0) {
+    printk("DMIC init failed\n");
+    return -1;
+  }
+
+  if (dmic_start() < 0) {
+    printk("DMIC start failed\n");
+    return -1;
+  }
+
+  printk("DMIC started\n");
+
+  struct audio_block blk;
+  int valid_cycles = 0;
+
+  int64_t prev_time = k_uptime_get();
+
+  while (1) {
+
+    int ret = dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT);
+
+    if (ret == 0) {
+
+      int64_t now = k_uptime_get();
+      int64_t diff = now - prev_time;
+      prev_time = now;
+
+      printk("DMIC data received: %lld ms\n", diff);
+
+      if (diff >= 50 && diff <= 70) {
+        valid_cycles++;
+        printk("Cycle %d OK\n", valid_cycles);
+      } else {
+        valid_cycles = 0;
+      }
+
+      /* IMPORTANT: free buffer immediately */
+      k_mem_slab_free(&mem_slab, blk.data);
+
+      if (valid_cycles >= 5) {
+        printk("DMIC TEST PASS\n");
+        break;
+      }
+    } else if (ret == -EAGAIN) {
+      printk("DMIC timeout\n");
+      break;
+    }
+  }
+  stop_dmic();
+
+  return 0;
+}
+
 SHELL_CMD_REGISTER(dmic_start, NULL, "dmic_start", cmd_dmic_start);
 SHELL_CMD_REGISTER(dmic_stop, NULL, "dmic_stop", cmd_dmic_stop);
+SHELL_CMD_REGISTER(test_dmic, NULL, "test_dmic", cmd_test_dmic);
