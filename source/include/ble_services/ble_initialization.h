@@ -32,6 +32,8 @@ void prcess_led(void);
  * Used for real-time audio level visualization over BLE.
  */
 void send_pdm_data(uint32_t data);
+
+typedef enum { FLAG_DISABLE = 0, FLAG_ENABLE = 1 } flag_state_t;
 /*
  * Send a keyword spotting (KWS) detection event to the phone.
  * Includes the detected keyword and its confidence score.

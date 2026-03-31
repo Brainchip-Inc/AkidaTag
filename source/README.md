@@ -485,6 +485,8 @@ This flashes both mcuboot and demo_apps application together
 ./scripts/run.sh -d -r
 ```
 
+### Device ID Display via UART CLI
+A CLI command is provided to display the unique Device ID of the SoC via the UART console. The device ID is read from the FICR registers and printed through the shell interface.
 
 ### FOTA over BLE using nRF Connect Mobile App
 - Copy the updated application image `zephyr.signed.bin` to your mobile device.
@@ -762,6 +764,7 @@ Use the following commands on the console:
 | `dmic_start` | Starts the dmic. |
 | `threads_stop` | Terminate all running threads for testing the WDT. |
 | `wdt_disable` | System crash for watchdog validation. |
+| `device_id` | Print device ID |
 
 __Inference mode__
  -  Default mode, in this mode it captures live audio data and shows the inferred class id.

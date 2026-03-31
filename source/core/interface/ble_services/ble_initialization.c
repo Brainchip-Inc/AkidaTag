@@ -2,7 +2,8 @@
 #include "ble_services/ble_initialization.h"
 #include "led_init.h"
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(ble_initilaization, CONFIG_LOG_DEFAULT_LEVEL);
+#include <zephyr/shell/shell.h>
+LOG_MODULE_REGISTER(ble_initialization, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
@@ -71,7 +72,7 @@ static const char device_firmware[] = "1.2.3";
 typedef struct {
   uint64_t high;
   uint64_t low;
-} uint128_t;
+} device_id_128_t;
 
 /**
  * Enumeration of supported BLE commands.
@@ -100,11 +101,11 @@ typedef struct {
 /* Flag indicating whether deployment mode is active.
  * Set when CMD_DEPLOY_START is received and cleared on CMD_DEPLOY_STOP.
  */
-uint8_t event_flag = false;
+uint8_t event_flag = FLAG_DISABLE;
 /* Flag indicating whether PDM audio streaming is enabled.
  * Used to control real-time audio data transmission to the phone.
  */
-uint8_t pdm_stream_flag = false;
+uint8_t pdm_stream_flag = FLAG_DISABLE;
 /*==================== ADVERTISING DATA ====================
  * Manufacturer data is encoded in ASCII (hex values of characters)
  * instead of raw numeric values. This allows the mobile phone BLE application
@@ -139,7 +140,7 @@ static const uint8_t adv_manufacturer_data[] = {
 /* Stores the unique 64-bit hardware device ID read from the MCU.
  * Used to uniquely identify the device during runtime or communication.
  */
-static uint128_t device_id = {0};
+static device_id_128_t device_id;
 
 /* BLE advertising data including flags, device name, and manufacturer-specific
  * data */
@@ -290,7 +291,7 @@ static void send_device_info_response(void) {
   err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return err;
+    return;
   }
   frame_index++;
 
@@ -304,7 +305,7 @@ static void send_device_info_response(void) {
   err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return err;
+    return;
   }
   frame_index++;
 
@@ -318,7 +319,7 @@ static void send_device_info_response(void) {
   err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return err;
+    return;
   }
   frame_index++;
 
@@ -332,7 +333,7 @@ static void send_device_info_response(void) {
   err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return err;
+    return;
   }
 }
 /**
@@ -373,7 +374,7 @@ void send_kws_event(const char *word, float strength) {
 
   /* Format: CMD_KWS_EVENT:<word>,<strength>\r
    * Example: "11:cat,91\r" */
-  snprintf(data_part, sizeof(data_part), "%d:%s,%f\r", CMD_DEPLOY_START, word,
+  snprintf(data_part, sizeof(data_part), "%d:%s,%.2f\r", CMD_DEPLOY_START, word,
            strength);
   int data_len = strlen(data_part);
 
@@ -475,17 +476,12 @@ static void restart_device(void) { sys_reboot(SYS_REBOOT_COLD); }
  *
  * @return uint128_t Device identifier.
  */
-static uint128_t get_device_id(void) {
+static void get_device_id(void) {
   uint32_t id0 = NRF_FICR->INFO.DEVICEID[0];
   uint32_t id1 = NRF_FICR->INFO.DEVICEID[1];
 
-  uint128_t device_id;
-
-  device_id.high = ((uint64_t)id1 << 32) |
-                   id0; // upper 64 bits (can add other info if needed)
+  device_id.high = ((uint64_t)id1 << 32) | id0;
   device_id.low = 0;
-
-  return device_id;
 }
 
 /**
@@ -535,25 +531,27 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
     break;
   case CMD_DEPLOY_START:
     LOG_INF("DEPLOY START command received\n");
-    event_flag = true;
+    event_flag = FLAG_ENABLE;
     break;
   case CMD_STREAM_START:
     LOG_INF("STREAM START command received\n");
-    pdm_stream_flag = true;
+    pdm_stream_flag = FLAG_ENABLE;
     break;
   case CMD_DEPLOY_STOP:
     LOG_INF("DEPLOY STOP command received\n");
-    event_flag = false;
+    event_flag = FLAG_DISABLE;
     send_ack(ACK_DONE, CMD_DEPLOY_STOP);
     break;
   case CMD_STREAM_STOP:
     LOG_INF("STREAM STOP command received\n");
-    pdm_stream_flag = false;
+    pdm_stream_flag = FLAG_DISABLE;
     send_ack(ACK_DONE, CMD_STREAM_STOP);
     break;
   case CMD_RESET:
     LOG_INF("RESET command received\n");
     send_ack(ACK_DONE, CMD_RESET);
+    /* Delay to ensure ACK is transmitted over BLE */
+    k_sleep(K_MSEC(200));
     restart_device();
     break;
   default:
@@ -798,7 +796,7 @@ int ble_init(void)
     return -1;
   }
 #endif
-  device_id = get_device_id();
+  get_device_id();
   err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
   if (err) {
     LOG_ERR("Advertising failed to start (err %d)\n", err);
@@ -815,3 +813,17 @@ void prcess_led(void) {
 #endif
   k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 }
+
+static int cmd_get_device_id(const struct shell *shell, size_t argc,
+                             char **argv) {
+  ARG_UNUSED(argc);
+  ARG_UNUSED(argv);
+
+  get_device_id();
+
+  shell_print(shell, "Device ID: 0x%016llx%016llx", device_id.high,
+              device_id.low);
+
+  return 0;
+}
+SHELL_CMD_REGISTER(device_id, NULL, "Print device ID", cmd_get_device_id);

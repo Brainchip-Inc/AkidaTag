@@ -1184,7 +1184,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                  confidence * 100.0f, score, inf_time, dma_time);
         }
         if (is_ble_connected()) {
-          send_kws_event(kws_new_tags[found], score);
+          send_kws_event(kws_new_tags[found], confidence * 100.0f);
         }
 
         // Clear history so next word starts fresh
