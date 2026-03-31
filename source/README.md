@@ -346,6 +346,15 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
 
      │                           │                           │
      ├───Connect & Pair──────────┼────────────────────────────►│
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_APP"              │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Prepare application info
+     │                           │                           │
+     │◄──Receive Response────────┼───────────────────────────┤
+     │ "app_name,description,    │                           │    
+     |      app_size,            │                           |
+     │                           │                           │
      │                           │                           │
      ├───Send Command───────────┼────────────────────────────►│
      │    "CMD_BATTERY"          │                           │
@@ -369,10 +378,21 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │    "CMD_APP_INFO"         │                           │
      │                           │                           ├───Process Command
      │                           │                           │    Prepare application info
-     │                           │                           │    (model, memory, version)
+     │                           │                           │ 
      │                           │                           │
-     │◄──Receive Response────────┼──────────────────────────────┤
-     │    Application metadata   │                           │
+     │◄──Receive Response────────┼───────────────────────────┤
+     │    "DEVICE:Processor,     │                           │
+     │         Type,             │                           │
+     │         Version,          │                           │
+     │        Processor_Detail,  │                           │
+     │         Model_Name,       │                           │
+     │         Model_Version,    │                           │
+     │         Model_Size,       |                           │
+     │         Input_Shape,      │                           │
+     │         Num_Classes,      │                           │
+     │         Akida_Nodes,      │                           │
+     │         Power_Consumption"│                           │
+     │                           │                           │
      │                           │                           │
 	 ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_START"     │                           │

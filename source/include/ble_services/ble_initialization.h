@@ -24,6 +24,12 @@ extern uint8_t event_flag;
  */
 extern uint8_t pdm_stream_flag;
 
+/* Access in main.c, and variable changes based on info.yaml */
+extern char model_name[64]; 
+extern uint32_t no_of_class;
+extern char input_shape[3] ;
+extern uint8_t model_size;
+
 int ble_init(void);
 void prcess_led(void);
 

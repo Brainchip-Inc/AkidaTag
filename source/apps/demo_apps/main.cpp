@@ -952,6 +952,9 @@ int main(void) {
     return -1;
   }
   printk("Model name: stored='%s', \n", kws_meta.model_name);
+  /* Step 3: Copy to model_name */
+  strncpy(model_name, kws_meta.model_name, sizeof(model_name) - 1);
+  model_name[sizeof(model_name) - 1] = '\0';  
   /* Step 2&4: load data meta and validate flash contents */
   int dm_ret = file_transfer_load_data_meta(0, &kws_data_meta);
   if (dm_ret == 0) {
@@ -1006,7 +1009,12 @@ int main(void) {
 
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
-
+  input_shape[0] = kws_meta.input_shape[0];
+  input_shape[1] = kws_meta.input_shape[1];
+  input_shape[2] = kws_meta.input_shape[2];
+  no_of_class = kws_meta.num_edge_classes;
+  model_size = kws_meta.info_data_len + kws_data_meta.data_length;
+  
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
   start_imu_proc();
 #endif
