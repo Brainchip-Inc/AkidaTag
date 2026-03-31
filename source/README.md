@@ -3,14 +3,33 @@ This is Akida Tag complete application source code. This project includes all th
 
 The application uses the LittleFS file system and also keeps track of the number of system restarts the device has undergone.
 
-##Generate the signing_key File
-Run the command below to generate the signing_key.pem file in the spark.env/ directory. This file is required for the build to compile successfully.
+## Signing Key and Build
 
-Important: This key is intended only for development/testing. Do not commit this file to the Git repository. Extra care must be taken when handling signing keys for production software.
+The `signing_key.pem` file is required in the `.env/` directory for the build to compile successfully. Do not commit this file to the Git repository. Extra care must be taken when handling signing keys for production software.
 
+### Release Build
+
+Download the signing key from the internal server and compile:
+
+```bash
+wget -O .env/signing_key.pem http://salesdata.brainchipinc.local/spark/sw/signing_key/03-31_developer/signing_key.pem
 ```
+
+Then build:
+
+```bash
+./scripts/run.sh -d -b --app demo_apps
+```
+
+### Dev / Testing
+
+Generate a local signing key (intended only for development/testing):
+
+```bash
 ./scripts/run.sh -d --key
 ```
+
+Refer to `docs/setup.md` for the full dev/testing procedure.
 
 ## MCUBoot Integration Changes
 The following updates were made to enable the nRF-provided MCUBoot bootloader:
