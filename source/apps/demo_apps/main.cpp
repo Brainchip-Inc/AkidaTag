@@ -333,6 +333,10 @@ int32_t *akida_output;
 uint32_t akd_op_size = 0;
 static uint8_t is_el_model = 0;
 
+/*Metadata of the loaded model used for app_info reporting*/
+model_meta_t kws_meta;
+model_data_meta_t kws_data_meta;
+
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 /* IMU thread variables*/
 K_THREAD_STACK_DEFINE(imu_stack, IMU_STACK_SIZE);
@@ -933,8 +937,6 @@ int main(void) {
    *   5. Reload full meta + program_info into sram_upload_buffer.
    *   6. Program Akida.
    */
-  model_meta_t kws_meta;
-  model_data_meta_t kws_data_meta;
 
   /* Step 1: read header struct only to get flash_address */
   int hdr_ret = file_transfer_read_meta_hdr_only(0, &kws_meta);
@@ -953,8 +955,6 @@ int main(void) {
   }
   printk("Model name: stored='%s', \n", kws_meta.model_name);
   /* Step 3: Copy to model_name */
-  strncpy(model_name, kws_meta.model_name, sizeof(model_name) - 1);
-  model_name[sizeof(model_name) - 1] = '\0';  
   /* Step 2&4: load data meta and validate flash contents */
   int dm_ret = file_transfer_load_data_meta(0, &kws_data_meta);
   if (dm_ret == 0) {
@@ -1009,12 +1009,9 @@ int main(void) {
 
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
-  input_shape[0] = kws_meta.input_shape[0];
-  input_shape[1] = kws_meta.input_shape[1];
-  input_shape[2] = kws_meta.input_shape[2];
-  no_of_class = kws_meta.num_edge_classes;
-  model_size = kws_meta.info_data_len + kws_data_meta.data_length;
-  
+
+  printk("data to check : model_size %d, class %d \n",
+         kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
   start_imu_proc();
 #endif
@@ -1192,7 +1189,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                  confidence * 100.0f, score, inf_time, dma_time);
         }
         if (is_ble_connected()) {
-          send_kws_event(kws_new_tags[found], confidence * 100.0f);
+          send_event(CMD_DEPLOY_START, kws_new_tags[found],
+                     confidence * 100.0f);
         }
 
         // Clear history so next word starts fresh

@@ -1,8 +1,11 @@
 
 #include "ble_services/ble_initialization.h"
 #include "led_init.h"
+#include <hal/nrf_ficr.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/reboot.h>
+
 LOG_MODULE_REGISTER(ble_initialization, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
@@ -61,60 +64,14 @@ static const char device_version[] = "5.3";
 static const char device_firmware[] = "1.2.3";
 
 static const char app_name[] = "Keyword Spotting";
-char description[244] = "Voice-activated wake word detection using microphone input";
-uint16_t app_size = 128 ;
+char description[244] =
+    "Voice-activated wake word detection using microphone input";
+uint16_t app_size = 128;
 
 char processor[] = "AKIDA_1500";
-char model_name[64];
-char model_version[] = "v2.17.0";
-uint8_t model_size = 0 ;
-char input_shape[3] ;
-uint32_t no_of_class = 0;
+char model_version[] = "v1.1.0";
 static uint16_t akd_nodes = 8;
 float pwr_con = 2.3f;
-
-
-
-/**
- * @brief 128-bit unsigned integer using two 64-bit values.
- *
- * The 128-bit value is split into:
- * - high: most significant 64 bits
- * - low : least significant 64 bits
- *
- * Combined value = (high << 64) | low
- */
-typedef struct {
-  uint64_t high;
-  uint64_t low;
-} device_id_128_t;
-
-/**
- * Enumeration of supported BLE commands.
- * Used to identify and handle commands received from the mobile application.
- */
-typedef enum {
-  CMD_BATTERY = 0,
-  CMD_DEVICE_INFO = 1,
-  CMD_APPS = 2,
-  CMD_NOTIFY = 3,
-  CMD_CONFIG = 4,
-  CMD_APP_INFO = 5,
-  CMD_UNINSTALL = 6,
-  CMD_RESET = 7,
-  CMD_DEPLOY_START = 8,
-  CMD_STREAM_START = 9,
-  CMD_DEPLOY_STOP = 10,
-  CMD_STREAM_STOP = 11,
-} command_type_t;
-
-/* Structure representing a parsed command frame received from the host */
-typedef struct {
-  uint8_t frame_type;
-  uint8_t index;
-  uint8_t size;
-  uint8_t command;
-} parsed_frame_t;
 
 /* Flag indicating whether deployment mode is active.
  * Set when CMD_DEPLOY_START is received and cleared on CMD_DEPLOY_STOP.
@@ -378,22 +335,25 @@ void send_pdm_data(uint32_t data) {
 }
 
 /**
- * @brief Send KWS detection event to phone
+ * @brief Send a command event frame over the communication channel.
  *
- * Notifies phone when a keyword is detected with confidence score.
+ * Constructs a framed message with the given command ID, label, and numeric
+ * value, then transmits it via send_frame().
  *
- * @param word Detected keyword string (e.g., "hello", "stop")
- * @param strength Confidence percentage (0-100)
+ * Format: "<FRAME_SINGLE>,<seq>,<data_len>,<cmd>:<label>,<value>\r"
+ * Example: "1,0,12,11:cat,0.91\r"
+ *
+ * @param cmd     Command ID to embed in the data part (e.g. CMD_DEPLOY_START).
+ * @param label   Null-terminated string label (e.g. keyword, class name).
+ * @param value   Numeric confidence or strength value (0.0 – 1.0 typical).
  */
-void send_kws_event(const char *word, float strength) {
+void send_event(int cmd, const char *label, float value) {
 
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
 
-  /* Format: CMD_KWS_EVENT:<word>,<strength>\r
-   * Example: "11:cat,91\r" */
-  snprintf(data_part, sizeof(data_part), "%d:%s,%.2f\r", CMD_DEPLOY_START, word,
-           strength);
+  /* Format data part: CMD:<label>,<value>\r */
+  snprintf(data_part, sizeof(data_part), "%d:%s,%.2f\r", cmd, label, value);
   int data_len = strlen(data_part);
 
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
@@ -401,10 +361,9 @@ void send_kws_event(const char *word, float strength) {
 
   int err = send_frame(frame);
   if (err) {
-    LOG_ERR("Failed to send KWS event (err=%d)", err);
+    LOG_ERR("Failed to send event (cmd=%d label=%s err=%d)", cmd, label, err);
   } else {
-    LOG_INF("KWS Event: word=\"%s\" strength=%f", word, strength);
-    LOG_INF("KWS event sent successfully");
+    LOG_INF("Event sent: cmd=%d label=\"%s\" value=%.2f", cmd, label, value);
   }
 }
 /**
@@ -437,7 +396,8 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
   }
 }
 /**
- * @brief Sends application display information over the communication interface.
+ * @brief Sends application display information over the communication
+ * interface.
  *
  * This function prepares and sends formatted frames containing application
  * display metadata such as application name, description, and application size.
@@ -459,7 +419,7 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
  *
  * @retval None
  */
-static void app_display(void){
+static void app_display(void) {
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
   int err;
@@ -468,8 +428,8 @@ static void app_display(void){
   LOG_INF("SENDING DEVICE INFO (MULTI)      \n");
 
   /* Frame 1: MF-START - app_name */
-  int data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r",
-                          CMD_APPS, app_name);
+  int data_len =
+      snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS, app_name);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_START, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
@@ -482,8 +442,8 @@ static void app_display(void){
   frame_index++;
 
   /* Frame 2: MF-MID - description */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS,
-                      description);
+  data_len =
+      snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS, description);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
@@ -496,8 +456,8 @@ static void app_display(void){
   frame_index++;
 
   /* Frame 3: MF-LAST - app_size */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APPS,
-                      app_size);
+  data_len =
+      snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APPS, app_size);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_LAST, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
@@ -513,7 +473,8 @@ static void app_display(void){
  *
  * This function prepares and sends formatted frames containing device and
  * application metadata such as processor type, model name, model version,
- * model size, input shape, number of classes, Akida nodes, and power consumption.
+ * model size, input shape, number of classes, Akida nodes, and power
+ * consumption.
  *
  * The information is formatted into data payloads (`data_part`), then wrapped
  * into transmission frames (`frame`) following the defined protocol format:
@@ -558,7 +519,7 @@ static void app_info(void) {
 
   /* Frame 2: MF-MID - model_name */
   data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APP_INFO,
-                      model_name);
+                      kws_meta.model_name);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
@@ -570,7 +531,7 @@ static void app_info(void) {
   }
   frame_index++;
 
-    /* Frame 3: MF-MID - model_version */
+  /* Frame 3: MF-MID - model_version */
   data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APP_INFO,
                       model_version);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
@@ -585,6 +546,7 @@ static void app_info(void) {
   frame_index++;
 
   /* Frame 4: MF-MID - model_size */
+  uint32_t model_size = kws_meta.info_data_len + kws_data_meta.data_length;
   data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
                       model_size);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
@@ -598,9 +560,10 @@ static void app_info(void) {
   }
   frame_index++;
 
-    /* Frame 5: MF-MID - input_shape */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%d.%d.%d,\r", CMD_APP_INFO,
-                      input_shape[0],input_shape[1],input_shape[2]);
+  /* Frame 5: MF-MID - input_shape */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%d.%d.%d,\r",
+                      CMD_APP_INFO, kws_meta.input_shape[0],
+                      kws_meta.input_shape[1], kws_meta.input_shape[2]);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
@@ -611,10 +574,9 @@ static void app_info(void) {
     return;
   }
   frame_index++;
-
   /* Frame 6: MF-MID - no_of_class */
   data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
-                      no_of_class);
+                      g_num_classes);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
@@ -626,7 +588,7 @@ static void app_info(void) {
   }
   frame_index++;
 
-    /* Frame 7: MF-MID - akd_nodes */
+  /* Frame 7: MF-MID - akd_nodes */
   data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
                       akd_nodes);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
