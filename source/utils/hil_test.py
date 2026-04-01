@@ -3,7 +3,7 @@ import time
 import sys
 import argparse
 import subprocess
-
+import re
 
 def reset_board():
     print("::group::Reset Board")
@@ -187,16 +187,55 @@ def test_akida_full_erase(ser, timeout):
 # TESTCASE 5
 # WDT
 # -----------------------------
+
+def get_wdt_count(ser, timeout):
+
+    ser.write(b"wdt_count\n")
+
+    start = time.time()
+
+    while time.time() - start < timeout:
+        line = ser.readline().decode(errors="ignore").strip()
+
+        if "Watchdog Reset Count" in line:
+            print("LOG:", line)
+
+            match = re.search(r'(\d+)', line)
+            if match:
+                return int(match.group(1))
+
+    return None
+
+
 def test_wdt(ser, timeout):
 
     print("::group::TESTCASE 5 - WDT DISABLE")
 
-    command = "wdt_disable\n"
-    ser.write(command.encode())
+    prev_count = get_wdt_count(ser, timeout)
 
-    line = wait_for_log(ser, "booting nrf connect sdk", timeout)
+    if prev_count is None:
+        print("Failed to read initial WDT count")
+        print("TESTCASE 5 FAILED")
+        print("::endgroup::")
+        return False
 
-    if line:
+    print(f"Initial WDT Count: {prev_count}")
+
+    ser.write(b"wdt_disable\n")
+
+    time.sleep(10)
+
+    new_count = get_wdt_count(ser, timeout)
+
+    if new_count is None:
+        print("Failed to read new WDT count")
+        print("TESTCASE 5 FAILED")
+        print("::endgroup::")
+        return False
+
+    print(f"New WDT Count: {new_count}")
+
+    if new_count > prev_count:
         print("TESTCASE 5 PASSED")
         print("::endgroup::")
         return True
@@ -338,8 +377,8 @@ def run_tests(port, baudrate, timeout, only_infer):
         return 1
 
     time.sleep(2)
-    # if not test_wdt(ser, timeout):
-    #     return 1
+    if not test_wdt(ser, timeout):
+        return 1
 
     if not test_dmic(ser, timeout):
         return 1

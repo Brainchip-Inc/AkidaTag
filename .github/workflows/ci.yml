@@ -13,12 +13,10 @@ jobs:
 
       - name: Generate Signing Key
         run: |
-          chmod +x scripts/run.sh
           ./scripts/run.sh -d --key
 
       - name: Transfer Model
         run: |
-          chmod +x scripts/run.sh
           ./scripts/run.sh -d \
           --model_transfer "https://drive.usercontent.google.com/download?id=19iPANlklDn_OAmPVgurPpCCfZnxyNkaf&export=download&authuser=0" \
           --model_name kws \
@@ -26,7 +24,6 @@ jobs:
           --map_mode 1
       - name: Build and Flash
         run: |
-          chmod +x scripts/run.sh
           ./scripts/run.sh -d -b -f --dk --app demo_apps
 
       - name: Run CLI Test
@@ -35,8 +32,7 @@ jobs:
       
       - name: Upload Model
         run: |
-          chmod +x scripts/run.sh
-          ./scripts/run.sh --send_ble \
+          /home/demo/.conda/envs/spark/bin/python source/utils/send_model_via_ble.py \
           --info source/external/model_files/kws/kws_program_info.bin \
           --bin source/external/model_files/kws/kws_program_data.bin \
           --yaml source/external/model_files/kws/info.yaml

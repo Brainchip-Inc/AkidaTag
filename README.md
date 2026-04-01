@@ -86,15 +86,39 @@ Verifies the flash erase result:
 
 ------------------------------------------------------------------------
 
-## Testcase 5 --- Watchdog Disable
+## Testcase 5 — Watchdog Disable
 
-Sends the CLI command:
+This test checks whether disabling the watchdog causes a reboot and increases the watchdog reset count.
 
-    wdt_disable
+### Steps
 
-The device reboots and the script verifies the boot message:
+1. Send the CLI command:
+   `wdt_count`
+2. Read the current value:
+   `Watchdog Reset Count: <value>`
+3. Store this as the **initial count**.
+4. Send the command:
+   `wdt_disable`
+5. Wait **10 seconds** for the device to reboot.
+6. Send the command again:
+   `wdt_count`
+7. Read the **new watchdog count**.
 
-    Booting nRF Connect SDK
+### Pass Condition
+
+The test passes if:
+
+`new_wdt_count > previous_wdt_count`
+
+### Fail Condition
+
+The test fails if:
+
+- The watchdog count cannot be read.
+- The new count is **not greater** than the previous count.
+
+### Example Output
+
 
 ------------------------------------------------------------------------
 
@@ -151,8 +175,7 @@ The script verifies that the output contains:
 ## Full Hardware Test
 
 Runs **Testcases 1--7**.
-
-    python source/utils/hil_test.py --port /dev/ttyUSB0
+    ./scripts/run.sh -d -t (python source/utils/hil_test.py --port /dev/ttyUSB0)
 
 ------------------------------------------------------------------------
 
@@ -161,7 +184,7 @@ Runs **Testcases 1--7**.
 Runs **Testcase 8 only** (typically executed after the model is
 uploaded).
 
-    python source/utils/hil_test.py --port /dev/ttyUSB0 --only-infer
+    ./scripts/run.sh -d -t --infer-test (python source/utils/hil_test.py --port /dev/ttyUSB0 --only-infer)
 
 ------------------------------------------------------------------------
 
