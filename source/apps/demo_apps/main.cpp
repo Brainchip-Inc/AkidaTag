@@ -724,7 +724,8 @@ static void read_learn_weights_from_flash(void) {
           (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
       /* if CRC is failed then user to do re-learning*/
       if (crc32 != saved_learn_weights_ptr->crc) {
-        printk("CRC check failed, %d bytes read from flash and there is an "
+        printk("learn weights CRC check failed, %d bytes read from flash and "
+               "there is an "
                "error in reading "
                "learning data, user need to perform learning again \r\n",
                ret);
@@ -744,7 +745,8 @@ static void read_learn_weights_from_flash(void) {
       reset_saved_weights();
     }
   } else {
-    printk("read_learn_weights_from_flash: file open failed \n");
+    printk("read_learn_weights_from_flash: saved learn weights file open "
+           "failed \n");
   }
 }
 
