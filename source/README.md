@@ -346,6 +346,15 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
 
      │                           │                           │
      ├───Connect & Pair──────────┼────────────────────────────►│
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_APP"              │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Prepare application info
+     │                           │                           │
+     │◄──Receive Response────────┼───────────────────────────┤
+     │ "app_name,description,    │                           │    
+     |      app_size,            │                           |
+     │                           │                           │
      │                           │                           │
      ├───Send Command───────────┼────────────────────────────►│
      │    "CMD_BATTERY"          │                           │
@@ -364,6 +373,26 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │◄──Receive Response────────┼───────────────────────────┤
      │    "DEVICE:AKIDA,TYPE,    │                           │
      │           5.3,1.2.3"      │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_APP_INFO"         │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Prepare application info
+     │                           │                           │ 
+     │                           │                           │
+     │◄──Receive Response────────┼───────────────────────────┤
+     │    "DEVICE:Processor,     │                           │
+     │         Type,             │                           │
+     │         Version,          │                           │
+     │        Processor_Detail,  │                           │
+     │         Model_Name,       │                           │
+     │         Model_Version,    │                           │
+     │         Model_Size,       |                           │
+     │         Input_Shape,      │                           │
+     │         Num_Classes,      │                           │
+     │         Akida_Nodes,      │                           │
+     │         Power_Consumption"│                           │
+     │                           │                           │
      │                           │                           │
 	 ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_START"     │                           │
@@ -400,6 +429,13 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
      │    "STREAM_STOP:ACK"      │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_RESTART"          │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Trigger system reboot
+     │                           │                           │    sys_reboot()
+     │                           │                           │
 
 3. How It Works
 
@@ -469,6 +505,8 @@ This flashes both mcuboot and demo_apps application together
 ./scripts/run.sh -d -r
 ```
 
+### Device ID Display via UART CLI
+A CLI command is provided to display the unique Device ID of the SoC via the UART console. The device ID is read from the FICR registers and printed through the shell interface.
 
 ### FOTA over BLE using nRF Connect Mobile App
 - Copy the updated application image `zephyr.signed.bin` to your mobile device.
@@ -746,6 +784,7 @@ Use the following commands on the console:
 | `dmic_start` | Starts the dmic. |
 | `threads_stop` | Terminate all running threads for testing the WDT. |
 | `wdt_disable` | System crash for watchdog validation. |
+| `device_id` | Print device ID |
 
 __Inference mode__
  -  Default mode, in this mode it captures live audio data and shows the inferred class id.
