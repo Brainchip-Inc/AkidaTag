@@ -929,7 +929,12 @@ int main(void) {
   }
 
   init_boot_count();
-
+  cli_worker_tid = k_thread_create(
+      &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
+      cli_worker_proc_thread, NULL, NULL, NULL, CLI_WORKER_PRIORITY, K_USER,
+      K_FOREVER // START SUSPENDED
+  );
+  k_thread_start(cli_worker_tid);
   /* Load model metadata from LittleFS (written there by a previous BLE upload).
    * The metadata contains the flash address and program_info binary so we do
    * not need to rely on compile-time flash_offsets[] or hardcoded program_info
@@ -1029,13 +1034,6 @@ int main(void) {
   printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
   printk("NRF_CLOCK_S->HFCLKCTRL: %d\n", NRF_CLOCK_S->HFCLKCTRL);
-
-  cli_worker_tid = k_thread_create(
-      &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
-      cli_worker_proc_thread, NULL, NULL, NULL, CLI_WORKER_PRIORITY, K_USER,
-      K_FOREVER // START SUSPENDED
-  );
-  k_thread_start(cli_worker_tid);
 
   return 0;
 }
