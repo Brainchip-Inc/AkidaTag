@@ -892,6 +892,9 @@ int main(void) {
   print_image_version(FLASH_AREA_ID(image_0), "App Core");
 
   /*print_image_version(FLASH_AREA_ID(image_1), "Net Core");*/
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+  watchdog_init(&wdt, &wdt_channel_id);
+#endif
 
   uart_init();
   start_led_ind();
@@ -1015,10 +1018,6 @@ int main(void) {
          kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
   start_imu_proc();
-#endif
-
-#if IS_ENABLED(CONFIG_WDT_ENABLE)
-  watchdog_init(&wdt, &wdt_channel_id);
 #endif
 
 #if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
