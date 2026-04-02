@@ -902,6 +902,7 @@ int main(void) {
   shared_buf_init();
   file_transfer_init();
   ble_init();
+  init_akd_object();
   akida_spiflash_init();
 
   /* Get the SPI NOR flash device defined in the device tree (node label:
