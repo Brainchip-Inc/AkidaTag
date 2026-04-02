@@ -333,6 +333,10 @@ int32_t *akida_output;
 uint32_t akd_op_size = 0;
 static uint8_t is_el_model = 0;
 
+/*Metadata of the loaded model used for app_info reporting*/
+model_meta_t kws_meta;
+model_data_meta_t kws_data_meta;
+
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 /* IMU thread variables*/
 K_THREAD_STACK_DEFINE(imu_stack, IMU_STACK_SIZE);
@@ -933,8 +937,6 @@ int main(void) {
    *   5. Reload full meta + program_info into sram_upload_buffer.
    *   6. Program Akida.
    */
-  model_meta_t kws_meta;
-  model_data_meta_t kws_data_meta;
 
   /* Step 1: read header struct only to get flash_address */
   int hdr_ret = file_transfer_read_meta_hdr_only(0, &kws_meta);
@@ -952,6 +954,7 @@ int main(void) {
     return -1;
   }
   printk("Model name: stored='%s', \n", kws_meta.model_name);
+  /* Step 3: Copy to model_name */
   /* Step 2&4: load data meta and validate flash contents */
   int dm_ret = file_transfer_load_data_meta(0, &kws_data_meta);
   if (dm_ret == 0) {
@@ -1007,6 +1010,8 @@ int main(void) {
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
 
+  printk("data to check : model_size %d, class %d \n",
+         kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
   start_imu_proc();
 #endif
@@ -1183,6 +1188,11 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
           printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
                  confidence * 100.0f, score, inf_time, dma_time);
         }
+        if (is_ble_connected()) {
+          send_event(CMD_DEPLOY_START, kws_new_tags[found],
+                     confidence * 100.0f);
+        }
+
         // Clear history so next word starts fresh
         memset(class_history, -1, sizeof(class_history));
         history_idx = 0;

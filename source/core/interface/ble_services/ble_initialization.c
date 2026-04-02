@@ -1,8 +1,12 @@
 
 #include "ble_services/ble_initialization.h"
 #include "led_init.h"
+#include <hal/nrf_ficr.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(ble_initilaization, CONFIG_LOG_DEFAULT_LEVEL);
+#include <zephyr/shell/shell.h>
+#include <zephyr/sys/reboot.h>
+
+LOG_MODULE_REGISTER(ble_initialization, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
@@ -33,6 +37,7 @@ LOG_MODULE_REGISTER(ble_initilaization, CONFIG_LOG_DEFAULT_LEVEL);
 #define FRAME_MF_MID 2   // Multi-frame middle
 #define FRAME_MF_LAST 3  // Multi-frame last
 #define FRAME_BUFFER_SIZE 128
+#define MTU_FRAME_BUFFER_SIZE 244
 #define DATA_PART_SIZE 96
 #define SEND_FRAME_TIMEOUT_MS 100
 #define MAX_NUS_RX_BUFFER_SIZE 245
@@ -58,38 +63,24 @@ static const char device_type[] = "TYPE";
 static const char device_version[] = "5.3";
 static const char device_firmware[] = "1.2.3";
 
-/**
- * Enumeration of supported BLE commands.
- * Used to identify and handle commands received from the mobile application.
- */
-typedef enum {
-  CMD_BATTERY = 0,
-  CMD_DEVICE_INFO = 1,
-  CMD_APPS = 2,
-  CMD_UNINSTALL = 7,
-  CMD_RESET = 8,
-  CMD_DEPLOY_START = 9,
-  CMD_STREAM_START = 10,
-  CMD_DEPLOY_STOP = 11,
-  CMD_STREAM_STOP = 12,
-} command_type_t;
+static const char app_name[] = "Keyword Spotting";
+char description[244] =
+    "Voice-activated wake word detection using microphone input";
+uint16_t app_size = 128;
 
-/* Structure representing a parsed command frame received from the host */
-typedef struct {
-  uint8_t frame_type;
-  uint8_t index;
-  uint8_t size;
-  uint8_t command;
-} parsed_frame_t;
+char processor[] = "AKIDA_1500";
+char model_version[] = "v1.1.0";
+static uint16_t akd_nodes = 8;
+float pwr_con = 2.3f;
 
 /* Flag indicating whether deployment mode is active.
  * Set when CMD_DEPLOY_START is received and cleared on CMD_DEPLOY_STOP.
  */
-uint8_t event_flag = false;
+uint8_t event_flag = FLAG_DISABLE;
 /* Flag indicating whether PDM audio streaming is enabled.
  * Used to control real-time audio data transmission to the phone.
  */
-uint8_t pdm_stream_flag = false;
+uint8_t pdm_stream_flag = FLAG_DISABLE;
 /*==================== ADVERTISING DATA ====================
  * Manufacturer data is encoded in ASCII (hex values of characters)
  * instead of raw numeric values. This allows the mobile phone BLE application
@@ -120,6 +111,12 @@ static const uint8_t adv_manufacturer_data[] = {
     0x30, // (decimal) 48 = ASCII '0'
     0x30, // (decimal) 48 = ASCII '0'
 };
+
+/* Stores the unique 64-bit hardware device ID read from the MCU.
+ * Used to uniquely identify the device during runtime or communication.
+ */
+static device_id_128_t device_id;
+
 /* BLE advertising data including flags, device name, and manufacturer-specific
  * data */
 static const struct bt_data ad[] = {
@@ -128,9 +125,9 @@ static const struct bt_data ad[] = {
     BT_DATA(BT_DATA_MANUFACTURER_DATA, adv_manufacturer_data,
             sizeof(adv_manufacturer_data)),
 };
-/* BLE scan response data containing the 128-bit UUID of the custom service */
+/* BLE scan response data containing the 128-bit UUID of the Device ID */
 static const struct bt_data sd[] = {
-    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_LBS_VAL),
+    BT_DATA(BT_DATA_UUID128_ALL, &device_id, sizeof(device_id)),
 };
 
 /**
@@ -269,7 +266,7 @@ static void send_device_info_response(void) {
   err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return err;
+    return;
   }
   frame_index++;
 
@@ -283,7 +280,7 @@ static void send_device_info_response(void) {
   err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return err;
+    return;
   }
   frame_index++;
 
@@ -297,7 +294,7 @@ static void send_device_info_response(void) {
   err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return err;
+    return;
   }
   frame_index++;
 
@@ -311,7 +308,7 @@ static void send_device_info_response(void) {
   err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return err;
+    return;
   }
 }
 /**
@@ -338,22 +335,25 @@ void send_pdm_data(uint32_t data) {
 }
 
 /**
- * @brief Send KWS detection event to phone
+ * @brief Send a command event frame over the communication channel.
  *
- * Notifies phone when a keyword is detected with confidence score.
+ * Constructs a framed message with the given command ID, label, and numeric
+ * value, then transmits it via send_frame().
  *
- * @param word Detected keyword string (e.g., "hello", "stop")
- * @param strength Confidence percentage (0-100)
+ * Format: "<FRAME_SINGLE>,<seq>,<data_len>,<cmd>:<label>,<value>\r"
+ * Example: "1,0,12,11:cat,0.91\r"
+ *
+ * @param cmd     Command ID to embed in the data part (e.g. CMD_DEPLOY_START).
+ * @param label   Null-terminated string label (e.g. keyword, class name).
+ * @param value   Numeric confidence or strength value (0.0 – 1.0 typical).
  */
-void send_kws_event(const char *word, uint8_t strength) {
+void send_event(int cmd, const char *label, float value) {
 
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
 
-  /* Format: CMD_KWS_EVENT:<word>,<strength>\r
-   * Example: "11:cat,91\r" */
-  snprintf(data_part, sizeof(data_part), "%d:%s,%d\r", CMD_DEPLOY_START, word,
-           strength);
+  /* Format data part: CMD:<label>,<value>\r */
+  snprintf(data_part, sizeof(data_part), "%d:%s,%.2f\r", cmd, label, value);
   int data_len = strlen(data_part);
 
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
@@ -361,10 +361,9 @@ void send_kws_event(const char *word, uint8_t strength) {
 
   int err = send_frame(frame);
   if (err) {
-    LOG_ERR("Failed to send KWS event (err=%d)", err);
+    LOG_ERR("Failed to send event (cmd=%d label=%s err=%d)", cmd, label, err);
   } else {
-    LOG_INF("KWS Event: word=\"%s\" strength=%d%%", word, strength);
-    LOG_INF("KWS event sent successfully");
+    LOG_INF("Event sent: cmd=%d label=\"%s\" value=%.2f", cmd, label, value);
   }
 }
 /**
@@ -397,6 +396,249 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
   }
 }
 /**
+ * @brief Sends application display information over the communication
+ * interface.
+ *
+ * This function prepares and sends formatted frames containing application
+ * display metadata such as application name, description, and application size.
+ *
+ * The information is formatted into data payloads (`data_part`), then wrapped
+ * into transmission frames (`frame`) following the defined protocol format:
+ *
+ *     FRAME_TYPE,FRAME_INDEX,DATA_LENGTH,DATA
+ *
+ * Frames are transmitted sequentially using the `send_frame()` function.
+ *
+ * Frame Structure:
+ * - Frame 1: MF-START - Application name
+ * - Frame 2: MF-MID  - Application description
+ * - Frame 3: MF-LAST - Application size
+ *
+ * @note All application information values are retrieved from the info.yaml
+ *       configuration at runtime.
+ *
+ * @retval None
+ */
+static void app_display(void) {
+  char frame[FRAME_BUFFER_SIZE];
+  char data_part[DATA_PART_SIZE];
+  int err;
+  uint8_t frame_index = 0;
+
+  LOG_INF("SENDING DEVICE INFO (MULTI)      \n");
+
+  /* Frame 1: MF-START - app_name */
+  int data_len =
+      snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS, app_name);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_START, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 2: MF-MID - description */
+  data_len =
+      snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS, description);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 3: MF-LAST - app_size */
+  data_len =
+      snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APPS, app_size);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_LAST, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+}
+/**
+ * @brief Sends application information over the communication interface.
+ *
+ * This function prepares and sends formatted frames containing device and
+ * application metadata such as processor type, model name, model version,
+ * model size, input shape, number of classes, Akida nodes, and power
+ * consumption.
+ *
+ * The information is formatted into data payloads (`data_part`), then wrapped
+ * into transmission frames (`frame`) following the defined protocol format:
+ *
+ *     FRAME_TYPE,FRAME_INDEX,DATA_LENGTH,DATA
+ *
+ * Frames are transmitted sequentially using the `send_frame()` function.
+ *
+ * Frame Structure:
+ * - Frame 1: MF-START - Processor information
+ * - Frames 2-7: MF-MID - Model metadata (name, version, size, input shape,
+ *                         classes, Akida nodes)
+ * - Frame 8: MF-LAST - Power consumption
+ *
+ * @note All application information values are retrieved from the info.yaml
+ *       configuration at runtime.
+ *
+ * @retval None
+ */
+static void app_info(void) {
+
+  char frame[FRAME_BUFFER_SIZE];
+  char data_part[DATA_PART_SIZE];
+  int err;
+  uint8_t frame_index = 0;
+
+  LOG_INF("SENDING DEVICE INFO (MULTI)      \n");
+
+  /* Frame 1: MF-START - processor */
+  int data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r",
+                          CMD_APP_INFO, processor);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_START, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 2: MF-MID - model_name */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APP_INFO,
+                      kws_meta.model_name);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 3: MF-MID - model_version */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APP_INFO,
+                      model_version);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 4: MF-MID - model_size */
+  uint32_t model_size = kws_meta.info_data_len + kws_data_meta.data_length;
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
+                      model_size);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 5: MF-MID - input_shape */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%d.%d.%d,\r",
+                      CMD_APP_INFO, kws_meta.input_shape[0],
+                      kws_meta.input_shape[1], kws_meta.input_shape[2]);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+  /* Frame 6: MF-MID - no_of_class */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
+                      g_num_classes);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 7: MF-MID - akd_nodes */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
+                      akd_nodes);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 8: MF-LAST - pwr_con */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%.2f,\r", CMD_APP_INFO,
+                      pwr_con);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_LAST, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+}
+
+/* Performs a software-triggered cold reboot of the device.
+ * This resets the system and restarts firmware execution from boot.
+ */
+static void restart_device(void) { sys_reboot(SYS_REBOOT_COLD); }
+
+/**
+ * @brief Retrieve device ID from FICR.
+ *
+ * Reads the hardware DEVICEID registers and combines them into a
+ * 128-bit structure. The 64-bit device identifier is stored in the
+ * high field, while the low field is set to 0.
+ *
+ * @return uint128_t Device identifier.
+ */
+static void get_device_id(void) {
+  uint32_t id0 = NRF_FICR->INFO.DEVICEID[0];
+  uint32_t id1 = NRF_FICR->INFO.DEVICEID[1];
+
+  device_id.high = ((uint64_t)id1 << 32) | id0;
+  device_id.low = 0;
+}
+
+/**
  * @brief Callback when data is received via NUS
  *
  * Parses the received frame and executes the appropriate command.
@@ -428,6 +670,10 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
 
   /* Handle based on command type */
   switch (frame.command) {
+  case CMD_APPS:
+    LOG_INF("APPS command received\n");
+    app_display();
+    break;
   case CMD_BATTERY:
     LOG_INF("BATTERY command received\n");
     send_battery_response();
@@ -437,23 +683,34 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
     LOG_INF("DEVICE_INFO command received\n");
     send_device_info_response();
     break;
+  case CMD_APP_INFO:
+    LOG_INF("APP INFO command received\n");
+    app_info();
+    break;
   case CMD_DEPLOY_START:
     LOG_INF("DEPLOY START command received\n");
-    event_flag = true;
+    event_flag = FLAG_ENABLE;
     break;
   case CMD_STREAM_START:
     LOG_INF("STREAM START command received\n");
-    pdm_stream_flag = true;
+    pdm_stream_flag = FLAG_ENABLE;
     break;
   case CMD_DEPLOY_STOP:
     LOG_INF("DEPLOY STOP command received\n");
-    event_flag = false;
+    event_flag = FLAG_DISABLE;
     send_ack(ACK_DONE, CMD_DEPLOY_STOP);
     break;
   case CMD_STREAM_STOP:
     LOG_INF("STREAM STOP command received\n");
-    pdm_stream_flag = false;
+    pdm_stream_flag = FLAG_DISABLE;
     send_ack(ACK_DONE, CMD_STREAM_STOP);
+    break;
+  case CMD_RESET:
+    LOG_INF("RESET command received\n");
+    send_ack(ACK_DONE, CMD_RESET);
+    /* Delay to ensure ACK is transmitted over BLE */
+    k_sleep(K_MSEC(200));
+    restart_device();
     break;
   default:
     LOG_INF("Command %d not implemented\n", frame.command);
@@ -697,6 +954,7 @@ int ble_init(void)
     return -1;
   }
 #endif
+  get_device_id();
   err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
   if (err) {
     LOG_ERR("Advertising failed to start (err %d)\n", err);
@@ -713,3 +971,17 @@ void prcess_led(void) {
 #endif
   k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 }
+
+static int cmd_get_device_id(const struct shell *shell, size_t argc,
+                             char **argv) {
+  ARG_UNUSED(argc);
+  ARG_UNUSED(argv);
+
+  get_device_id();
+
+  shell_print(shell, "Device ID: 0x%016llx%016llx", device_id.high,
+              device_id.low);
+
+  return 0;
+}
+SHELL_CMD_REGISTER(device_id, NULL, "Print device ID", cmd_get_device_id);
