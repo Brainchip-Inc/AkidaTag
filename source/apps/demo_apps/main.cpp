@@ -154,11 +154,11 @@ static void reset_kws_spectrogram(void);
 #endif
 #ifdef CONFIG_SPARK_BOARD
 /* ---------- Control GPIOs ---------- */
-#define AKD_ENB_NODE     DT_NODELABEL(akd_enb)
-#define ACC_ENB_NODE     DT_NODELABEL(acc_enb)
-#define PDM_ENB_NODE     DT_NODELABEL(pdm_enb)
-#define AKD_0V_ENB_NODE  DT_NODELABEL(akd_0v_enb)
-#define CAM_ENB_NODE  DT_NODELABEL(cam_enb)
+#define AKD_ENB_NODE DT_NODELABEL(akd_enb)
+#define ACC_ENB_NODE DT_NODELABEL(acc_enb)
+#define PDM_ENB_NODE DT_NODELABEL(pdm_enb)
+#define AKD_0V_ENB_NODE DT_NODELABEL(akd_0v_enb)
+#define CAM_ENB_NODE DT_NODELABEL(cam_enb)
 
 static const struct gpio_dt_spec enable_akd =
     GPIO_DT_SPEC_GET(AKD_ENB_NODE, gpios);
@@ -171,7 +171,7 @@ static const struct gpio_dt_spec enable_pdm =
 
 static const struct gpio_dt_spec enable_akd_0V =
     GPIO_DT_SPEC_GET(AKD_0V_ENB_NODE, gpios);
-  
+
 static const struct gpio_dt_spec enable_camera =
     GPIO_DT_SPEC_GET(CAM_ENB_NODE, gpios);
 /* ---------- Buttons ---------- */
@@ -183,11 +183,9 @@ static const struct gpio_dt_spec user_btn =
 static struct gpio_callback user_cb;
 
 /* ---------- Button Callbacks ---------- */
-void user_pressed(const struct device *dev,
-                  struct gpio_callback *cb,
-                  uint32_t pins)
-{
-    printf("User button pressed\n");
+void user_pressed(const struct device *dev, struct gpio_callback *cb,
+                  uint32_t pins) {
+  printf("User button pressed\n");
 }
 #endif
 static struct kws_demo_params {
@@ -937,90 +935,89 @@ static void update_model_params(model_meta_t kws_meta) {
  * @return -ENODEV if any GPIO device is not ready
  * @return negative errno on configuration failure
  */
-static int gpio_init(void)
-{
-    int err;
+static int gpio_init(void) {
+  int err;
 
-    /* --- Check GPIO readiness --- */
-    if (!gpio_is_ready_dt(&enable_akd)) {
-        printf("AKD enable GPIO not ready\n");
-        return -ENODEV;
-    }
-    if (!gpio_is_ready_dt(&enable_acc)) {
-        printf("ACC enable GPIO not ready\n");
-        return -ENODEV;
-    }
-    if (!gpio_is_ready_dt(&enable_pdm)) {
-        printf("PDM enable GPIO not ready\n");
-        return -ENODEV;
-    }
-    if (!gpio_is_ready_dt(&enable_akd_0V)) {
-        printf("AKD 0V enable GPIO not ready\n");
-        return -ENODEV;
-    }
-    if (!gpio_is_ready_dt(&enable_camera)) {
-        printk("Camera enable GPIO not ready\n");
-        return -ENODEV;
-    }
-    if (!gpio_is_ready_dt(&user_btn)) {
-        printf("User button GPIO not ready\n");
-        return -ENODEV;
-    }
+  /* --- Check GPIO readiness --- */
+  if (!gpio_is_ready_dt(&enable_akd)) {
+    printf("AKD enable GPIO not ready\n");
+    return -ENODEV;
+  }
+  if (!gpio_is_ready_dt(&enable_acc)) {
+    printf("ACC enable GPIO not ready\n");
+    return -ENODEV;
+  }
+  if (!gpio_is_ready_dt(&enable_pdm)) {
+    printf("PDM enable GPIO not ready\n");
+    return -ENODEV;
+  }
+  if (!gpio_is_ready_dt(&enable_akd_0V)) {
+    printf("AKD 0V enable GPIO not ready\n");
+    return -ENODEV;
+  }
+  if (!gpio_is_ready_dt(&enable_camera)) {
+    printk("Camera enable GPIO not ready\n");
+    return -ENODEV;
+  }
+  if (!gpio_is_ready_dt(&user_btn)) {
+    printf("User button GPIO not ready\n");
+    return -ENODEV;
+  }
 
-    /* --- Configure control pins as output inactive --- */
-    err = gpio_pin_configure_dt(&enable_akd, GPIO_OUTPUT_INACTIVE);
-    if (err) {
-        printf("Failed to configure AKD enable pin (err %d)\n", err);
-        return err;
-    }
+  /* --- Configure control pins as output inactive --- */
+  err = gpio_pin_configure_dt(&enable_akd, GPIO_OUTPUT_INACTIVE);
+  if (err) {
+    printf("Failed to configure AKD enable pin (err %d)\n", err);
+    return err;
+  }
 
-    err = gpio_pin_configure_dt(&enable_acc, GPIO_OUTPUT_INACTIVE);
-    if (err) {
-        printf("Failed to configure ACC enable pin (err %d)\n", err);
-        return err;
-    }
+  err = gpio_pin_configure_dt(&enable_acc, GPIO_OUTPUT_INACTIVE);
+  if (err) {
+    printf("Failed to configure ACC enable pin (err %d)\n", err);
+    return err;
+  }
 
-    err = gpio_pin_configure_dt(&enable_pdm, GPIO_OUTPUT_INACTIVE);
-    if (err) {
-        printf("Failed to configure PDM enable pin (err %d)\n", err);
-        return err;
-    }
+  err = gpio_pin_configure_dt(&enable_pdm, GPIO_OUTPUT_INACTIVE);
+  if (err) {
+    printf("Failed to configure PDM enable pin (err %d)\n", err);
+    return err;
+  }
 
-    err = gpio_pin_configure_dt(&enable_akd_0V, GPIO_OUTPUT_INACTIVE);
-    if (err) {
-        printf("Failed to configure AKD 0V enable pin (err %d)\n", err);
-        return err;
-    }
-    err = gpio_pin_configure_dt(&enable_camera, GPIO_OUTPUT_INACTIVE);
-    if (err) {
-        printk("Failed to configure camera enable pin (err %d)\n", err);
-        return err;
-    }
+  err = gpio_pin_configure_dt(&enable_akd_0V, GPIO_OUTPUT_INACTIVE);
+  if (err) {
+    printf("Failed to configure AKD 0V enable pin (err %d)\n", err);
+    return err;
+  }
+  err = gpio_pin_configure_dt(&enable_camera, GPIO_OUTPUT_INACTIVE);
+  if (err) {
+    printk("Failed to configure camera enable pin (err %d)\n", err);
+    return err;
+  }
 
-    /* --- Configure buttons as input --- */
-    err = gpio_pin_configure_dt(&user_btn, GPIO_INPUT);
-    if (err) {
-        printf("Failed to configure user button (err %d)\n", err);
-        return err;
-    }
+  /* --- Configure buttons as input --- */
+  err = gpio_pin_configure_dt(&user_btn, GPIO_INPUT);
+  if (err) {
+    printf("Failed to configure user button (err %d)\n", err);
+    return err;
+  }
 
-    /* --- Configure button interrupts --- */
-    err = gpio_pin_interrupt_configure_dt(&user_btn, GPIO_INT_EDGE_TO_ACTIVE);
-    if (err) {
-        printf("Failed to configure user button interrupt (err %d)\n", err);
-        return err;
-    }
+  /* --- Configure button interrupts --- */
+  err = gpio_pin_interrupt_configure_dt(&user_btn, GPIO_INT_EDGE_TO_ACTIVE);
+  if (err) {
+    printf("Failed to configure user button interrupt (err %d)\n", err);
+    return err;
+  }
 
-    /* --- Register button callbacks --- */
-    gpio_init_callback(&user_cb, user_pressed, BIT(user_btn.pin));
-    err = gpio_add_callback(user_btn.port, &user_cb);
-    if (err) {
-        printf("Failed to add user button callback (err %d)\n", err);
-        return err;
-    }
+  /* --- Register button callbacks --- */
+  gpio_init_callback(&user_cb, user_pressed, BIT(user_btn.pin));
+  err = gpio_add_callback(user_btn.port, &user_cb);
+  if (err) {
+    printf("Failed to add user button callback (err %d)\n", err);
+    return err;
+  }
 
-    printf("GPIO + Buttons initialized\n");
-    return 0;
+  printf("GPIO + Buttons initialized\n");
+  return 0;
 }
 /**
  * @brief Enable power for onboard sensors and peripherals on the Spark board.
@@ -1035,18 +1032,17 @@ static int gpio_init(void)
  * 4. Enable PDM microphone
  * 5. Enable camera module
  */
-static void spark_peripherals_power_enable(void)
-{
-    gpio_pin_set_dt(&enable_akd_0V, GPIO_ENABLE);
-    k_msleep(2);   /* 0V rail settle time */
-    gpio_pin_set_dt(&enable_akd, GPIO_ENABLE);
-    k_msleep(2);    /* AKD1500 power-up time */
-    gpio_pin_set_dt(&enable_acc, GPIO_ENABLE);
-    k_msleep(2); 
-    gpio_pin_set_dt(&enable_pdm, GPIO_ENABLE);
-    k_msleep(2); 
-    gpio_pin_set_dt(&enable_camera, GPIO_ENABLE);
-    k_msleep(2); 
+static void spark_peripherals_power_enable(void) {
+  gpio_pin_set_dt(&enable_akd_0V, GPIO_ENABLE);
+  k_msleep(2); /* 0V rail settle time */
+  gpio_pin_set_dt(&enable_akd, GPIO_ENABLE);
+  k_msleep(2); /* AKD1500 power-up time */
+  gpio_pin_set_dt(&enable_acc, GPIO_ENABLE);
+  k_msleep(2);
+  gpio_pin_set_dt(&enable_pdm, GPIO_ENABLE);
+  k_msleep(2);
+  gpio_pin_set_dt(&enable_camera, GPIO_ENABLE);
+  k_msleep(2);
 }
 #endif
 int main(void) {
@@ -1061,14 +1057,14 @@ int main(void) {
   watchdog_init(&wdt, &wdt_channel_id);
 #endif
 
-  #ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_SPARK_BOARD
   int err_gpio = gpio_init();
   if (err_gpio) {
     printf("GPIO init failed (err %d)\n", err_gpio);
     return -1;
   }
   spark_peripherals_power_enable();
-  #endif
+#endif
   uart_init();
   start_led_ind();
   led_set_state(LED_STATE_NORMAL_APP);
