@@ -1632,7 +1632,7 @@ static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
 }
 
 /* shell cli function to invoke erase function */
-static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
+static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
   printk("cmd exec argc %d\n", argc);
   if (argc > 1) {
     if (argc > 2 && !strcmp(argv[1], "verbose")) {
@@ -1641,7 +1641,7 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
     } else if (!strcmp(argv[1], "stop")) {
       cur_kws_edge_state = STATE_STOPPED;
       audio_processor_stop();
-    } else if (!strcmp(argv[1], "evt")) {
+    } else if (!strcmp(argv[1], "el")) {
       if (argc > 2) {
         printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
         if (is_el_model == 0) {
@@ -1688,37 +1688,37 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
       metrics_on = atoi(argv[2]);
       printk("metrics_on = %d\n\r", metrics_on);
     } else if (!strcmp(argv[1], "show")) {
-      printk("\n\r=== KWS Parameters (kws_el <cmd> <val>) ===\n\r");
-      printk("  verbose          = %d          [kws_el verbose <0|1|2>]\n\r",
+      printk("\n\r=== App Parameters (app <cmd> <val>) ===\n\r");
+      printk("  verbose          = %d          [app verbose <0|1|2>]\n\r",
              verbose_on);
-      printk("  rms_threshold    = %d          [kws_el rms <val>]\n\r",
+      printk("  rms_threshold    = %d          [app rms <val>]\n\r",
              rms_threshold);
-      printk("  debounce_time    = %u ms       [kws_el debounce <ms>]\n\r",
+      printk("  debounce_time    = %u ms       [app debounce <ms>]\n\r",
              kws_debounce_time);
-      printk("  smoothing_alpha  = %.2f        [kws_el alpha <0.0-1.0>]\n\r",
+      printk("  smoothing_alpha  = %.2f        [app alpha <0.0-1.0>]\n\r",
              smoothing_alpha);
-      printk("  score_threshold  = %.2f        [kws_el score <0.0-1.0>]\n\r",
+      printk("  score_threshold  = %.2f        [app score <0.0-1.0>]\n\r",
              score_threshold);
-      printk("  chiming_threshold= %d          [kws_el chiming <n>]\n\r",
+      printk("  chiming_threshold= %d          [app chiming <n>]\n\r",
              chiming_threshold);
-      printk("  speech_timeout   = %d ms       [kws_el speech <ms>]\n\r",
+      printk("  speech_timeout   = %d ms       [app speech <ms>]\n\r",
              speech_active_time_ms);
-      printk("  metrics          = %d          [kws_el metrics <0|1>]\n\r",
+      printk("  metrics          = %d          [app metrics <0|1>]\n\r",
              metrics_on);
-      printk("=============================================\n\r");
+      printk("=========================================\n\r");
     } else {
-      printk("KWS Commands:\n\r");
-      printk("  kws_el verbose <0|1|2>  (0=off, 1=pipeline, 2=+idle rms)\n\r");
-      printk("  kws_el rms <val>\n\r");
-      printk("  kws_el debounce <ms>\n\r");
-      printk("  kws_el alpha <0.0-1.0>\n\r");
-      printk("  kws_el score <0.0-1.0>\n\r");
-      printk("  kws_el chiming <n>\n\r");
-      printk("  kws_el speech <ms>\n\r");
-      printk("  kws_el metrics <0|1>\n\r");
-      printk("  kws_el show\n\r");
-      printk("  kws_el stop\n\r");
-      printk("  kws_el evt <n>\n\r");
+      printk("App Commands:\n\r");
+      printk("  app verbose <0|1|2>  (0=off, 1=pipeline, 2=+idle rms)\n\r");
+      printk("  app rms <val>\n\r");
+      printk("  app debounce <ms>\n\r");
+      printk("  app alpha <0.0-1.0>\n\r");
+      printk("  app score <0.0-1.0>\n\r");
+      printk("  app chiming <n>\n\r");
+      printk("  app speech <ms>\n\r");
+      printk("  app metrics <0|1>\n\r");
+      printk("  app show\n\r");
+      printk("  app stop\n\r");
+      printk("  app el <n>\n\r");
     }
   }
 
@@ -1790,7 +1790,7 @@ SHELL_CMD_REGISTER(threads_stop, NULL, "Stop all worker threads",
                    cmd_threads_stop);
 #endif
 
-SHELL_CMD_REGISTER(kws_el, NULL, "KWS Edge Learn Support", cmd_kws_el);
+SHELL_CMD_REGISTER(app, NULL, "App Commands", cmd_app);
 
 SHELL_CMD_REGISTER(full_erase, NULL, "Erase flash: erase <size>",
                    cmd_full_erase);
