@@ -1359,7 +1359,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
           printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
                  confidence * 100.0f, score, inf_time, dma_time);
         }
-        if (is_ble_connected()) {
+        if (is_ble_connected() && event_flag) {
           send_event(CMD_DEPLOY_START, kws_new_tags[found],
                      confidence * 100.0f);
         }
