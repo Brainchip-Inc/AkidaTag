@@ -77,7 +77,6 @@ extern "C" {
 
 // Extern variables for audio processor configuration
 extern int rms_threshold;
-extern int g_min_inference_frames;
 extern int speech_active_time_ms;
 
 extern "C" {
@@ -1682,11 +1681,6 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
       if (score_threshold > 1.0f)
         score_threshold = 1.0f;
       printk("score_threshold = %.2f\n\r", score_threshold);
-    } else if (argc > 2 && !strcmp(argv[1], "min_frames")) {
-      g_min_inference_frames = atoi(argv[2]);
-      if (g_min_inference_frames < 1)
-        g_min_inference_frames = 1;
-      printk("g_min_inference_frames = %d\n\r", g_min_inference_frames);
     } else if (argc > 2 && !strcmp(argv[1], "speech")) {
       speech_active_time_ms = atoi(argv[2]);
       printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
@@ -1694,26 +1688,32 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
       metrics_on = atoi(argv[2]);
       printk("metrics_on = %d\n\r", metrics_on);
     } else if (!strcmp(argv[1], "show")) {
-      printk("\n\r=== KWS Parameters ===\n\r");
-      printk("verbose_on = %d\n\r", verbose_on);
-      printk("rms_threshold = %d\n\r", rms_threshold);
-      printk("kws_debounce_time = %u ms\n\r", kws_debounce_time);
-      printk("smoothing_alpha = %.2f\n\r", smoothing_alpha);
-      printk("score_threshold = %.2f\n\r", score_threshold);
-      printk("chiming_threshold = %d\n\r", chiming_threshold);
-      printk("g_min_inference_frames = %d\n\r", g_min_inference_frames);
-      printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
-      printk("metrics_on = %d\n\r", metrics_on);
-      printk("====================\n\r");
+      printk("\n\r=== KWS Parameters (kws_el <cmd> <val>) ===\n\r");
+      printk("  verbose          = %d          [kws_el verbose <0|1|2>]\n\r",
+             verbose_on);
+      printk("  rms_threshold    = %d          [kws_el rms <val>]\n\r",
+             rms_threshold);
+      printk("  debounce_time    = %u ms       [kws_el debounce <ms>]\n\r",
+             kws_debounce_time);
+      printk("  smoothing_alpha  = %.2f        [kws_el alpha <0.0-1.0>]\n\r",
+             smoothing_alpha);
+      printk("  score_threshold  = %.2f        [kws_el score <0.0-1.0>]\n\r",
+             score_threshold);
+      printk("  chiming_threshold= %d          [kws_el chiming <n>]\n\r",
+             chiming_threshold);
+      printk("  speech_timeout   = %d ms       [kws_el speech <ms>]\n\r",
+             speech_active_time_ms);
+      printk("  metrics          = %d          [kws_el metrics <0|1>]\n\r",
+             metrics_on);
+      printk("=============================================\n\r");
     } else {
       printk("KWS Commands:\n\r");
-      printk("  kws_el verbose <0|1>\n\r");
-      printk("  kws_el rms <threshold>\n\r");
+      printk("  kws_el verbose <0|1|2>  (0=off, 1=pipeline, 2=+idle rms)\n\r");
+      printk("  kws_el rms <val>\n\r");
       printk("  kws_el debounce <ms>\n\r");
       printk("  kws_el alpha <0.0-1.0>\n\r");
       printk("  kws_el score <0.0-1.0>\n\r");
       printk("  kws_el chiming <n>\n\r");
-      printk("  kws_el min_frames <n>\n\r");
       printk("  kws_el speech <ms>\n\r");
       printk("  kws_el metrics <0|1>\n\r");
       printk("  kws_el show\n\r");

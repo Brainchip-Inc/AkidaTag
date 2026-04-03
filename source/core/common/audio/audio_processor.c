@@ -22,7 +22,6 @@ int rms_threshold = RMS_THRESHOLD;
 #define SPEECH_IDLE 0
 #define SPEECH_ACTIVE 1
 int speech_active_time_ms = 1300;
-int g_min_inference_frames = 16;
 static atomic_t g_inference_period = 3;
 static int g_frames_since_reset = 0;
 /** Number of channels in audio capture = 1, as it is stereo data */
