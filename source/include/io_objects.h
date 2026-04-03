@@ -20,10 +20,15 @@
 #define EN_SPI_S2M_Msk (0x1UL << EN_SPI_S2M_Pos)
 #define EN_SPI_S2M EN_SPI_S2M_Msk
 
-// Create an instance of ZephyrSpiDriver
+// spi_driver and akd1500 are constructed at startup (before main).
 extern akida::ZephyrSpiDriver spi_driver;
-// Create an instance of Akd1500SpiDriver with predefined memory regions
 extern akida::Akd1500SpiDriver akd1500;
-extern akida::HardwareDeviceImpl akd_device;
+
+// akd_device is constructed in init_akd_object() — valid only after that call.
+extern akida::HardwareDeviceImpl &akd_device;
+
+// Constructs akd_device. Must be called once from main() after akida is powered
+// ON.
+void init_akd_object();
 
 #endif // IO_OBJECTS_H

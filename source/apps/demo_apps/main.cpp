@@ -724,7 +724,8 @@ static void read_learn_weights_from_flash(void) {
           (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
       /* if CRC is failed then user to do re-learning*/
       if (crc32 != saved_learn_weights_ptr->crc) {
-        printk("CRC check failed, %d bytes read from flash and there is an "
+        printk("learn weights CRC check failed, %d bytes read from flash and "
+               "there is an "
                "error in reading "
                "learning data, user need to perform learning again \r\n",
                ret);
@@ -744,7 +745,8 @@ static void read_learn_weights_from_flash(void) {
       reset_saved_weights();
     }
   } else {
-    printk("read_learn_weights_from_flash: file open failed \n");
+    printk("read_learn_weights_from_flash: saved learn weights file open "
+           "failed \n");
   }
 }
 
@@ -892,6 +894,9 @@ int main(void) {
   print_image_version(FLASH_AREA_ID(image_0), "App Core");
 
   /*print_image_version(FLASH_AREA_ID(image_1), "Net Core");*/
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+  watchdog_init(&wdt, &wdt_channel_id);
+#endif
 
   uart_init();
   start_led_ind();
@@ -902,6 +907,7 @@ int main(void) {
   shared_buf_init();
   file_transfer_init();
   ble_init();
+  init_akd_object();
   akida_spiflash_init();
 
   /* Get the SPI NOR flash device defined in the device tree (node label:
@@ -923,7 +929,12 @@ int main(void) {
   }
 
   init_boot_count();
-
+  cli_worker_tid = k_thread_create(
+      &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
+      cli_worker_proc_thread, NULL, NULL, NULL, CLI_WORKER_PRIORITY, K_USER,
+      K_FOREVER // START SUSPENDED
+  );
+  k_thread_start(cli_worker_tid);
   /* Load model metadata from LittleFS (written there by a previous BLE upload).
    * The metadata contains the flash address and program_info binary so we do
    * not need to rely on compile-time flash_offsets[] or hardcoded program_info
@@ -1016,10 +1027,6 @@ int main(void) {
   start_imu_proc();
 #endif
 
-#if IS_ENABLED(CONFIG_WDT_ENABLE)
-  watchdog_init(&wdt, &wdt_channel_id);
-#endif
-
 #if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
   initialize_spi_camera_interface();
 #endif
@@ -1027,13 +1034,6 @@ int main(void) {
   printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
   printk("NRF_CLOCK_S->HFCLKCTRL: %d\n", NRF_CLOCK_S->HFCLKCTRL);
-
-  cli_worker_tid = k_thread_create(
-      &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
-      cli_worker_proc_thread, NULL, NULL, NULL, CLI_WORKER_PRIORITY, K_USER,
-      K_FOREVER // START SUSPENDED
-  );
-  k_thread_start(cli_worker_tid);
 
   return 0;
 }
