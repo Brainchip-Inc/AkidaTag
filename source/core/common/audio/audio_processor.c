@@ -182,7 +182,7 @@ int audio_processor(void) {
 
   if (verbose_on) {
     printk("mfcc: 3 frames computed, buffer %d/%d\n\r",
-           g_frames_since_reset, state->spectrogram_len);
+           state->spectrogram_index, state->spectrogram_len);
   }
 
   ap_counter++;
