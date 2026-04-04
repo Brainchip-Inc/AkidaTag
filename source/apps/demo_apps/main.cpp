@@ -335,6 +335,7 @@ uint32_t g_num_edge_learn_classes = 0;
 uint32_t g_input_size = 0;
 // int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
 int32_t *akida_output;
+float *akida_output_dq;
 uint32_t akd_op_size = 0;
 static uint8_t is_el_model = 0;
 
@@ -396,7 +397,7 @@ float mfcc_fs = 123.56967163085938f;
 // Softmax EMA smoothing and chiming trigger parameters
 #define MAX_KWS_CLASSES 15
 #define SMOOTHING_ALPHA 0.7f
-#define SCORE_THRESHOLD 0.6f
+#define SCORE_THRESHOLD 0.5f
 #define CHIMING_THRESHOLD 3
 
 float smoothing_alpha = SMOOTHING_ALPHA;    // EMA factor (0.0-1.0, higher = less smoothing)
@@ -904,6 +905,8 @@ static void update_model_params(model_meta_t kws_meta) {
 
   delete[] akida_output;
   akida_output = new int32_t[g_num_classes * g_num_neurons_per_class];
+  delete[] akida_output_dq;
+  akida_output_dq = new float[g_num_classes * g_num_neurons_per_class];
   akd_op_size = sizeof(int32_t) * g_num_classes * g_num_neurons_per_class;
 }
 
@@ -1126,8 +1129,9 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     uint64_t start_time = time_ms();
     uint32_t s_dma_cycls = akd_device.read_clock_counter();
 
-    if (SUCCESS == akida_forward(input, input_shape, (uint8_t *)akida_output,
-                                 akd_op_size)) {
+    if (SUCCESS ==
+        akida_forward_dequantized(input, input_shape, akida_output_dq,
+                                  g_num_classes * g_num_neurons_per_class)) {
       uint32_t inf_time = time_ms() - start_time;
       uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
       uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
@@ -1135,44 +1139,35 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         printk("inference: done (cpu=%ums dma=%uus)\n\r", inf_time, dma_time);
       }
 
-      // Step 1: Per-class max neuron pooling
-      int32_t akida_output_l[g_num_classes] = {0};
-      for (int num_cls = 0; num_cls < g_num_classes; num_cls++) {
-        int32_t max_val = INT32_MIN;
-        for (int i = 0; i < g_num_neurons_per_class; i++) {
-          int32_t current_val =
-              akida_output[(num_cls * g_num_neurons_per_class) + i];
-          if (current_val > max_val) {
-            max_val = current_val;
-          }
-        }
-        akida_output_l[num_cls] = max_val;
-      }
-
-      int found = get_inferred_class(akida_output_l, g_num_classes, 1);
-
-      // Step 2: Compute per-class neuron sums for softmax
+      // Step 1: Per-class max pooling from dequantized output
       int num_cls_capped =
           (g_num_classes < MAX_KWS_CLASSES) ? g_num_classes : MAX_KWS_CLASSES;
-      float class_sums[MAX_KWS_CLASSES] = {0};
+      float class_maxes[MAX_KWS_CLASSES];
       for (int c = 0; c < num_cls_capped; c++) {
-        for (int n = 0; n < g_num_neurons_per_class; n++) {
-          class_sums[c] +=
-              (float)akida_output[c * g_num_neurons_per_class + n];
+        float max_val = akida_output_dq[c * g_num_neurons_per_class];
+        for (int n = 1; n < g_num_neurons_per_class; n++) {
+          float val = akida_output_dq[c * g_num_neurons_per_class + n];
+          if (val > max_val) {
+            max_val = val;
+          }
         }
+        class_maxes[c] = max_val;
       }
 
-      // Step 3: Softmax over class sums (with max subtraction for stability)
-      float max_sum = class_sums[0];
+      // Step 2: Softmax over per-class max values (with max subtraction for
+      // stability)
+      float max_logit = class_maxes[0];
+      int found = 0;
       for (int c = 1; c < num_cls_capped; c++) {
-        if (class_sums[c] > max_sum) {
-          max_sum = class_sums[c];
+        if (class_maxes[c] > max_logit) {
+          max_logit = class_maxes[c];
+          found = c;
         }
       }
       float softmax_scores[MAX_KWS_CLASSES] = {0};
       float exp_sum = 0.0f;
       for (int c = 0; c < num_cls_capped; c++) {
-        softmax_scores[c] = expf(class_sums[c] - max_sum);
+        softmax_scores[c] = expf(class_maxes[c] - max_logit);
         exp_sum += softmax_scores[c];
       }
       if (exp_sum > 0.0f) {
@@ -1181,13 +1176,13 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         }
       }
 
-      // Step 4: EMA smoothing of softmax scores
+      // Step 3: EMA smoothing of softmax scores
       for (int c = 0; c < num_cls_capped; c++) {
         smoothed_scores[c] = smoothing_alpha * softmax_scores[c] +
                              (1.0f - smoothing_alpha) * smoothed_scores[c];
       }
 
-      // Step 5: Update chiming counters for keyword classes
+      // Step 4: Update chiming counters for keyword classes
       // (skip silence and unknown classes)
       int triggered_class = -1;
       float triggered_score = 0.0f;
@@ -1220,7 +1215,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                chiming_threshold);
       }
 
-      // Step 6: Trigger if chiming threshold reached
+      // Step 5: Trigger if chiming threshold reached
       if (triggered_class >= 0) {
         if (verbose_on) {
           printk("trigger: keyword=%s chiming=%d/%d\n\r",
@@ -1230,8 +1225,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                  chiming_counters[triggered_class], chiming_threshold);
         }
         current_class = triggered_class;
-        // Use raw softmax as confidence (smoothed score is dampened for gating)
-        float confidence = softmax_scores[triggered_class];
+        float confidence = smoothed_scores[triggered_class];
 
         printk("\nKeyword Detected: %s\n\r",
                (triggered_class < kws_new_tags_count)
@@ -1257,7 +1251,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         last_trigger_time_ms = time_ms();
       }
     } else {
-      printk("akida_forward failure\n");
+      printk("akida_forward_dequantized failure\n");
     }
   }
   return ret;
