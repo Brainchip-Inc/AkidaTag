@@ -179,6 +179,68 @@ static uint32_t mesh_learn_weights_size = 0;
 /** Timestamp of last sample enqueued for learning */
 static uint64_t last_learn_ts = 0;
 
+/*---------------------------------------------------------------------------
+ * Structured Edge Learning - sub-state machine, capture buffer, augmentation
+ *---------------------------------------------------------------------------*/
+
+/** Sub-states within STATE_LEARNING for structured multi-utterance flow */
+typedef enum {
+  LEARN_SUB_WAITING_FOR_SPEECH, /**< Prompting user, waiting for speech */
+  LEARN_SUB_CAPTURING,          /**< Speech detected, accumulating MFCC frames */
+  LEARN_SUB_PROCESSING,         /**< Speech ended, generating augmented samples */
+  LEARN_SUB_COMPLETE            /**< All utterances done */
+} learn_sub_state_t;
+
+#define LEARN_CAPTURE_MAX_FRAMES 80  /**< ~1.6s of MFCC frames */
+#define LEARN_NUM_UTTERANCES 5       /**< User must speak keyword this many times */
+#define LEARN_SILENCE_TIMEOUT_MS 5000 /**< No-speech timeout before re-prompt */
+#define LEARN_SPEECH_END_GAP_MS 500  /**< Gap after last MFCC cb to detect end */
+#define LEARN_SPEECH_ACTIVE_TIME_MS 400 /**< Shorter VAD timeout during learning */
+#define LEARN_MIN_KEYWORD_FRAMES 10  /**< ~200ms minimum utterance */
+#define LEARN_NUM_AUG_TYPES 8        /**< Number of augmentation types to cycle */
+
+typedef struct {
+  learn_sub_state_t sub_state;
+  uint8_t current_utterance;             /**< 0 to LEARN_NUM_UTTERANCES-1 */
+  uint16_t total_fit_calls;              /**< Running total (up to 150) */
+  uint16_t augmentations_per_utterance;  /**< 2 * g_num_neurons_per_class */
+  uint64_t waiting_since_ts;             /**< When we started waiting for speech */
+  uint64_t last_callback_ts;             /**< Last time learning_on_spectrogram fired */
+  float captured_mfcc[LEARN_CAPTURE_MAX_FRAMES][SPECTROGRAM_RES]; /**< ~3.2KB */
+  int capture_write_idx;                 /**< Write index into captured_mfcc */
+  bool speech_detected;
+} structured_learn_state_t;
+
+static structured_learn_state_t learn_state;
+
+/** Saved speech_active_time_ms value to restore when leaving learning mode */
+static int saved_speech_active_time_ms;
+
+/** Spectrogram index at the time of the most recent do_inference() call */
+static int current_spectrogram_index = 0;
+
+/** Simple LCG PRNG for augmentation randomness */
+static uint32_t learn_rng_state;
+static float learn_rand_float(void) {
+  learn_rng_state = learn_rng_state * 1664525u + 1013904223u;
+  return (float)(learn_rng_state & 0xFFFF) / 65535.0f;
+}
+
+static inline uint8_t clamp_uint8(float v) {
+  if (v < 0.0f) return 0;
+  if (v > 255.0f) return 255;
+  return (uint8_t)v;
+}
+
+/** Work items for structured learning */
+static struct k_work_delayable learn_speech_end_work;
+static struct k_work learn_process_work;
+
+/** Forward declarations for structured learning */
+static void learn_speech_end_handler(struct k_work *work);
+static void learn_process_handler(struct k_work *work);
+static void complete_structured_learning(void);
+
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 /** Handle for the watchdog device  */
 static const struct device *wdt;
@@ -300,7 +362,7 @@ static void learn_select_on_user_input(int input_type);
  *
  * @return int32_t returns SUCCESS
  */
-static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape);
+static void learning_on_spectrogram(int spectrogram_index);
 
 /**
  * @brief  Callback functions in Learning state
@@ -317,7 +379,7 @@ static void switch_learning_delayed(struct k_work *work);
 static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
     [STATE_INFERENCE] = {inference_on_mfcc_output, inference_on_user_input},
     [STATE_LEARN_SELECT] = {NULL, learn_select_on_user_input},
-    [STATE_LEARNING] = {learning_on_mfcc_output, learning_on_user_input},
+    [STATE_LEARNING] = {NULL, learning_on_user_input},
 };
 
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
@@ -428,74 +490,19 @@ static int check_model_compatibility(uint8_t is_el_model_l,
   return SUCCESS;
 }
 
-static void learn_to_ls(void) {
-  if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
-    uint64_t cur_ts = time_ms();
-    switch_mode(STATE_LEARN_SELECT);
-    printk("learning -> learn_select\n\r");
-    akida_learn_mode(true);
-    if (SUCCESS ==
-        save_weights_from_mesh(
-            learn_weights_buff_ptr,
-            saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
-      saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
-          1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
-      learning_completed();
-      printk("Save Weights from MESH->MEM \n\r");
-    } else {
-      printk("Sync:akida_save_learn_weights function has failed for label %d ",
-             cur_kws_edge_novel_class);
-    }
-    akida_learn_mode(false);
-    uint32_t duration_ms = (uint32_t)(time_ms() - cur_ts);
-    if (verbose_on) {
-      printk("mesh_mem = % lu ms\n", duration_ms);
-    }
-  }
-}
-
 void do_inference(int spectrogram_index) {
-  __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
-  /*q7_t min = 127;
-  q7_t max = -128;
-  int32_t energy = 0;
-  int32_t energies[SPECTROGRAM_COUNT + 1];
+  current_spectrogram_index = spectrogram_index;
 
-  // printk ("do_inference \n");
+  /* Learning pipeline: dispatch directly to learning handler with raw
+   * float spectrogram access (no uint8 normalization needed here). */
+  if (cur_kws_edge_state == STATE_LEARNING) {
+    learning_on_spectrogram(spectrogram_index);
+    return;
+  }
 
-  for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
-    int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
-    energies[i] = 0;
-    for (int j = 0; j < SPECTROGRAM_RES; j++) {
-      if (spectrogram[idx][j] > max) {
-        max = spectrogram[idx][j];
-      }
-      if (spectrogram[idx][j] < min) {
-        min = spectrogram[idx][j];
-      }
-      if (j > 0)
-        energies[i] += spectrogram[idx][j] > 0 ? spectrogram[idx][j]
-                                               : -spectrogram[idx][j];
-    }
-    energy += energies[i];
-  }*/
-
-  /* It has been experimentally determined that when we talk on the mic,
-   * the energy goes above 666, and the first bin of the MFCC spectrogram
-   * is above -39. This allows not to send data to akida if we already
-   * know that there is nothing to detect.
-   */
-  // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
-  // energy, spectrogram[(25 + spectrogram_index) % SPECTROGRAM_COUNT][0]);
-  /*if ((energy > params.energy_threshold) &&
-      (spectrogram[(25 + spectrogram_index) % SPECTROGRAM_COUNT][0] >
-       params.bin0_threshold))*/
-
-  // printk ("min %d, max %d  energy %d, spectrogram_index %d\n" , min, max,
-  // energy, spectrogram_index);
+  /* Inference pipeline: normalize spectrogram to uint8 and dispatch. */
   if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
-    /* Generate model input where whole spectrogram is normalized
-       between 0 and 255 */
+    __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
     for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
       int idx = (i + spectrogram_index) % SPECTROGRAM_COUNT;
       for (int j = 0; j < SPECTROGRAM_RES; j++) {
@@ -509,8 +516,6 @@ void do_inference(int spectrogram_index) {
       }
     }
 
-    // memcpy ((uint8_t*) akida_input, &kws_inputs[0], 490);
-    // printk ("do_inference cur_kws_edge_state %d \n", cur_kws_edge_state);
     kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
                                                       (uint32_t *)dims);
   }
@@ -630,12 +635,39 @@ static void switch_learning_delayed(struct k_work *work) {
 
   if (cur_kws_edge_state == STATE_LEARN_SELECT) {
     cur_kws_edge_state = STATE_LEARNING;
-    printk("learn_select -> learning");
+    printk("learn_select -> learning\n\r");
     last_learn_ts = time_ms();
-    k_work_reschedule(&switch_delayed_work, K_SECONDS(5));
-  } else if (cur_kws_edge_state == STATE_LEARNING) {
-    learn_to_ls();
+
+    /* Initialize structured learning state */
+    memset(&learn_state, 0, sizeof(learn_state));
+    learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
+    learn_state.augmentations_per_utterance =
+        2 * g_num_neurons_per_class;
+    learn_state.waiting_since_ts = time_ms();
+    learn_rng_state = (uint32_t)k_uptime_get();
+
+    /* Use shorter VAD timeout during learning for tighter capture */
+    saved_speech_active_time_ms = speech_active_time_ms;
+    speech_active_time_ms = LEARN_SPEECH_ACTIVE_TIME_MS;
+
+    k_work_init_delayable(&learn_speech_end_work,
+                          learn_speech_end_handler);
+    k_work_init(&learn_process_work, learn_process_handler);
+
+    /* Start polling for silence timeout */
+    k_work_reschedule(&learn_speech_end_work,
+                      K_MSEC(LEARN_SPEECH_END_GAP_MS));
+
+    printk("\nlearn: structured learning for class %d "
+           "(%d inputs/utterance, %d utterances)\n\r",
+           cur_kws_edge_novel_class,
+           learn_state.augmentations_per_utterance,
+           LEARN_NUM_UTTERANCES);
+    printk("learn: say keyword 1/%d\n\r", LEARN_NUM_UTTERANCES);
   }
+  /* Removed: auto-transition back to learn_select after 5s timeout.
+   * The structured learning flow manages its own timeouts via
+   * learn_speech_end_work. */
 }
 
 static void switch_mode(int mode) {
@@ -662,18 +694,17 @@ static void switch_mode(int mode) {
     break;
   case STATE_LEARNING:
     k_work_cancel_delayable(&switch_delayed_work);
+    k_work_cancel_delayable(&learn_speech_end_work);
+    k_work_cancel(&learn_process_work);
+    /* Restore original VAD timeout */
+    speech_active_time_ms = saved_speech_active_time_ms;
     akida_learn_mode(false);
-    // printk(" STATE_LEARNING mode %d, cur_kws_edge_state %d \n\r", mode,
-    // cur_kws_edge_state);
     if (STATE_LEARN_SELECT == mode) {
       cur_kws_edge_state = mode;
     } else if (STATE_INFERENCE == mode) {
-
       akida_learn_mode(false);
-
       cur_kws_edge_state = mode;
     }
-
     break;
   default:
     break;
@@ -1068,7 +1099,11 @@ uint32_t kws_debounce_time = DEBOUNCE_COOLDOWN_MS;
 bool feature_buff_full = false;
 
 extern "C" void reset_stale_inference_data(void) {
-  reset_kws_spectrogram();
+  /* During learning, skip the spectrogram reset — learning has its own
+   * capture buffer and the spectrogram is still needed for ongoing capture. */
+  if (cur_kws_edge_state != STATE_LEARNING) {
+    reset_kws_spectrogram();
+  }
   memset(smoothed_scores, 0, sizeof(smoothed_scores));
   memset(chiming_counters, 0, sizeof(chiming_counters));
   if (verbose_on) {
@@ -1350,6 +1385,333 @@ static void learn_select_on_user_input(int input_type) {
   }
 }
 
+/*---------------------------------------------------------------------------
+ * Structured Edge Learning - Augmented Input Generation
+ *---------------------------------------------------------------------------*/
+
+/**
+ * @brief Generate a single augmented 49x10 uint8 input from captured MFCC frames.
+ *
+ * Applies time-shifting (unique position per index) and one of 8 augmentation
+ * types, cycled via (aug_index % LEARN_NUM_AUG_TYPES).
+ *
+ * @param captured      Float MFCC frames captured during utterance
+ * @param keyword_len   Number of frames in the captured keyword
+ * @param aug_index     Augmentation index (0..augmentations_per_utterance-1)
+ * @param num_augs      Total augmentations per utterance
+ * @param output        Output buffer [SPECTROGRAM_COUNT][SPECTROGRAM_RES]
+ */
+static void generate_augmented_input(
+    float captured[][SPECTROGRAM_RES], int keyword_len, int aug_index,
+    int num_augs, uint8_t output[SPECTROGRAM_COUNT][SPECTROGRAM_RES]) {
+
+  int available_padding = SPECTROGRAM_COUNT - keyword_len;
+  if (available_padding < 0)
+    available_padding = 0;
+
+  /* --- Time shift: spread keyword across all positions evenly --- */
+  int target_start;
+  if (num_augs <= 1 || available_padding == 0)
+    target_start = available_padding / 2;
+  else
+    target_start = (aug_index * available_padding) / (num_augs - 1);
+
+  if (target_start < 0)
+    target_start = 0;
+  if (target_start + keyword_len > SPECTROGRAM_COUNT)
+    target_start = SPECTROGRAM_COUNT - keyword_len;
+
+  /* --- Determine augmentation type (cycle through 8 types) --- */
+  int aug_type = aug_index % LEARN_NUM_AUG_TYPES;
+
+  /* Augmentation parameters */
+  float gain = 1.0f;
+  float bg_noise_scale = 0.0f;   /* background noise across whole window */
+  int freq_mask_bin = -1;
+  bool do_time_stretch = false;
+  bool do_time_compress = false;
+  int stretch_pos = -1;
+  int compress_pos = -1;
+
+  switch (aug_type) {
+  case 0: /* Clean - no augmentation */
+    break;
+  case 1: /* Background noise across entire window */
+    bg_noise_scale = 0.03f + learn_rand_float() * 0.05f; /* 3-8% */
+    break;
+  case 2: /* Gain scaling */
+    gain = 0.75f + learn_rand_float() * 0.50f; /* 0.75 - 1.25 */
+    break;
+  case 3: /* Background noise + gain */
+    bg_noise_scale = 0.02f + learn_rand_float() * 0.03f; /* 2-5% */
+    gain = 0.80f + learn_rand_float() * 0.40f;           /* 0.8 - 1.2 */
+    break;
+  case 4: /* Slight time-stretch (duplicate 1-2 frames) */
+    do_time_stretch = true;
+    stretch_pos = (int)(learn_rand_float() * (keyword_len - 1));
+    break;
+  case 5: /* Slight time-compress (skip 1-2 frames) */
+    do_time_compress = true;
+    if (keyword_len > LEARN_MIN_KEYWORD_FRAMES + 2)
+      compress_pos = 1 + (int)(learn_rand_float() * (keyword_len - 2));
+    break;
+  case 6: /* Frequency masking (1 random MFCC bin) */
+    freq_mask_bin = (int)(learn_rand_float() * SPECTROGRAM_RES);
+    break;
+  case 7: /* Heavy combined: bg noise + gain + freq mask */
+    bg_noise_scale = 0.02f + learn_rand_float() * 0.02f; /* 2-4% */
+    gain = 0.85f + learn_rand_float() * 0.30f;           /* 0.85 - 1.15 */
+    freq_mask_bin = (int)(learn_rand_float() * SPECTROGRAM_RES);
+    break;
+  }
+
+  /* --- Step 1: Fill entire window with silence or background noise --- */
+  for (int i = 0; i < SPECTROGRAM_COUNT; i++) {
+    for (int j = 0; j < SPECTROGRAM_RES; j++) {
+      if (bg_noise_scale > 0.0f) {
+        float noise =
+            (learn_rand_float() - 0.5f) * 2.0f * bg_noise_scale * mfcc_fs;
+        output[i][j] = clamp_uint8(((noise / mfcc_fs) + 1.0f) * 128.0f);
+      } else {
+        output[i][j] = 128; /* silence = normalized zero */
+      }
+    }
+  }
+
+  /* --- Step 2: Place keyword at target_start with augmentation --- */
+  int dst = target_start;
+  for (int src = 0; src < keyword_len && dst < SPECTROGRAM_COUNT; src++) {
+    /* Time-compress: skip this frame */
+    if (do_time_compress && src == compress_pos)
+      continue;
+
+    for (int j = 0; j < SPECTROGRAM_RES; j++) {
+      if (j == freq_mask_bin) {
+        output[dst][j] = 128; /* masked bin */
+        continue;
+      }
+      float val = captured[src][j] * gain;
+      if (bg_noise_scale > 0.0f) {
+        /* Add signal on top of existing background noise */
+        float existing =
+            ((float)output[dst][j] / 128.0f - 1.0f) * mfcc_fs;
+        val = val + existing;
+      }
+      float normalized = ((val / mfcc_fs) + 1.0f) * 128.0f;
+      output[dst][j] = clamp_uint8(normalized);
+    }
+    dst++;
+
+    /* Time-stretch: duplicate this frame */
+    if (do_time_stretch && src == stretch_pos && dst < SPECTROGRAM_COUNT) {
+      for (int j = 0; j < SPECTROGRAM_RES; j++) {
+        if (j == freq_mask_bin) {
+          output[dst][j] = 128;
+          continue;
+        }
+        float val = captured[src][j] * gain;
+        float normalized = ((val / mfcc_fs) + 1.0f) * 128.0f;
+        output[dst][j] = clamp_uint8(normalized);
+      }
+      dst++;
+    }
+  }
+}
+
+/*---------------------------------------------------------------------------
+ * Structured Edge Learning - Processing & Completion Handlers
+ *---------------------------------------------------------------------------*/
+
+/**
+ * @brief Complete the structured learning process: save weights and return
+ *        to inference mode.
+ */
+static void complete_structured_learning(void) {
+  printk("\nlearn: COMPLETE - %d utterances, %d total fit() calls\n\r",
+         LEARN_NUM_UTTERANCES, learn_state.total_fit_calls);
+
+  akida_learn_mode(true);
+  if (SUCCESS ==
+      save_weights_from_mesh(
+          learn_weights_buff_ptr,
+          saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
+    saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
+        1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
+    printk("learn: weights saved MESH->MEM\n\r");
+
+    save_weights_to_flash();
+    printk("learn: weights saved MEM->FLASH\n\r");
+
+    learning_completed();
+  } else {
+    printk("learn: akida_save_learn_weights failed for class %d\n\r",
+           cur_kws_edge_novel_class);
+  }
+  akida_learn_mode(false);
+
+  switch_mode(STATE_INFERENCE);
+}
+
+/**
+ * @brief Trim captured MFCC buffer to just the keyword region using
+ *        per-frame energy analysis.  Shifts keyword frames to the start
+ *        of the buffer and returns the trimmed length.
+ *
+ * @param captured    Float MFCC capture buffer
+ * @param total_frames Number of frames currently in the buffer
+ * @return Trimmed keyword length (0 if no speech detected)
+ */
+static int trim_captured_keyword(float captured[][SPECTROGRAM_RES],
+                                 int total_frames) {
+  float max_energy = 0.0f;
+  int max_idx = 0;
+  float energies[LEARN_CAPTURE_MAX_FRAMES];
+
+  for (int i = 0; i < total_frames; i++) {
+    float energy = 0.0f;
+    for (int j = 0; j < SPECTROGRAM_RES; j++) {
+      float v = captured[i][j];
+      energy += (v < 0.0f) ? -v : v;
+    }
+    energies[i] = energy;
+    if (energy > max_energy) {
+      max_energy = energy;
+      max_idx = i;
+    }
+  }
+
+  if (max_energy < 1.0f)
+    return 0; /* no speech detected */
+
+  float threshold = max_energy * 0.2f;
+
+  /* Find start: scan backward from peak */
+  int start = max_idx;
+  while (start > 0 && energies[start - 1] > threshold)
+    start--;
+
+  /* Find end: scan forward from peak */
+  int end = max_idx;
+  while (end < total_frames - 1 && energies[end + 1] > threshold)
+    end++;
+
+  /* Add 2 frames padding on each side */
+  start = (start > 2) ? start - 2 : 0;
+  end = (end < total_frames - 3) ? end + 2 : total_frames - 1;
+
+  int trimmed_len = end - start + 1;
+
+  /* Shift keyword to beginning of buffer */
+  if (start > 0) {
+    memmove(captured[0], captured[start],
+            trimmed_len * SPECTROGRAM_RES * sizeof(float));
+  }
+
+  return trimmed_len;
+}
+
+/**
+ * @brief Work handler: generate augmented inputs and call fit() for one
+ *        utterance.  Runs off the audio thread so fit() calls don't block
+ *        audio capture.
+ */
+static void learn_process_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+
+  __aligned(32) static uint8_t
+      aug_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
+
+  int raw_len = learn_state.capture_write_idx;
+  int32_t label_id = cur_kws_edge_novel_class;
+  int num_augs = learn_state.augmentations_per_utterance;
+
+  /* Trim captured buffer to just the keyword using energy analysis */
+  int keyword_len =
+      trim_captured_keyword(learn_state.captured_mfcc, raw_len);
+
+  printk("learn: trimmed to %d frames (was %d)\n\r", keyword_len, raw_len);
+
+  if (keyword_len < LEARN_MIN_KEYWORD_FRAMES) {
+    printk("learn: utterance too short after trim (%d frames), try again\n\r",
+           keyword_len);
+    learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
+    learn_state.waiting_since_ts = time_ms();
+    learn_state.capture_write_idx = 0;
+    learn_state.speech_detected = false;
+    printk("learn: say keyword %d/%d\n\r",
+           learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
+    k_work_reschedule(&learn_speech_end_work,
+                      K_MSEC(LEARN_SPEECH_END_GAP_MS));
+    return;
+  }
+
+  printk("learn: processing %d augmented inputs for utterance %d/%d "
+         "(%d frames)\n\r",
+         num_augs, learn_state.current_utterance + 1,
+         LEARN_NUM_UTTERANCES, keyword_len);
+
+  for (int i = 0; i < num_augs; i++) {
+    generate_augmented_input(learn_state.captured_mfcc, keyword_len, i,
+                             num_augs, aug_input);
+
+    akida_fit((uint8_t *)aug_input, (uint32_t *)dims, &label_id);
+    learn_state.total_fit_calls++;
+
+    /* Log progress periodically to avoid flooding serial */
+    if ((i + 1) % 10 == 0 || i == num_augs - 1) {
+      printk("learn: fit %d/%d done\n\r", i + 1, num_augs);
+    }
+  }
+
+  learn_state.current_utterance++;
+
+  if (learn_state.current_utterance >= LEARN_NUM_UTTERANCES) {
+    learn_state.sub_state = LEARN_SUB_COMPLETE;
+    complete_structured_learning();
+  } else {
+    /* Ready for next utterance */
+    learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
+    learn_state.waiting_since_ts = time_ms();
+    learn_state.capture_write_idx = 0;
+    learn_state.speech_detected = false;
+    printk("\nlearn: say keyword %d/%d\n\r",
+           learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
+    k_work_reschedule(&learn_speech_end_work,
+                      K_MSEC(LEARN_SPEECH_END_GAP_MS));
+  }
+}
+
+/**
+ * @brief Delayable work handler for speech-end detection and silence timeout.
+ *
+ * Fires LEARN_SPEECH_END_GAP_MS (500ms) after the last MFCC callback.
+ * - In CAPTURING state: speech ended -> submit processing work.
+ * - In WAITING state: check for 5s silence timeout -> re-prompt user.
+ */
+static void learn_speech_end_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+
+  if (learn_state.sub_state == LEARN_SUB_CAPTURING) {
+    /* Speech ended - transition to processing */
+    learn_state.sub_state = LEARN_SUB_PROCESSING;
+    k_work_submit(&learn_process_work);
+
+  } else if (learn_state.sub_state == LEARN_SUB_WAITING_FOR_SPEECH) {
+    uint64_t elapsed = time_ms() - learn_state.waiting_since_ts;
+    if (elapsed >= LEARN_SILENCE_TIMEOUT_MS) {
+      printk("learn: no utterance detected (timeout %dms), try again\n\r",
+             LEARN_SILENCE_TIMEOUT_MS);
+      /* Reset and re-prompt */
+      learn_state.waiting_since_ts = time_ms();
+      printk("learn: say keyword %d/%d\n\r",
+             learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
+    }
+    /* Keep polling for timeout */
+    k_work_reschedule(&learn_speech_end_work,
+                      K_MSEC(LEARN_SPEECH_END_GAP_MS));
+  }
+}
+
 /**
  * @brief Function to save learned weights from mesh into location pointed by
  * passed argument.
@@ -1370,24 +1732,63 @@ static int32_t save_weights_from_mesh(uint8_t *lbl_wts_ptr, uint32_t size) {
   return ret_val;
 }
 
-static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
+/**
+ * @brief Learning pipeline callback — receives raw spectrogram index directly
+ *        from do_inference(), bypassing the uint8 normalization path.
+ */
+static void learning_on_spectrogram(int spectrogram_index) {
 
-  int32_t label_id = cur_kws_edge_novel_class;
+  /* Number of MFCC frames produced between consecutive do_inference() calls.
+   * MFCC_PER_BLOCK (3) * g_inference_period (default 3) = 9 frames per cb. */
+  const int frames_per_cb = 9;
 
-  int ret = 0;
-  if (params.sync_api == 0) {
-    akida_fit(input, input_shape, &label_id);
-    printk("Sync:learning done for class@ %d", cur_kws_edge_novel_class);
+  switch (learn_state.sub_state) {
 
-  } else {
+  case LEARN_SUB_WAITING_FOR_SPEECH:
+    /* The audio_process_thread only calls audio_processor() (and therefore
+     * do_inference / this callback) when RMS >= threshold, so receiving a
+     * callback here means speech has started. */
+    learn_state.sub_state = LEARN_SUB_CAPTURING;
+    learn_state.speech_detected = true;
+    learn_state.capture_write_idx = 0;
+    learn_state.last_callback_ts = time_ms();
+    printk("learn: speech detected, capturing utterance %d/%d...\n\r",
+           learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
+    /* Fall through to capture the first batch of frames */
+    /* fallthrough */
 
-    do {
-      ret = akida_enqueue(input, input_shape, &label_id);
-    } while (ret);
+  case LEARN_SUB_CAPTURING: {
+    /* Copy the latest frames from the circular spectrogram into our linear
+     * capture buffer.  spectrogram_index points to where the NEXT frame
+     * will be written, so the most recent `frames_per_cb` frames are at
+     * indices (spectrogram_index - frames_per_cb) .. (spectrogram_index - 1).
+     */
+    for (int i = frames_per_cb; i > 0; i--) {
+      int src =
+          (spectrogram_index - i + SPECTROGRAM_COUNT) % SPECTROGRAM_COUNT;
+      if (learn_state.capture_write_idx < LEARN_CAPTURE_MAX_FRAMES) {
+        for (int j = 0; j < SPECTROGRAM_RES; j++) {
+          learn_state.captured_mfcc[learn_state.capture_write_idx][j] =
+              spectrogram[src][j];
+        }
+        learn_state.capture_write_idx++;
+      }
+    }
+    learn_state.last_callback_ts = time_ms();
+
+    /* Reschedule speech-end timer: if no callback for 500ms, speech ended */
+    k_work_reschedule(&learn_speech_end_work,
+                      K_MSEC(LEARN_SPEECH_END_GAP_MS));
+    break;
+  }
+
+  case LEARN_SUB_PROCESSING:
+  case LEARN_SUB_COMPLETE:
+    /* Do nothing - processing happens in work handler */
+    break;
   }
 
   last_learn_ts = time_ms();
-  return ret;
 }
 
 static void learning_on_user_input(int input_type) {
