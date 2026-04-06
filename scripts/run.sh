@@ -28,6 +28,7 @@ Options:
   -m, --minicom      | (str)  | Run minicom inside Docker (default: ttyUSB0).
                      |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
   --key              | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
+  --prod             | (flag) | Production/CI mode: disables -it flag for non-interactive Docker runs
   -r, --reset        | (flag) | Do Board Reset
   -h, --help         | (flag) | Show this help message
   --dk               | (flag) | Select dk board pin configuration overlay file.
@@ -148,6 +149,7 @@ MINICOM_DEV="/dev/ttyUSB0"
 DO_RESET=false
 
 DO_KEY=false
+DO_PROD=false
 KEY_FILE=".env/signing_key.pem"
 
 IS_DARWIN=false
@@ -234,6 +236,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --key)
             DO_KEY=true
+            shift
+            ;;
+        --prod)
+            DO_PROD=true
             shift
             ;;
         --dk)
@@ -340,8 +346,12 @@ DOCKER_RUN_BASE=(
     -e USER_UID="$HOST_UID"
     -e USER_GID="$HOST_GID"
     -e CCACHE_DIR="/home/demo/.ccache"
-    -it
 )
+
+# Add interactive TTY flags only when not in prod/CI mode (no TTY available in CI)
+if ! $DO_PROD; then
+    DOCKER_RUN_BASE+=(-it)
+fi
 
 if $IS_LINUX; then
   DOCKER_RUN_BASE+=(--device /dev/bus/usb:/dev/bus/usb)
