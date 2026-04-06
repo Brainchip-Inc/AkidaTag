@@ -89,6 +89,24 @@ int infer(int app_index_l);
 }
 
 void cli_worker_proc_thread(void *a, void *b, void *c);
+
+#define AKD_ASYNC_ENB_NODE DT_NODELABEL(akd_async)
+static const struct gpio_dt_spec enable_akd_async =
+    GPIO_DT_SPEC_GET(AKD_ASYNC_ENB_NODE, gpios);
+
+static struct gpio_callback akd_async_cb;
+static uint8_t akd_async_var = 0;
+
+/* Semaphore signaled by ISR when Akida asserts its done interrupt */
+K_SEM_DEFINE(akd_async_sem, 0, 1);
+
+/* Thread for processing Akida async results */
+#define AKD_ASYNC_STACK_SIZE 2048
+#define AKD_ASYNC_PRIORITY 5
+K_THREAD_STACK_DEFINE(akd_async_stack, AKD_ASYNC_STACK_SIZE);
+static struct k_thread akd_async_thread_data;
+static k_tid_t akd_async_tid;
+
 /*
 FLash offset indices
 KWS - 0
@@ -145,27 +163,11 @@ static void reset_kws_spectrogram(void);
 #define DEFAULT_BIN0_THRESHOLD -39
 /** Learning delay is set to an arbitrary value */
 #define DEFAULT_LEARNING_DELAY 1000
-/** Macro to set the API to async mode */
-#ifdef CONFIG_SYNC_MODE
-#define DEFAULT_API_SELECTION_ASYNC 0
-#else
-#define DEFAULT_API_SELECTION_ASYNC 1
-#endif
-#ifdef CONFIG_INFERENCE_SAMPLE_THRESHOLD
-#define DEFAULT_INFERENCE_SAMPLE_THRESHOLD CONFIG_INFERENCE_SAMPLE_THRESHOLD
-#else
-#define DEFAULT_INFERENCE_SAMPLE_THRESHOLD 3
-#endif
 
-static struct kws_demo_params {
-  int energy_threshold;
-  int bin0_threshold;
-  int learning_delay;
-  int sync_api;
-  int infer_threshold;
-} params = {DEFAULT_ENERGY_THRESHOLD, DEFAULT_BIN0_THRESHOLD,
-            DEFAULT_LEARNING_DELAY, DEFAULT_API_SELECTION_ASYNC,
-            DEFAULT_INFERENCE_SAMPLE_THRESHOLD};
+/*Akida Async */
+#define DEFAULT_API_SELECTION_ASYNC 1
+/*Akida Sync */
+#define DEFAULT_API_SELECTION_SYNC 0
 
 static uint64_t last_trigger_time_ms = 0ULL;
 int verbose_on = 0;
@@ -946,6 +948,37 @@ static void update_model_params(model_meta_t kws_meta) {
   akd_op_size = sizeof(int32_t) * g_num_classes * g_num_neurons_per_class;
 }
 
+static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
+
+volatile uint32_t inference_start_dma_ts = 0;
+volatile uint64_t inference_start_ts = 0;
+
+static void akd_async_isr_handler(const struct device *dev,
+                                  struct gpio_callback *cb, uint32_t pins) {
+  k_sem_give(&akd_async_sem);
+}
+
+static void akd_async_thread(void *a, void *b, void *c) {
+  ARG_UNUSED(a);
+  ARG_UNUSED(b);
+  ARG_UNUSED(c);
+
+  while (1) {
+    k_sem_take(&akd_async_sem, K_FOREVER);
+
+    uint64_t fetch_start_ts = time_ms();
+    if (-EAGAIN != akida_fetch((uint8_t *)akida_output, akd_op_size, false)) {
+      uint64_t fetch_end_ts = time_ms();
+      uint32_t inference_dma_ts =
+          akd_device.read_clock_counter() - inference_start_dma_ts;
+      uint32_t inference_time = fetch_end_ts - inference_start_ts;
+      kws_post_processing(inference_dma_ts, inference_time);
+    } else {
+      printk("Fetch returned EAGAIN or Error\n");
+    }
+  }
+}
+
 int main(void) {
 
   check_reset_reason();
@@ -979,8 +1012,32 @@ int main(void) {
   shared_buf_init();
   file_transfer_init();
   ble_init();
+  if (!gpio_is_ready_dt(&enable_akd_async)) {
+    printk("AKD ASYBC enable GPIO not ready\n");
+    return -ENODEV;
+  }
+
   init_akd_object();
   akida_spiflash_init();
+
+  int err = gpio_pin_configure_dt(&enable_akd_async, GPIO_INPUT);
+  if (err) {
+    printk("Failed to configure AKD ASYNC enable pin (err %d)\n", err);
+    return err;
+  }
+  err = gpio_pin_interrupt_configure_dt(&enable_akd_async,
+                                        GPIO_INT_EDGE_TO_ACTIVE);
+  if (err) {
+    printf("Failed to configure AKD ASYNC interrupt (err %d)\n", err);
+    return err;
+  }
+  gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
+                     BIT(enable_akd_async.pin));
+  err = gpio_add_callback(enable_akd_async.port, &akd_async_cb);
+  if (err) {
+    printk("Failed to add AKD ASYNC callback (err %d)\n", err);
+    return err;
+  }
 
   /* Get the SPI NOR flash device defined in the device tree (node label:
    * ext_flash) and verify that the driver has initialized successfully before
@@ -993,7 +1050,7 @@ int main(void) {
   } else {
     printk("SPI flash device ready: %s\n", spi_flash->name);
   }
-  int err = storage_init();
+  err = storage_init();
   if (err != 0) {
     printk("LittleFS mount failed %d", err);
   } else {
@@ -1090,6 +1147,13 @@ int main(void) {
     return -1;
   }
 
+  if (kws_meta.sync_api == DEFAULT_API_SELECTION_ASYNC) {
+    /* Start dedicated thread for Akida async result processing */
+    akd_async_tid = k_thread_create(
+        &akd_async_thread_data, akd_async_stack, AKD_ASYNC_STACK_SIZE,
+        akd_async_thread, NULL, NULL, NULL, AKD_ASYNC_PRIORITY, 0, K_NO_WAIT);
+    k_thread_name_set(akd_async_tid, "akd_async");
+  }
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
 
@@ -1161,12 +1225,111 @@ static void reset_kws_spectrogram(void) {
   // feature_buff_full = false;
   reset_spectrogram_index();
 }
+
+static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
+  static int class_history[SCORE_WINDOW_SIZE] = {-1, -1, -1, -1, -1};
+  static int history_idx = 0;
+  int32_t max_val = 0;
+  int32_t akida_output_l[g_num_classes] = {0};
+  for (int num_cls = 0; num_cls < g_num_classes; num_cls++) {
+    max_val = 0;
+    for (int i = 0; i < g_num_neurons_per_class; i++) {
+      /* identify the biggest value within the g_num_neurons_per_class and
+      use the max value for that class */
+      int32_t current_val =
+          akida_output[(num_cls * g_num_neurons_per_class) + i];
+      if (current_val > max_val) {
+        max_val = current_val;
+      }
+    }
+
+    /* copy the max value per class */
+    akida_output_l[num_cls] = max_val;
+  }
+
+  int found = get_inferred_class(akida_output_l, g_num_classes, 1);
+
+  if (found == -1) {
+    if (verbose_on) {
+      printk("no class detected (zero activations)\n\r");
+    }
+    return;
+  }
+
+  if (found == KWS_SILENCE_CLASS || found == KWS_UNKNOWN_CLASS) {
+    if (verbose_on) {
+      printk("suppressed: %s\n\r",
+             (found < kws_new_tags_count) ? kws_new_tags[found] : "?");
+    }
+    return;
+  }
+
+  // Sliding window score smoothing
+  class_history[history_idx % score_window_size] = found;
+  history_idx++;
+
+  // Compute smoothing score for this class
+  uint32_t match_count = 0;
+  for (uint32_t i = 0; i < score_window_size; i++) {
+    if (class_history[i] == found)
+      match_count++;
+  }
+  float score = (float)match_count / score_window_size;
+
+  if (verbose_on) {
+    printk("class=%d (%s) score=%.2f\n\r", found,
+           (found < kws_new_tags_count) ? kws_new_tags[found] : "?", score);
+  }
+
+  if (score >= score_threshold) {
+    current_class = found;
+    // Compute softmax confidence over class-level spike sums
+
+    float class_sums[g_num_classes] = {0};
+
+    for (uint32_t c = 0; c < g_num_classes; c++) {
+      for (uint32_t n = 0; n < g_num_neurons_per_class; n++) {
+        class_sums[c] += (float)akida_output[c * g_num_neurons_per_class + n];
+      }
+    }
+    float max_sum = class_sums[0];
+    for (uint32_t c = 1; c < g_num_classes; c++) {
+      if (class_sums[c] > max_sum) {
+        max_sum = class_sums[c];
+      }
+    }
+    float exp_sum = 0.0f;
+    for (uint32_t c = 0; c < g_num_classes; c++) {
+      exp_sum += expf(class_sums[c] - max_sum);
+    }
+    float confidence =
+        (exp_sum > 0.0f) ? expf(class_sums[found] - max_sum) / exp_sum : 0.0f;
+
+    printk("\nKeyword Detected: %s\n\r",
+           (found < kws_new_tags_count) ? kws_new_tags[found] : "?");
+    if (metrics_on) {
+      printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
+             confidence * 100.0f, score, inf_time, dma_time);
+    }
+    if (is_ble_connected()) {
+      send_event(CMD_DEPLOY_START, kws_new_tags[found], confidence * 100.0f);
+    }
+
+    // Clear history so next word starts fresh
+    memset(class_history, -1, sizeof(class_history));
+    history_idx = 0;
+    reset_kws_spectrogram();
+    last_trigger_time_ms = time_ms();
+  }
+  return;
+}
+
 static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   int ret = 0;
 
-  if (params.sync_api == 0) {
+  if (kws_meta.sync_api == DEFAULT_API_SELECTION_SYNC) {
 
-    uint64_t start_time = time_ms();
+    inference_start_ts = time_ms();
     uint32_t s_dma_cycls = akd_device.read_clock_counter();
 
     int num_outputs = g_num_classes * g_num_neurons_per_class;
@@ -1300,6 +1463,18 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     } else {
       printk("predict failure\n");
     }
+  } else {
+    do {
+      inference_start_ts = time_ms();
+      inference_start_dma_ts = akd_device.read_clock_counter();
+      ret = akida_enqueue(input, input_shape, NULL);
+      uint32_t enq_time = time_ms() - inference_start_ts;
+      {
+        // uint32_t power_tmp;
+        /* clear , accumulated power before enqueue */
+        // capture_power(true, &power_tmp, &power_tmp);
+      }
+    } while (ret);
   }
   return ret;
 }

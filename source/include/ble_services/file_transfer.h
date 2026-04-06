@@ -61,6 +61,7 @@ typedef struct {
   uint32_t is_edge_learned;  /**< 1 = edge-learning model                 */
   uint32_t num_edge_classes; /**< upper16=neurons, lower16=classes        */
   uint32_t info_data_len;    /**< bytes of program_info                   */
+  uint32_t sync_api;         /**< akida sync or async selection           */
   char model_name[MAX_FS_NAME_LEN]; /**< Model name, e.g. "kws"        */
 } model_meta_t;
 

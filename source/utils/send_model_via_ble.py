@@ -592,13 +592,10 @@ if __name__ == "__main__":
     parser.add_argument("--fs_name", default=None,
                         help="LittleFS path for model metadata "
                              "(default: /model_meta/<prefix>, e.g. /model_meta/kws_el)")
-<<<<<<< HEAD
-=======
     parser.add_argument("--sync_mode", default=None, choices=["sync", "async"],
                         help="Akida API mode override: 'sync' (0) or 'async' (1). "
                              "Defaults to value from --yaml if not specified.")
 
->>>>>>> 2690b52 (feat(send_ble): send akida async or sync info via ble)
     args = parser.parse_args()
 
     DEVICE_NAME = get_device_name()
