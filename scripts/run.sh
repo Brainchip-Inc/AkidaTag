@@ -22,6 +22,7 @@ Options:
   --model_name       | (str)  | Model name for --model_transfer (default: kws)
   --model_flash_addr | (str)  | Flash address for --model_transfer (default: 0x1000)
   --map_mode         | (int)  | Akida MapMode value for --model_transfer (default: 1)
+  --sync_mode        | (str)  | Akida API mode: "sync" or "async" (default: async)
   -d, --docker       | (str)  | Run build/flash using Docker
                      |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
   -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
@@ -145,7 +146,12 @@ CLI_TEST_CMD=""
 DK_OVERLAY=false
 MODEL_TRANSFER_NEURONS_PER_CLASS=1
 MODEL_TRANSFER_NUM_EL_CLASSES=0
+<<<<<<< HEAD
 DO_INFER_TEST=false
+=======
+MODEL_TRANSFER_SYNC_MODE="async"
+
+>>>>>>> 689cb63 (chore(run): add support to akida async)
 
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
@@ -216,6 +222,7 @@ while [[ $# -gt 0 ]]; do
         --map_mode) MODEL_TRANSFER_MAP_MODE="${2:-1}"; shift 2;;
 	--neurons_per_class) MODEL_TRANSFER_NEURONS_PER_CLASS="${2:-1}"; shift 2;;
 	--num_el_classes) MODEL_TRANSFER_NUM_EL_CLASSES="${2:-0}"; shift 2;;
+	--sync_mode) MODEL_TRANSFER_SYNC_MODE="${2:-async}"; shift 2;;
         -d|--docker)
             DOCKER=true
             # Optional image name
@@ -576,7 +583,8 @@ if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
 --flash_address \"${MODEL_TRANSFER_FLASH_ADDR}\" \
 --map_mode \"${MODEL_TRANSFER_MAP_MODE}\" \
 --neurons_per_class \"${MODEL_TRANSFER_NEURONS_PER_CLASS}\" \
---num_el_classes \"${MODEL_TRANSFER_NUM_EL_CLASSES}\""
+--num_el_classes \"${MODEL_TRANSFER_NUM_EL_CLASSES}\" \
+--sync_mode \"${MODEL_TRANSFER_SYNC_MODE}\""
 
 fi
 
