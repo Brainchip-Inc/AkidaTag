@@ -3,41 +3,6 @@ This is Akida Tag complete application source code. This project includes all th
 
 The application uses the LittleFS file system and also keeps track of the number of system restarts the device has undergone.
 
-## Signing Key and Build
-
-The `signing_key.pem` file is required in the `.env/` directory for the build to compile successfully. Do not commit this file to the Git repository. Extra care must be taken when handling signing keys for production software.
-
-### Release Build
-
-Download the signing key from the internal server and compile:
-
-```bash
-wget -O .env/signing_key.pem http://salesdata.brainchipinc.local/spark/sw/signing_key/03-31_developer/signing_key.pem
-```
-
-Then build:
-
-```bash
-./scripts/run.sh -d -b --app demo_apps
-```
-
-### Dev / Testing
-
-Generate a local signing key (intended only for development/testing):
-
-```bash
-./scripts/run.sh -d --key
-```
-
-Refer to `docs/setup.md` for the full dev/testing procedure.
-
-## MCUBoot Integration Changes
-The following updates were made to enable the nRF-provided MCUBoot bootloader:
-- Added a sysbuild.conf file with `SB_CONFIG_BOOTLOADER_MCUBOOT=y`
-- Updated prj.conf to include `CONFIG_BOOTLOADER_MCUBOOT=y` and `CONFIG_NCS_SAMPLE_MCUMGR_BT_OTA_DFU=y`
-- Added a sysbuild/ directory containing mcuboot.conf
-	- In this file, add `CONFIG_SERIAL=n` option to suppress mcuboot log messages
-
 ### LED Indication
 
 This application provides visual status indication using Red and Green LEDs.  
