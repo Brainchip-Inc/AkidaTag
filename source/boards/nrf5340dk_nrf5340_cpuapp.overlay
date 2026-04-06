@@ -272,6 +272,10 @@ dmic_dev: &pdm0 {
         akdreset: akdreset {
 			gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
 		};
+
+        akd_async: akd_async {
+            gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+        };
 	
         imui: imui {
 			gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
@@ -296,5 +300,6 @@ dmic_dev: &pdm0 {
         akdreset = &akdreset;
         spi2 = &spi2;
         imui = &imui;
+        akd-async  = &akd_async;
     };
 };
