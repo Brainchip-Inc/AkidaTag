@@ -803,8 +803,29 @@ __Learn Select mode__
 
 __Learning mode__
  - Switching to learning mode is preceded with a forced delay to avoid learning button push sounds (incase learning happens through buttons)
- - In this mode it captures live audio data and use it for training the selected class.
- - Application continues to stay in **__Learning** mode until user switches the mode or if no valid samples are available for last 5 sec. In the later case, application switches from **__Learning ---> __Learn_select** after waiting for 5 sec.
+ - Learning uses a **structured multi-utterance** flow: the user must speak the keyword **5 times**. Each utterance is captured, augmented, and fed to the on-chip learning engine before prompting for the next.
+ - The sub-state machine for each utterance cycles through:
+   1. **WAITING_FOR_SPEECH** — listens for RMS energy above threshold (uses a shorter 400ms VAD timeout for tighter capture)
+   2. **CAPTURING** — records up to ~1.6s of MFCC frames into a float buffer
+   3. **PROCESSING** — speech end detected (500ms gap); generates augmented training samples and calls `fit()` for each
+   4. **COMPLETE** — all 5 utterances collected; weights are saved to flash and the system returns to inference mode
+ - If no speech is detected for 5 seconds, the system re-prompts for the current utterance
+ - Minimum utterance length is ~200ms (10 MFCC frames); shorter utterances are discarded with a re-prompt
+
+#### Data Augmentation
+
+Each utterance generates `2 × neurons_per_class` augmented training samples. Samples are created by combining **time-shifting** (spreading the keyword across different positions in the spectrogram window) with one of **8 augmentation types**, cycled per sample:
+
+| Type | Description |
+| --- | --- |
+| 0 | Clean — no augmentation |
+| 1 | Background noise (3–8% of full scale) |
+| 2 | Gain scaling (0.75–1.25×) |
+| 3 | Background noise + gain combined |
+| 4 | Time-stretch (duplicate 1–2 frames) |
+| 5 | Time-compress (skip 1–2 frames) |
+| 6 | Frequency masking (zero out 1 random MFCC bin) |
+| 7 | Heavy combined (noise + gain + frequency mask) |
 
 ### App Configuration Commands
 
@@ -875,8 +896,16 @@ The following GPIOs are added in the board overlay to control **power enabling f
 
 These GPIOs are defined in the **DeviceTree overlay** and are used to manage power enabling of onboard components in the Spark board.
 
+### Inference Pipeline
 
+The scoring pipeline uses **dequantized inference** with **softmax EMA smoothing** to produce stable, confidence-based keyword triggers:
 
+1. **Dequantized forward pass** — `akida_forward_dequantized()` runs inference on the Akida SNN and applies per-neuron shift and scale factors (from the model's program info) to convert discrete spike potentials into float values suitable for softmax.
 
+2. **Per-class max pooling** — For models with multiple neurons per class, the maximum dequantized value across all neurons for each class is selected. This produces one logit per class.
 
+3. **Softmax normalization** — Standard softmax (with max-subtraction for numerical stability) converts per-class logits into a probability distribution.
 
+4. **EMA smoothing** — An exponential moving average filter smooths the softmax scores across consecutive inference frames, controlled by the `alpha` parameter (`smoothed = alpha × current + (1 - alpha) × previous`). Higher alpha values respond faster but are noisier.
+
+5. **Chiming trigger** — A per-class counter increments each time the smoothed score exceeds the `score` threshold and resets to zero when it falls below. A keyword is triggered when any class counter reaches the `chiming` threshold. All counters reset after a trigger and during the debounce cooldown.
