@@ -1,6 +1,6 @@
 ## Highlights
 
-First alpha release of the Spark firmware platform — transitioning from early prototyping (v0.2.0) to a feature-complete firmware with keyword spotting, edge learning, comprehensive BLE services, and secure OTA updates.
+First alpha release of the Spark firmware platform — transitioning from early prototyping (v0.2.0) to a feature-complete firmware with keyword spotting, edge learning, comprehensive BLE services, serial recovery, and secure OTA application updates.
 
 ## Features
 
@@ -28,9 +28,14 @@ First alpha release of the Spark firmware platform — transitioning from early 
 - **IMU (ISM330):** I2C accelerometer and gyroscope driver
 - **SPI Camera:** SPI3 interface at 8 MHz, 96x96 and 128x128 resolutions (RGB888), RGB565-to-RGB888 conversion, base64 encoding for UART/BLE transmission (#17)
 
+### Model Update via BLE
+- Wireless model transfer to device over BLE
+- Model metadata, program info, and program data streaming with validation
+
 ### MCUboot, DFU Updates & Integrity
 - MCUboot bootloader with RSA-3072 firmware signature verification
-- BLE-based DFU (Device Firmware Update) via MCUmgr and nRF Connect mobile app
+- BLE-based DFU (Device Firmware Update) for application core via MCUmgr and nRF Connect mobile app
+- Serial recovery support for firmware restoration
 - Dual-slot architecture with external flash for secondary image
 - CRC validation on model data transfers
 - Production signing key integration for secure firmware builds
@@ -50,6 +55,7 @@ First alpha release of the Spark firmware platform — transitioning from early 
 
 ## Upcoming
 
+- Secure boot
 - CI/CD integration for automated testing (Hardware-in-the-Loop)
 - Improved KWS inference accuracy and scoring mechanism
 - Enhanced edge learning with multi-utterance training
