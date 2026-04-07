@@ -1160,9 +1160,22 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     uint64_t start_time = time_ms();
     uint32_t s_dma_cycls = akd_device.read_clock_counter();
 
-    if (SUCCESS ==
-        akida_forward_dequantized(input, input_shape, akida_output_dq,
-                                  g_num_classes * g_num_neurons_per_class)) {
+    int num_outputs = g_num_classes * g_num_neurons_per_class;
+    akida::TensorConstPtr in = akida::Dense::create_view(
+        reinterpret_cast<const char *>(input), akida::TensorType::uint8,
+        {input_shape[0], input_shape[1], input_shape[2]},
+        akida::Dense::Layout::RowMajor);
+    auto pred = akd_device.predict({in});
+    if (pred.size()) {
+      auto out = akida::Tensor::ensure_dense(std::move(pred[0]));
+      if (out && (int)out->size() == num_outputs) {
+        memcpy(akida_output_dq, out->data<float>(),
+               num_outputs * sizeof(float));
+      } else {
+        pred.clear();
+      }
+    }
+    if (pred.size()) {
       uint32_t inf_time = time_ms() - start_time;
       uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
       uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
@@ -1282,7 +1295,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         last_trigger_time_ms = time_ms();
       }
     } else {
-      printk("akida_forward_dequantized failure\n");
+      printk("predict failure\n");
     }
   }
   return ret;

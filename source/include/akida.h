@@ -80,21 +80,6 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
                   int output_size);
 
 /**
- * Execute an inference and dequantize the output. Applies per-neuron shift and
- * scale from the model's program info to convert discrete potentials to float
- * values suitable for softmax.
- *
- * @param input the input data to send to inference
- * @param input_dims the input data dimensions
- * @param output the buffer where dequantized float output data are stored
- * @param num_outputs the number of output elements (not bytes)
- *
- * @return SUCCESS if expected output size matches else error code
- */
-int akida_forward_dequantized(uint8_t *input, uint32_t *input_dims,
-                              float *output, int num_outputs);
-
-/**
  * Learn input
  *
  * @param input the input data to send to inference learn

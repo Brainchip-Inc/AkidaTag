@@ -95,32 +95,6 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
   return -EFAILURE;
 }
 
-int akida_forward_dequantized(uint8_t *input, uint32_t *input_dims,
-                              float *output, int num_outputs) {
-
-  akida::TensorConstPtr in = akida::Dense::create_view(
-      reinterpret_cast<const char *>(input), akida::TensorType::uint8,
-      {input_dims[0], input_dims[1], input_dims[2]},
-      akida::Dense::Layout::RowMajor);
-
-  /** Execute inference */
-  auto ret = akd_device.forward({in});
-
-  if (ret.size()) {
-    /** Get dense output tensor */
-    auto out = akida::Tensor::ensure_dense(std::move(ret[0]));
-    if (out && (int)out->size() == num_outputs) {
-      /** Dequantize: applies per-neuron shift and scale to convert
-       *  discrete potentials to float values */
-      auto dequantized = akd_device.dequantize(*out);
-      const float *float_out = dequantized->data<float>();
-      memcpy(output, float_out, num_outputs * sizeof(float));
-      return SUCCESS;
-    }
-  }
-  return -EFAILURE;
-}
-
 void akida_fit(uint8_t *input, uint32_t *input_dims, int32_t *input_label) {
   /* Create a 4-D view and split into tensors */
   akida::Shape input_shape({1, input_dims[0], input_dims[1], input_dims[2]});
