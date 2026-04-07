@@ -30,11 +30,8 @@
 #include "akida.h"
 #include "akida/hardware_device.h"
 #include "io_objects.h"
-#include "kws/kws_program_info.h"
-#include "mnist/mnist_program_info.h"
 #include "nrf_spi.h"
 #include "sample_input/kws/kws_inputs.h"
-#include "sample_input/mnist/mnist_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <cmath>
 #include <hardware_device_impl.h>
@@ -42,9 +39,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vector>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
@@ -57,6 +54,7 @@ extern "C" {
 #endif
 #include "audio_processor.h"
 #include "ble_services/ble_initialization.h"
+#include "ble_services/edge_learning.h"
 #include "ble_services/file_transfer.h"
 #include "boot_manager.h"
 #include "error.h"
@@ -66,6 +64,9 @@ extern "C" {
 #include "led_init.h"
 #include "littlefs_storage.h"
 #include "pdm_mic.h"
+#if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
+#include "camera/spi_camera.h"
+#endif
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 #include "watchdog_h/watchdog.h"
 #endif
@@ -78,11 +79,15 @@ extern int rms_threshold;
 extern int g_min_inference_frames;
 extern int speech_active_time_ms;
 
+extern "C" {
+int file_transfer_load_meta(int app_idx, model_meta_t *meta_out);
+int infer(int app_index_l);
+}
+
 void cli_worker_proc_thread(void *a, void *b, void *c);
 /*
 FLash offset indices
-KWS - 1
-MNIST - 0
+KWS - 0
 */
 
 static void reset_kws_spectrogram(void);
@@ -113,9 +118,9 @@ static void reset_kws_spectrogram(void);
 /** No operation mode */
 #define STATE_STOPPED (3)
 
-/** Indexes of novel classes ranges from 33-35 */
-#define KWS_EDGE_NOVEL_CLASS_BASE_ID 33
-#define KWS_EDGE_MAX_NOVEL_CLASS_ID 35
+/** Indexes of novel classes ranges from 12-14 */
+#define KWS_EDGE_NOVEL_CLASS_BASE_ID 12
+#define KWS_EDGE_MAX_NOVEL_CLASS_ID 14
 
 /** long button pressed event */
 #define LONG_PRESS_EVENT 0
@@ -157,6 +162,7 @@ static struct kws_demo_params {
             DEFAULT_LEARNING_DELAY, DEFAULT_API_SELECTION_ASYNC,
             DEFAULT_INFERENCE_SAMPLE_THRESHOLD};
 
+static uint64_t last_trigger_time_ms = 0ULL;
 int verbose_on = 0;
 /** Current state of the application */
 static uint32_t cur_kws_edge_state = STATE_STOPPED;
@@ -171,7 +177,7 @@ static bool kws_threads_suspended = false;
 static uint32_t mesh_learn_weights_size = 0;
 
 /** Timestamp of last sample enqueued for learning */
-static uint32_t last_learn_ts = 0;
+static uint64_t last_learn_ts = 0;
 
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 /** Handle for the watchdog device  */
@@ -314,18 +320,22 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
     [STATE_LEARNING] = {learning_on_mfcc_output, learning_on_user_input},
 };
 
-#define VALID_PROGRAM_DATA_MNIST 0xD8130700
-#define VALID_PROGRAM_DATA_KWS 0x24D20000 // 0xF4020100 // 0x64d70000
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
-const unsigned char *inputs[] = {mnist_inputs, kws_inputs};
-uint32_t valid_program_data[] = {VALID_PROGRAM_DATA_MNIST,
-                                 VALID_PROGRAM_DATA_KWS};
-const unsigned char *program_info[] = {mnist_program_info, kws_program_info};
-const int64_t program_info_len[] = {mnist_program_info_len,
-                                    kws_program_info_len};
+const unsigned char *inputs[] = {kws_inputs};
 
-int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
+uint32_t g_num_classes = 0;
+uint32_t g_num_neurons_per_class = 1;
+uint32_t g_num_edge_learn_classes = 0;
+uint32_t g_input_size = 0;
+// int32_t akida_output[NUM_CLASSES * NUM_NEURONS_PER_CLASS] = {0};
+int32_t *akida_output;
+uint32_t akd_op_size = 0;
+static uint8_t is_el_model = 0;
+
+/*Metadata of the loaded model used for app_info reporting*/
+model_meta_t kws_meta;
+model_data_meta_t kws_data_meta;
 
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 /* IMU thread variables*/
@@ -346,21 +356,6 @@ void kick_watchdog(void) {
 uint32_t swap_endian(uint32_t value) {
   return ((value >> 24) & 0x000000FF) | ((value >> 8) & 0x0000FF00) |
          ((value << 8) & 0x00FF0000) | ((value << 24) & 0xFF000000);
-}
-
-/* function to read 1st 4 bytes of model data from the flash_offsets[app_index]
- * and validate with the VALID_PROGRAM_DATA, once model is uploaded to the
- * spi-flash via external applications (BLE or Jlink)  */
-bool check_program_data(int offset, int len, int app_index_l) {
-  uint32_t data;
-  spi_flash_read(spi_driver, offset, (uint8_t *)&data, 4);
-  if (swap_endian(data) == valid_program_data[app_index_l]) {
-    printk("program data @%x: %x is same as the expected one\n", offset,
-           valid_program_data[app_index_l]);
-    return true;
-  }
-  printk("program data @%x: %x is not the expected one\n", offset, data);
-  return false;
 }
 
 // int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
@@ -401,6 +396,55 @@ float score_threshold = SCORE_THRESHOLD;
 
 // Metrics mode: show confidence and timing details on keyword detection
 int metrics_on = 0;
+
+static int check_model_compatibility(uint8_t is_el_model_l,
+                                     model_meta_t kws_meta) {
+
+  if (is_el_model_l) {
+    if (kws_meta.is_edge_learned) {
+      printk("\n\r model is edge learn capable\n\r");
+    } else {
+      printk("E: model in-compatability, FS and model to be updated "
+             "correctly\n\r");
+      return -1;
+    }
+  } else {
+    if (kws_meta.is_edge_learned == 0) {
+      printk("\n\r model is not edge learn capable\n\r");
+    } else {
+      printk("E: model in-compatability, FS and model to be updated "
+             "correctly\n\r");
+      return -1;
+    }
+  }
+  return SUCCESS;
+}
+
+static void learn_to_ls(void) {
+  if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
+    uint64_t cur_ts = time_ms();
+    switch_mode(STATE_LEARN_SELECT);
+    printk("learning -> learn_select\n\r");
+    akida_learn_mode(true);
+    if (SUCCESS ==
+        save_weights_from_mesh(
+            learn_weights_buff_ptr,
+            saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
+      saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
+          1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
+      learning_completed();
+      printk("Save Weights from MESH->MEM \n\r");
+    } else {
+      printk("Sync:akida_save_learn_weights function has failed for label %d ",
+             cur_kws_edge_novel_class);
+    }
+    akida_learn_mode(false);
+    uint32_t duration_ms = (uint32_t)(time_ms() - cur_ts);
+    if (verbose_on) {
+      printk("mesh_mem = % lu ms\n", duration_ms);
+    }
+  }
+}
 
 void do_inference(int spectrogram_index) {
   __aligned(32) static uint8_t akida_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
@@ -462,34 +506,6 @@ void do_inference(int spectrogram_index) {
     kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)akida_input,
                                                       (uint32_t *)dims);
   }
-
-  if (last_learn_ts && STATE_LEARNING == cur_kws_edge_state) {
-    uint32_t cur_ts = k_cycle_get_32();
-    uint32_t last_learn_duration = (uint32_t)(cur_ts - last_learn_ts);
-    uint64_t duration_us = k_cyc_to_us_floor64(last_learn_duration);
-    if (duration_us >= GET_SEC_TO_USEC(5)) {
-      switch_mode(STATE_LEARN_SELECT);
-      printk("learning -> learn_select\n\r");
-      akida_learn_mode(true);
-      if (SUCCESS ==
-          save_weights_from_mesh(
-              learn_weights_buff_ptr,
-              saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
-        saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
-            1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
-        printk("Save Weights from MESH->MEM \n\r");
-      } else {
-        printk(
-            "Sync:akida_save_learn_weights function has failed for label %d ",
-            cur_kws_edge_novel_class);
-      }
-      akida_learn_mode(false);
-      uint64_t duration_us = k_cyc_to_us_floor64(k_cycle_get_32() - cur_ts);
-      if (verbose_on) {
-        printk("mesh_mem = %" PRIu64 " us\n", duration_us);
-      }
-    }
-  }
 }
 
 K_THREAD_STACK_DEFINE(capture_stack, CAPTURE_STACK_SIZE);
@@ -501,6 +517,12 @@ K_THREAD_STACK_DEFINE(led_stack, LED_STACK_SIZE);
 struct k_thread capture_thread;
 struct k_thread process_thread;
 struct k_thread cli_worker_thread;
+
+#if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
+struct k_thread camera_thread;
+k_tid_t camera_thread_id;
+K_THREAD_STACK_DEFINE(camera_stack, CAMERA_STACK_SIZE);
+#endif
 struct k_thread led_thread;
 
 k_tid_t capture_tid;
@@ -549,7 +571,20 @@ static int start_dmic_audio_proc(void) {
 
   return 0;
 }
+#if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
+static int initialize_spi_camera_interface(void) {
 
+  camera_thread_id = k_thread_create(&camera_thread, camera_stack,
+                                     CAMERA_STACK_SIZE, camera_capture_thread,
+                                     NULL, NULL, NULL, CAMERA_PRIORITY, K_USER,
+                                     K_FOREVER // START SUSPENDED
+  );
+
+  k_thread_start(camera_thread_id);
+
+  return 0;
+}
+#endif
 /**
  * @brief Initialize the learn weights memory
  *
@@ -582,13 +617,17 @@ static void init_learn_weights_mem(uint32_t layer_mem_size) {
 }
 
 static struct k_work_delayable switch_delayed_work;
-
 static void switch_learning_delayed(struct k_work *work) {
   ARG_UNUSED(work);
-  memset(spectrogram, -127, SPECTROGRAM_COUNT * SPECTROGRAM_RES);
-  cur_kws_edge_state = STATE_LEARNING;
-  printk("learn_select -> learning");
-  last_learn_ts = k_cycle_get_32();
+
+  if (cur_kws_edge_state == STATE_LEARN_SELECT) {
+    cur_kws_edge_state = STATE_LEARNING;
+    printk("learn_select -> learning");
+    last_learn_ts = time_ms();
+    k_work_reschedule(&switch_delayed_work, K_SECONDS(5));
+  } else if (cur_kws_edge_state == STATE_LEARNING) {
+    learn_to_ls();
+  }
 }
 
 static void switch_mode(int mode) {
@@ -603,19 +642,18 @@ static void switch_mode(int mode) {
     break;
   case STATE_LEARN_SELECT:
     if (STATE_INFERENCE == mode) {
-
+      k_work_cancel_delayable(&switch_delayed_work);
       akida_learn_mode(false);
 
       cur_kws_edge_state = mode;
     } else if (STATE_LEARNING == mode) {
 
       akida_learn_mode(true);
-      k_work_schedule(&switch_delayed_work, K_SECONDS(1));
-      //  switch_learning_delayed();
+      k_work_reschedule(&switch_delayed_work, K_SECONDS(1));
     }
     break;
   case STATE_LEARNING:
-
+    k_work_cancel_delayable(&switch_delayed_work);
     akida_learn_mode(false);
     // printk(" STATE_LEARNING mode %d, cur_kws_edge_state %d \n\r", mode,
     // cur_kws_edge_state);
@@ -686,7 +724,8 @@ static void read_learn_weights_from_flash(void) {
           (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
       /* if CRC is failed then user to do re-learning*/
       if (crc32 != saved_learn_weights_ptr->crc) {
-        printk("CRC check failed, %d bytes read from flash and there is an "
+        printk("learn weights CRC check failed, %d bytes read from flash and "
+               "there is an "
                "error in reading "
                "learning data, user need to perform learning again \r\n",
                ret);
@@ -706,23 +745,36 @@ static void read_learn_weights_from_flash(void) {
       reset_saved_weights();
     }
   } else {
-    printk("read_learn_weights_from_flash: file open failed \n");
+    printk("read_learn_weights_from_flash: saved learn weights file open "
+           "failed \n");
   }
 }
 
-static int initiate_kws_inference() {
+static int initiate_kws_inference(uint8_t is_el_model_l) {
 
-  /*  k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
+  if (is_el_model_l) {
+    k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
     mesh_learn_weights_size = akida_learn_mem_size();
 
     printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
 
+    // Free any prior allocation to avoid memory leak on re-init
+    if (saved_learn_weights_ptr) {
+      delete[] reinterpret_cast<uint8_t *>(saved_learn_weights_ptr);
+      saved_learn_weights_ptr = NULL;
+      learn_weights_buff_ptr = NULL;
+    }
+    if (base_labels_wts_ptr) {
+      delete[] base_labels_wts_ptr;
+      base_labels_wts_ptr = NULL;
+    }
+
     // allocating memory for structure (this will hold crc, size etc ) + learn
     // weights data together to place them in contiguous locations
-    saved_learn_weights_ptr = (saved_learn_weights *)malloc(
-        sizeof(saved_learn_weights) + mesh_learn_weights_size);
+    saved_learn_weights_ptr = reinterpret_cast<saved_learn_weights *>(
+        new uint8_t[sizeof(saved_learn_weights) + mesh_learn_weights_size]);
 
-    base_labels_wts_ptr = (uint8_t *)malloc(mesh_learn_weights_size);
+    base_labels_wts_ptr = new uint8_t[mesh_learn_weights_size];
 
     if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
       printk("dynamic memory allocation failed for weights data and hence "
@@ -732,12 +784,14 @@ static int initiate_kws_inference() {
     }
     // initialize the learn_weights_mem structure
     reset_saved_weights();
-    // init_learn_weights_mem(mesh_learn_weights_size);
 
-    read_learn_weights_from_flash();*/
+    read_learn_weights_from_flash();
+  }
 
   cur_kws_edge_state = STATE_INFERENCE;
-
+  /* adding additional 1200ms to last_trigger_time_ms to increase the debouce
+   * time at during the initialization to suppress any noise from dmic */
+  last_trigger_time_ms = time_ms() + 1200ULL;
   start_dmic_audio_proc();
   return SUCCESS;
 }
@@ -754,32 +808,29 @@ static int start_imu_proc(void) {
 }
 #endif
 void check_reset_reason(void) {
-  uint32_t reason = NRF_RESET->RESETREAS;
+  uint32_t cause = 0;
 
-  printk("Reset reason raw: 0x%08x\n", reason);
+  if (hwinfo_get_reset_cause(&cause) != 0) {
+    printk("Failed to read reset cause\n");
+    return;
+  }
 
-  if (reason & RESET_RESETREAS_OFF_Msk) {
+  printk("Reset cause: 0x%08x\n", cause);
+
+  if (cause & RESET_LOW_POWER_WAKE) {
     printk("Wakeup from System OFF\n");
   }
-
-  if (reason & RESET_RESETREAS_RESETPIN_Msk) {
+  if (cause & RESET_PIN) {
     printk("Reset from RESET pin\n");
   }
-
-  if (reason & RESET_RESETREAS_DOG0_Msk) {
-    printk("Reset from Watchdog 0\n");
+  if (cause & RESET_WATCHDOG) {
+    printk("Reset from Watchdog\n");
   }
-
-  if (reason & RESET_RESETREAS_DOG1_Msk) {
-    printk("Reset from Watchdog 1\n");
-  }
-
-  if (reason & RESET_RESETREAS_SREQ_Msk) {
+  if (cause & RESET_SOFTWARE) {
     printk("Reset from software reset\n");
   }
 
-  /* Clear reset reason flags */
-  NRF_RESET->RESETREAS = reason;
+  /* Do not clear here — init_boot_count() reads and clears later */
 }
 /**
  * @brief Create and start the LED indication thread.
@@ -800,6 +851,41 @@ static int start_led_ind(void) {
   return 0;
 }
 
+static void update_model_params(model_meta_t kws_meta) {
+  g_input_size = kws_meta.input_shape[0] * kws_meta.input_shape[1] *
+                 kws_meta.input_shape[2];
+  g_num_classes = kws_meta.output_shape[0] * kws_meta.output_shape[1] *
+                  kws_meta.output_shape[2];
+
+  printk("kws_meta.num_edge_classes %x \n\r", kws_meta.num_edge_classes);
+  g_num_neurons_per_class = (kws_meta.num_edge_classes & 0xFFFF0000) >> 16;
+  if (g_num_neurons_per_class == 0) {
+    g_num_neurons_per_class = 1;
+  }
+
+  g_num_classes = g_num_classes / g_num_neurons_per_class;
+  g_num_edge_learn_classes = (kws_meta.num_edge_classes & 0xFFFF);
+
+  printk("kws_meta.input_shape[0] %d, kws_meta.input_shape[1] %d, "
+         "kws_meta.input_shape[2] %d\n\r",
+         kws_meta.input_shape[0], kws_meta.input_shape[1],
+         kws_meta.input_shape[2]);
+
+  printk("kws_meta.output_shape[0] %d, kws_meta.output_shape[1] %d, "
+         "kws_meta.output_shape[2] %d\n\r",
+         kws_meta.output_shape[0], kws_meta.output_shape[1],
+         kws_meta.output_shape[2]);
+
+  printk("g_input_size %d, g_num_classes %d, g_num_neurons_per_class %d, "
+         "g_num_edge_learn_classes %d \n\r",
+         g_input_size, g_num_classes, g_num_neurons_per_class,
+         g_num_edge_learn_classes);
+
+  delete[] akida_output;
+  akida_output = new int32_t[g_num_classes * g_num_neurons_per_class];
+  akd_op_size = sizeof(int32_t) * g_num_classes * g_num_neurons_per_class;
+}
+
 int main(void) {
 
   check_reset_reason();
@@ -808,6 +894,9 @@ int main(void) {
   print_image_version(FLASH_AREA_ID(image_0), "App Core");
 
   /*print_image_version(FLASH_AREA_ID(image_1), "Net Core");*/
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+  watchdog_init(&wdt, &wdt_channel_id);
+#endif
 
   uart_init();
   start_led_ind();
@@ -815,16 +904,22 @@ int main(void) {
   printk("Akida TAG Application\n");
   confirm_image_if_needed();
   init_setting_sub_system();
+  shared_buf_init();
   file_transfer_init();
   ble_init();
+  init_akd_object();
   akida_spiflash_init();
 
-  const struct device *qspi = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
+  /* Get the SPI NOR flash device defined in the device tree (node label:
+   * ext_flash) and verify that the driver has initialized successfully before
+   * using it.
+   */
+  const struct device *spi_flash = DEVICE_DT_GET(DT_NODELABEL(ext_flash));
 
-  if (!device_is_ready(qspi)) {
-    printk("QSPI not ready\n");
+  if (!device_is_ready(spi_flash)) {
+    printk("SPI flash not ready\n");
   } else {
-    printk("QSPI device ready: %s \n", qspi->name);
+    printk("SPI flash device ready: %s\n", spi_flash->name);
   }
   int err = storage_init();
   if (err != 0) {
@@ -834,61 +929,111 @@ int main(void) {
   }
 
   init_boot_count();
-
-  akida_config_spi(1);
-  int ret = check_program_data(flash_offsets[1], 4, 1);
-  akida_config_spi(0);
-
-  if (ret == false) {
-    printk("model data, not present in SPI Flash, upload the model\n");
-    kws_model_present = false;
-  } else {
-    printk("model is already present \n");
-    // program the model info part to AKD1500
-    akd_device.toggle_clock_counter(true);
-    printk("Programming the model\n");
-
-    uint32_t s_dma_cycls = akd_device.read_clock_counter();
-    uint64_t start_time = time_ms();
-
-    akida_program_flash((uint8_t *)program_info[1], program_info_len[1],
-                        flash_offsets[1]);
-    uint32_t prog_time = time_ms() - start_time;
-    uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
-    uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
-
-    printk("\n model program time= %u dma cycles, dma time = %d us, cpu time = "
-           "%u ms \n\r",
-           delta_cycle, dma_time, prog_time);
-
-    akd_device.set_batch_size(1, true);
-    kws_model_present = true;
-  }
-
-  if (kws_model_present) {
-    initiate_kws_inference();
-    is_kws_inference_started = true;
-  }
-
-#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
-  start_imu_proc();
-#endif
-
-#if IS_ENABLED(CONFIG_WDT_ENABLE)
-  watchdog_init(&wdt, &wdt_channel_id);
-#endif
-
-  // ... inside a function like main() or a separate initialization function
-  printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
-  // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
-  printk("NRF_CLOCK_S->HFCLKCTRL: %d\n", NRF_CLOCK_S->HFCLKCTRL);
-
   cli_worker_tid = k_thread_create(
       &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
       cli_worker_proc_thread, NULL, NULL, NULL, CLI_WORKER_PRIORITY, K_USER,
       K_FOREVER // START SUSPENDED
   );
   k_thread_start(cli_worker_tid);
+  /* Load model metadata from LittleFS (written there by a previous BLE upload).
+   * The metadata contains the flash address and program_info binary so we do
+   * not need to rely on compile-time flash_offsets[] or hardcoded program_info
+   * arrays.
+   *
+   * Boot validation sequence:
+   *   1. Read header only (no sram_upload_buffer usage) to get flash_address.
+   *   2. Load model_data meta (3rd file): CRC, first 4 bytes, length, name.
+   *   3. Validate model_name against expected slot (whitelist check).
+   *   4. Full SPI flash CRC validation (overwrites sram_upload_buffer).
+   *   5. Reload full meta + program_info into sram_upload_buffer.
+   *   6. Program Akida.
+   */
+
+  /* Step 1: read header struct only to get flash_address */
+  int hdr_ret = file_transfer_read_meta_hdr_only(0, &kws_meta);
+  if (hdr_ret != 0) {
+    printk("E: Metadata header unavailable (err %d)\n", hdr_ret);
+    return -1;
+  }
+  uint32_t kws_flash_addr = kws_meta.flash_address;
+
+  /* Step 3: validate model name from the header (model_meta_t.model_name) */
+  if (file_transfer_check_model_name(0, kws_meta.model_name) != 0) {
+    printk("E: Model name mismatch: stored='%s', expected for slot 1='kws'\n",
+           kws_meta.model_name);
+    kws_model_present = false;
+    return -1;
+  }
+  printk("Model name: stored='%s', \n", kws_meta.model_name);
+  /* Step 3: Copy to model_name */
+  /* Step 2&4: load data meta and validate flash contents */
+  int dm_ret = file_transfer_load_data_meta(0, &kws_data_meta);
+  if (dm_ret == 0) {
+    /* Step 4: full SPI flash CRC validation */
+    akida_config_spi(1);
+    int val_ret =
+        file_transfer_validate_flash_data(kws_flash_addr, &kws_data_meta);
+    akida_config_spi(0);
+    if (val_ret != 0) {
+      printk("E: Model data validation FAILED will not program Akida\n");
+      kws_model_present = false;
+      return -1;
+    }
+  } else {
+    printk("E: model_data file is not present and returning\n");
+    return -1;
+  }
+
+  /* Step 5: reload full meta + program_info into sram_upload_buffer.
+   * This is necessary because file_transfer_validate_flash_data() may have
+   * overwritten sram_upload_buffer during the CRC read loop. */
+  int meta_ret = file_transfer_load_meta(0, &kws_meta);
+  if (meta_ret != 0) {
+    printk("E: Metadata reload failed (err %d)\n", meta_ret);
+    return -1;
+  }
+
+  /* Step 6: program Akida */
+  printk("Model data found at 0x%08X\n", kws_flash_addr);
+  akd_device.toggle_clock_counter(true);
+  printk("Programming model info into AKD1500\n");
+
+  uint32_t s_dma_cycls = akd_device.read_clock_counter();
+  uint64_t start_time = time_ms();
+
+  akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len,
+                      kws_meta.flash_address, &is_el_model);
+
+  uint32_t prog_time = (uint32_t)(time_ms() - start_time);
+  uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+  uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
+  printk("\nModel program: %u dma cycles, %u us dma, %u ms cpu\n", delta_cycle,
+         dma_time, prog_time);
+
+  akd_device.set_batch_size(1, true);
+  kws_model_present = true;
+  update_model_params(kws_meta);
+
+  if (check_model_compatibility(is_el_model, kws_meta) != SUCCESS) {
+    return -1;
+  }
+
+  initiate_kws_inference(is_el_model);
+  is_kws_inference_started = true;
+
+  printk("data to check : model_size %d, class %d \n",
+         kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+  start_imu_proc();
+#endif
+
+#if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
+  initialize_spi_camera_interface();
+#endif
+  // ... inside a function like main() or a separate initialization function
+  printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
+  // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
+  printk("NRF_CLOCK_S->HFCLKCTRL: %d\n", NRF_CLOCK_S->HFCLKCTRL);
 
   return 0;
 }
@@ -911,7 +1056,7 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
 
 uint32_t kws_debounce_time = DEBOUNCE_COOLDOWN_MS;
 bool feature_buff_full = false;
-uint64_t last_trigger_time_ms = 0ULL;
+
 extern "C" void reset_stale_inference_data(void) {
   reset_kws_spectrogram();
   if (verbose_on) {
@@ -923,7 +1068,7 @@ extern "C" void reset_stale_inference_data(void) {
 extern "C" uint8_t is_kws_debounce_complete(void) {
   uint8_t is_debounce = 0;
   /* DEBOUNCING (Preventing multiple rapid triggers)*/
-  if ((time_ms() - last_trigger_time_ms) > kws_debounce_time)
+  if ((time_ms()) > last_trigger_time_ms + kws_debounce_time)
     is_debounce = 1;
 
   return is_debounce;
@@ -949,7 +1094,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     uint32_t s_dma_cycls = akd_device.read_clock_counter();
 
     if (SUCCESS == akida_forward(input, input_shape, (uint8_t *)akida_output,
-                                 sizeof(akida_output))) {
+                                 akd_op_size)) {
       uint32_t inf_time = time_ms() - start_time;
       uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
       uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
@@ -958,8 +1103,26 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                "= %u ms\n\r",
                delta_cycle, dma_time, inf_time);
       }
-      int found =
-          get_inferred_class(akida_output, NUM_CLASSES, NUM_NEURONS_PER_CLASS);
+
+      int32_t max_val = 0;
+      int32_t akida_output_l[g_num_classes] = {0};
+      for (int num_cls = 0; num_cls < g_num_classes; num_cls++) {
+        max_val = 0;
+        for (int i = 0; i < g_num_neurons_per_class; i++) {
+          /* identify the biggest value within the g_num_neurons_per_class and
+          use the max value for that class */
+          int32_t current_val =
+              akida_output[(num_cls * g_num_neurons_per_class) + i];
+          if (current_val > max_val) {
+            max_val = current_val;
+          }
+        }
+
+        /* copy the max value per class */
+        akida_output_l[num_cls] = max_val;
+      }
+
+      int found = get_inferred_class(akida_output_l, g_num_classes, 1);
 
       if (found == -1) {
         if (verbose_on) {
@@ -970,7 +1133,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
 
       if (found == KWS_SILENCE_CLASS || found == KWS_UNKNOWN_CLASS) {
         if (verbose_on) {
-          printk("suppressed: %s\n\r", kws_new_tags[found]);
+          printk("suppressed: %s\n\r",
+                 (found < kws_new_tags_count) ? kws_new_tags[found] : "?");
         }
         return 0;
       }
@@ -988,33 +1152,47 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       float score = (float)match_count / score_window_size;
 
       if (verbose_on) {
-        printk("class=%d (%s) score=%.2f\n\r", found, kws_new_tags[found],
-               score);
+        printk("class=%d (%s) score=%.2f\n\r", found,
+               (found < kws_new_tags_count) ? kws_new_tags[found] : "?", score);
       }
 
       if (score >= score_threshold) {
         current_class = found;
         // Compute softmax confidence over class-level spike sums
-        float class_sums[NUM_CLASSES] = {0};
-        for (int c = 0; c < NUM_CLASSES; c++)
-          for (int n = 0; n < NUM_NEURONS_PER_CLASS; n++)
-            class_sums[c] += (float)akida_output[c * NUM_NEURONS_PER_CLASS + n];
+
+        float class_sums[g_num_classes] = {0};
+
+        for (int c = 0; c < g_num_classes; c++) {
+          for (int n = 0; n < g_num_neurons_per_class; n++) {
+            class_sums[c] +=
+                (float)akida_output[c * g_num_neurons_per_class + n];
+          }
+        }
         float max_sum = class_sums[0];
-        for (int c = 1; c < NUM_CLASSES; c++)
-          if (class_sums[c] > max_sum)
+        for (int c = 1; c < g_num_classes; c++) {
+          if (class_sums[c] > max_sum) {
             max_sum = class_sums[c];
+          }
+        }
         float exp_sum = 0.0f;
-        for (int c = 0; c < NUM_CLASSES; c++)
+        for (int c = 0; c < g_num_classes; c++) {
           exp_sum += expf(class_sums[c] - max_sum);
+        }
         float confidence = (exp_sum > 0.0f)
                                ? expf(class_sums[found] - max_sum) / exp_sum
                                : 0.0f;
 
-        printk("\nKeyword Detected: %s\n\r", kws_new_tags[found]);
+        printk("\nKeyword Detected: %s\n\r",
+               (found < kws_new_tags_count) ? kws_new_tags[found] : "?");
         if (metrics_on) {
           printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
                  confidence * 100.0f, score, inf_time, dma_time);
         }
+        if (is_ble_connected()) {
+          send_event(CMD_DEPLOY_START, kws_new_tags[found],
+                     confidence * 100.0f);
+        }
+
         // Clear history so next word starts fresh
         memset(class_history, -1, sizeof(class_history));
         history_idx = 0;
@@ -1185,7 +1363,7 @@ static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     } while (ret);
   }
 
-  last_learn_ts = k_cycle_get_32();
+  last_learn_ts = time_ms();
   return ret;
 }
 
@@ -1250,29 +1428,66 @@ static void learning_on_user_input(int input_type) {
 }
 
 /* function to run the inference */
-int infer(int app_index_l) {
-  if (app_index_l > 1) {
+extern "C" int infer(int app_index_l) {
+  if (app_index_l > 0) {
     printk("Illegal model index %d\n", app_index_l);
     return -1;
   }
 
-  akida_config_spi(1);
-  int ret = check_program_data(flash_offsets[app_index_l], 4, app_index_l);
-  akida_config_spi(0);
-
-  if (ret == false) {
-    printk("model data, not present in SPI Flash, upload the model\n");
+  /* Step 1: read header only to get flash_address without touching
+   * sram_upload_buffer */
+  model_meta_t infer_meta;
+  int hdr_ret = file_transfer_read_meta_hdr_only(app_index_l, &infer_meta);
+  if (hdr_ret != 0) {
+    printk("E: Metadata header unavailable (err %d)\n", hdr_ret);
     return -1;
-  } else {
-    printk("model is already present \n");
-    // program the model info part to AKD1500
+  }
+  uint32_t use_flash_addr = infer_meta.flash_address;
 
-    printk("Programming the model\n");
-    akida_program_flash((uint8_t *)program_info[app_index_l],
-                        program_info_len[app_index_l],
-                        flash_offsets[app_index_l]);
-    akd_device.set_batch_size(1, true);
-    app_index = app_index_l;
+  /* Step 3: validate model name from the header (model_meta_t.model_name) */
+  if (file_transfer_check_model_name(app_index_l, infer_meta.model_name) != 0) {
+    printk("E: Model name mismatch for slot %d: '%s'\n", app_index_l,
+           infer_meta.model_name);
+    return -1;
+  }
+
+  /* Step 2&4: load data meta and validate flash contents */
+  model_data_meta_t infer_data_meta;
+  int dm_ret = file_transfer_load_data_meta(app_index_l, &infer_data_meta);
+  if (dm_ret == 0) {
+    /* Step 4: full SPI flash CRC validation */
+    akida_config_spi(1);
+    int val_ret =
+        file_transfer_validate_flash_data(use_flash_addr, &infer_data_meta);
+    akida_config_spi(0);
+    if (val_ret != 0) {
+      printk("E: Flash data validation FAILED for slot %d\n", app_index_l);
+      return -1;
+    }
+  } else {
+    /* Legacy fallback: 4-byte check only */
+    printk("E: No data meta file (err %d) \n", dm_ret);
+    return -1;
+  }
+
+  /* Step 5: reload full meta + program_info into sram_upload_buffer.
+   * file_transfer_validate_flash_data() may have overwritten it. */
+  int meta_ret = file_transfer_load_meta(app_index_l, &infer_meta);
+  if (meta_ret != 0) {
+    printk("Metadata reload failed (err %d)\n", meta_ret);
+    return -1;
+  }
+  update_model_params(infer_meta);
+
+  /* Step 6: program Akida */
+  akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
+                      infer_meta.flash_address, &is_el_model);
+
+  akd_device.set_batch_size(1, true);
+  app_index = app_index_l;
+
+  if (check_model_compatibility(is_el_model, infer_meta) != SUCCESS) {
+    return -1;
   }
 
   akd_device.toggle_clock_counter(true);
@@ -1286,21 +1501,16 @@ int infer(int app_index_l) {
   int num_classes = 10;
   int num_neurons_per_class = 1;
 
-  auto shape = mnist_inputs_shape;
-  int output_size = 10 * 4;
-  if (app_index_l == 1) {
-    shape = kws_inputs_shape;
-    num_classes = NUM_CLASSES;
-    num_neurons_per_class = NUM_NEURONS_PER_CLASS;
-    output_size = sizeof(akida_output);
-  }
+  num_classes = g_num_classes;
+  num_neurons_per_class = g_num_neurons_per_class;
 
   int class_id = -1;
-  uint32_t inp_shap[] = {shape[0], shape[1], shape[2]};
+  uint32_t inp_shap[] = {infer_meta.input_shape[0], infer_meta.input_shape[1],
+                         infer_meta.input_shape[2]};
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
-  ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
-                      (uint8_t *)akida_output, output_size);
+  int ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
+                          (uint8_t *)akida_output, akd_op_size);
   e_tick = time_ms();
   e_dma_cycls = akd_device.read_clock_counter();
   delta_cycle = e_dma_cycls - s_dma_cycls;
@@ -1314,18 +1524,14 @@ int infer(int app_index_l) {
     printk("\n\r inference failed \n\r");
     return -1;
   }
-  if (app_index_l == 0) { // mnist
-    printk("Predicted Digit : %d\n", class_id);
-
-    k_thread_suspend(capture_tid);
-    k_thread_suspend(process_tid);
-    kws_threads_suspended = true;
-  } else if (app_index_l == 1) { // kws
+  if (app_index_l == 0) { // kws
     printk("\nClass : %d\n", class_id);
-    printk("Word : %s\n", kws_tags[class_id]);
+    printk("Word : %s\n", (class_id >= 0 && class_id < kws_new_tags_count)
+                              ? kws_new_tags[class_id]
+                              : "?");
     kws_model_present = true;
     if (!is_kws_inference_started) {
-      initiate_kws_inference();
+      initiate_kws_inference(is_el_model);
     } else if (kws_threads_suspended) {
       k_thread_resume(capture_tid);
       k_thread_resume(process_tid);
@@ -1347,11 +1553,8 @@ static int cmd_infer(const struct shell *shell, size_t argc, char **argv) {
 
   char *string = argv[1];
   if (!strcmp(string, "kws")) {
-    app_index = 1;
-    printk("inference kws requested, app index %d", app_index);
-  } else if (!strcmp(string, "mnist")) {
     app_index = 0;
-    printk("inference mnist requested, app index %d", app_index);
+    printk("inference kws requested, app index %d", app_index);
   } else {
     printk("Illegal model inference request");
     return -EINVAL;
@@ -1412,6 +1615,16 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
     } else if (!strcmp(argv[1], "evt")) {
       if (argc > 2) {
         printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
+        if (is_el_model == 0) {
+          printk(" illegal request, this is not an edge learning model\n");
+          return 0;
+        }
+
+        if (cur_kws_edge_state == STATE_STOPPED) {
+          printk(
+              " cur_kws_edge_state is STATE_STOPPED user input not possible\n");
+          return 0;
+        }
         kws_edge_state[cur_kws_edge_state].on_user_input(atoi(argv[2]));
       }
     } else if (argc > 2 && !strcmp(argv[1], "rms")) {
@@ -1473,6 +1686,11 @@ static int cmd_kws_el(const struct shell *shell, size_t argc, char **argv) {
   }
 
   return 0;
+}
+void edge_learning_cmd_process(uint8_t value) {
+  printk("cur_kws_edge_state %d\n", cur_kws_edge_state);
+
+  kws_edge_state[cur_kws_edge_state].on_user_input(value);
 }
 
 #if IS_ENABLED(CONFIG_WDT_ENABLE)

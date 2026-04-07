@@ -1,6 +1,5 @@
 #ifndef __AUDIO_PROCESSOR_H__
 #define __AUDIO_PROCESSOR_H__
-#include "arm_math.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -39,20 +38,6 @@ int audio_processor_start(bool is_stream, float *spectrogram_buff,
  *
  */
 int audio_processor_stop();
-
-/**
- * @brief Set verbose level
- *
- * @param verbose_level verbosity level.
- */
-void audio_processor_set_verbose(int verbose_level);
-
-/**
- * @brief Get last processing time
- *
- * @return last processing time
- */
-int audio_processor_get_proc_time(void);
 
 void audio_process_thread(void *a, void *b, void *c);
 

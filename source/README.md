@@ -3,22 +3,6 @@ This is Akida Tag complete application source code. This project includes all th
 
 The application uses the LittleFS file system and also keeps track of the number of system restarts the device has undergone.
 
-##Generate the signing_key File
-Run the command below to generate the signing_key.pem file in the spark.env/ directory. This file is required for the build to compile successfully.
-
-Important: This key is intended only for development/testing. Do not commit this file to the Git repository. Extra care must be taken when handling signing keys for production software.
-
-```
-./scripts/run.sh -d --key
-```
-
-## MCUBoot Integration Changes
-The following updates were made to enable the nRF-provided MCUBoot bootloader:
-- Added a sysbuild.conf file with `SB_CONFIG_BOOTLOADER_MCUBOOT=y`
-- Updated prj.conf to include `CONFIG_BOOTLOADER_MCUBOOT=y` and `CONFIG_NCS_SAMPLE_MCUMGR_BT_OTA_DFU=y`
-- Added a sysbuild/ directory containing mcuboot.conf
-	- In this file, add `CONFIG_SERIAL=n` option to suppress mcuboot log messages
-
 ### LED Indication
 
 This application provides visual status indication using Red and Green LEDs.  
@@ -89,7 +73,7 @@ This allows the LED logic to operate in two modes:
 | UPDATE_FAILED   | Green OFF, Red ON |
 
 ### PDM MIC 
-This application uses the DMIC (PDM microphone) interface with PDM_CLK on P0.26 and PDM_DIN on P0.25.
+This application uses the DMIC (PDM microphone) interface with PDM_CLK on P1.9 and PDM_DIN on P1.10.
 The DMIC peripheral is enabled via DeviceTree using the dmic_dev node and pinctrl configuration.
 Required Zephyr flags: CONFIG_AUDIO=y, CONFIG_DMIC=y, CONFIG_MEM_SLAB=y, CONFIG_PRINTK=y.
 Audio is captured at 16 kHz, 16-bit mono and RMS is calculated after DC offset removal.
@@ -201,12 +185,295 @@ Close the serial monitor and run utils/imu_data_screening.py.
 The script plots accelerometer and gyroscope data in real time.
 Ensure matplotlib and pyserial are installed before running.
 
+### SPI CAMERA
+The SPI Camera module enables image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with a dedicated CS pin) to communicate with the camera. On startup, it performs full sensor initialization and reset, then configures ISP settings (brightness, contrast, saturation, sharpness, white balance, EV) and applies manual exposure and gain values.
+
+Frame acquisition follows a **demand  model**. Each frame capture is initiated explicitly using a `FIFO_START` command, allowing frames to be requested only when needed. Multiple frames can be requested in quick succession when higher capture throughput is required.
+
+The capture process is **synchronous** (blocking). After initiating a capture, the software waits for completion by polling the `CAP_DONE` flag. During this period, the calling thread waits until the frame capture is finished.
+
+
+## Supported Resolutions
+
+Frames are captured based on a CLI command. Due to RAM constraints, only two resolutions are supported:
+
+| Index | Resolution | RGB888 Size |
+|-------|------------|-------------|
+| 1     | 96 × 96    | 27,648 B    |
+| 2     | 128 × 128  | 49,152 B    |
+
+> **WARNING:** 320×240, 320×320, and higher resolutions exceed available RAM and are **not supported**.
+
+## Frame Timing
+
+| Event 				  				  			 | Time 	       	  |
+|------------------------------------------------------------|--------------------|
+| First frame ready — 96x96(from `camera_start`)  	      | ~956 ms (average)  |
+| First frame ready — 128x128(from `camera_start`)	      | ~1042 ms (average) |
+| Execution time of the capture_rgb() function
+			 — 96×96 resolution 	  	  			 | ~22 ms	            |
+| Execution time of the capture_rgb() function
+			 — 128×128 resolution 	  	  			 | ~36 ms             |
+
+Sensor Capture Time
+The time was calculated based on the duration the firmware waits for the CAP_DONE_MASK flag to be set. The measurement was verified using CRO.
+
+Resolution	Capture Time
+|-----------------------|
+96×96		~50 µs
+128×128		~50 µs
+
+SPI Transfer Time
+Measured time required to transfer image data from the camera FIFO to the MCU using SPI @8 MHz.
+
+Resolution			Data Size	SPI Transfer Time
+|-------------------------------------------------|
+ 96×96 (RGB565)		~18 KB		~18 ms
+ 128×128 (RGB565)	     ~32 KB		~33 ms
+
+Image Conversion Time
+
+Resolution	Conversion Time
+|--------------------------|
+ 96×96		~3 ms
+ 128×128	     ~5 ms
+
+The first-frame timer starts when the `camera_start` shell command is issued. This includes the warm-up sequence (3 discarded frames) before the first valid frame is delivered.
+
+### SRAM Upload Buffer
+
+`sram_upload_buffer` is a shared memory buffer used between the camera capture thread and the model update process. Access to this buffer is synchronized using a Zephyr `k_event` to ensure that only one module uses the buffer at a time. The buffer state is controlled using `BUF_EVENT_FREE` and `BUF_EVENT_BUSY` flags to prevent concurrent access and data corruption.
+
+## Frame Output
+
+Captured frames are read from the camera FIFO and validated. The raw RGB565 data is converted to RGB888 format. Frames are then Base64-encoded and printed to the console, delimited by:
+
+```
+--- RGB888_START_ ---
+<base64 data>
+--- RGB888_END_ ---
+```
+
+## Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `camera_set_pixel 1` | Set resolution to 96×96 (must be run before `camera_start`) |
+| `camera_set_pixel 2` | Set resolution to 128×128 (must be run before `camera_start`) |
+| `camera_start` | Initialize camera, run warm-up, and begin continuous capture |
+| `camera_stop` | Stop capture and reset the sensor |
+
+`camera_set_pixel` **must** be called before `camera_start`. If resolution is not set, `camera_start` will return an error.
+
+## Configuration
+
+- **`CONFIG_DK_BOARD`** — Set to `N`. If enabled (`Y`), the DK board pins overlap with the SPI pins used by the camera, causing incorrect image capture.
+- **`CONFIG_CAMERA_ENABLE_THREAD`** — Enables or disables the dedicated camera processing thread. When disabled, no camera thread or stack is allocated.
+- A separate Kconfig file **`camera_app.conf`** is provided for all camera-related configuration options.
+
+
+### To check camera image
+A Python script `utils/image_display.py` is provided to receive frames over serial, decode them, and save them as PNG images.
+
+## Prerequisites
+
+```bash
+pip install pyserial numpy pillow
+```
+
+## Usage
+
+1. Close any active serial monitor (e.g. in your IDE or terminal).
+2. Run the script:
+
+```bash
+python utils/image_display.py
+```
+
+The script will prompt for serial port, baud rate, frame dimensions, and output folder. Frames are saved as `frame_00001.png`, `frame_00002.png`, etc. under the specified folder (default: `./frames/`), upscaled 4× for easier viewing.
+
+## Notes
+
+- The script buffers serial data and only processes a frame once both `--- RGB888_START_ ---` and `--- RGB888_END_ ---` markers are found.
+- Frames with incorrect byte counts (not equal to `width × height × 3`) are skipped with a warning.
+- Each saved PNG is upscaled 4× using nearest-neighbour interpolation for easy visual inspection.
+- Press **Ctrl+C** to stop; the script prints a final frame count summary.
+
+### SPI CAMERA
+The SPI Camera module enables continuous image capture from an SPI-connected camera on Zephyr RTOS. It uses the SPI3 peripheral (8 MHz, MSB-first, with dedicated CS pin) to communicate with the camera, performs initialization and sensor reset, configures ISP settings (brightness, contrast, saturation, sharpness, white balance), and sets manual exposure and gain. Frames are captured in 96×96 RGB resolution (legacy mode) using the camera FIFO buffer. Captured frames are read from the FIFO, validated, and optionally converted to Base64 format for safe logging or transmission, marked with --- RGB_START_X --- and --- RGB_END_X ---. A continuous capture thread handles multi-frame capture sequences, while shell commands camera_start and camera_stop allow starting and stopping the camera via Zephyr shell.
+
+### BLE Service Implementation
+This firmware implements Bluetooth Low Energy (BLE) services for the AKIDA device platform on the Nordic Semiconductor nRF5340. It enables mobile applications to communicate with the device through the Nordic UART Service (NUS).
+NUS provides:
+One RX characteristic (write from phone)
+One TX characteristic (notify to phone)
+It behaves like a bidirectional data pipe. It simplifies protocol scalability and allows structured communication over a single BLE service.
+It is used in eg: battery_response and device_info_response etc.
+1. Device Advertising
+When scanning for devices, phones will see:
+
+Device Name: Configured through CONFIG_BT_DEVICE_NAME
+Manufacturer Data (human-readable ASCII):
+BLE Version: "53" (version 5.3)
+Firmware Version: "241" (version 2.4.1)
+Chip ID: "AKD1500"
+The manufacturer data is encoded in ASCII text format, allowing phones to display this information directly without needing to convert binary data.
+
+ The Nordic UART Service (NUS) handles command processing with a sophisticated multi-frame protocol supporting single-frame messages for battery commands and multi-frame fragmentation for larger device information transfers, complete with retry logic and send-state management.
+
+
+2. Phone-Firmware Communication Flow
+The communication between the mobile application and firmware follows a simple command-response protocol over BLE's Nordic UART Service (NUS).
+Command Frame Format: [frame_type],[index],[size],[command],[data]
+
+MOBILE APP  ◄────────►   BLE STACK   ◄────────►     FIRMWARE
+
+     │                           │                           │
+     ├───Connect & Pair──────────┼────────────────────────────►│
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_APP"              │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Prepare application info
+     │                           │                           │
+     │◄──Receive Response────────┼───────────────────────────┤
+     │ "app_name,description,    │                           │    
+     |      app_size,            │                           |
+     │                           │                           │
+     │                           │                           │
+     ├───Send Command───────────┼────────────────────────────►│
+     │    "CMD_BATTERY"          │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Read battery (97%)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │    "BATTERY:97"           │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_DEVICE_INFO"      │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Gather device data
+     │                           │                           │    "AKIDA,TYPE,5.3,1.2.3"
+     │                           │                           │
+     │◄──Receive Response────────┼───────────────────────────┤
+     │    "DEVICE:AKIDA,TYPE,    │                           │
+     │           5.3,1.2.3"      │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_APP_INFO"         │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Prepare application info
+     │                           │                           │ 
+     │                           │                           │
+     │◄──Receive Response────────┼───────────────────────────┤
+     │    "DEVICE:Processor,     │                           │
+     │         Type,             │                           │
+     │         Version,          │                           │
+     │        Processor_Detail,  │                           │
+     │         Model_Name,       │                           │
+     │         Model_Version,    │                           │
+     │         Model_Size,       |                           │
+     │         Input_Shape,      │                           │
+     │         Num_Classes,      │                           │
+     │         Akida_Nodes,      │                           │
+     │         Power_Consumption"│                           │
+     │                           │                           │
+     │                           │                           │
+	 ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_DEPLOY_START"     │                           │
+     │                           │                           ├───Set event_flag = true
+     │                           │                           │    (KWS detection send start)
+     │                           │                           │
+     │◄──Receive KWS Events──────┼──────────────────────────────┤
+     │    "KWS:hello"            │                           │
+     │    "KWS:stop"             │                           │
+     │    "KWS:yes"              │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_STREAM_START"     │                           │
+     │                           │                           ├───Set pdm_stream_flag = true
+     │                           │                           │    (Audio streaming active)
+     │                           │                           │
+     │◄──Receive PDM Audio Data──┼──────────────────────────────┤
+     │    [Audio chunk 1]        │                           │
+     │    [Audio chunk 2]        │                           │
+     │    [Audio chunk 3]        │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_DEPLOY_STOP"      │                           │
+     │                           │                           ├───Set event_flag = false
+     │                           │                           │    (KWS detection sending stopped)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │    "DEPLOY_STOP:ACK"      │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_STREAM_STOP"      │                           │
+     │                           │                           ├───Set pdm_stream_flag = false
+     │                           │                           │    (Audio streaming stopped)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │    "STREAM_STOP:ACK"      │                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_RESTART"          │                           │
+     │                           │                           ├───Process Command
+     │                           │                           │    Trigger system reboot
+     │                           │                           │    sys_reboot()
+     │                           │                           │
+
+3. How It Works
+
+Phone sends a command - The mobile app writes a command string to the NUS characteristic
+Firmware parses the command - The nus_received_cb callback identifies which command was received
+Firmware prepares response - Based on the command type, the appropriate data is gathered
+Response is sent back - Data is formatted and transmitted to the phone via NUS
+Phone displays the data - The app receives and presents the information to the user
+
+NOTE: A static MAC address is required for phone app testing. Hence, CONFIG_BT_PRIVACY is disabled(CONFIG_BT_PRIVACY = n). Ensure this is re-enabled for the final production build.
+
+### Edge Learning BLE Service
+
+MOBILE APP                    BLE STACK                    FIRMWARE
+     │                              │                             │
+     │───Subscribe to ACK───────────┼────────────────────────────►│
+     │    (Enable notifications)    │                             │
+     │                              │                             ├───Set notify_enabled = true
+     │                              │                             │
+     ├───Write Command──────────────┼────────────────────────────►│
+     │    [CMD=0] Enter Inference   │                             │
+     │                              │                             ├───edge_cmd_write() called
+     │                              │                             ├───Process command
+     │                              │                             │
+     ├───Write Command──────────────┼────────────────────────────►│
+     │    [CMD=1] Start Learning    │                             │
+     │                              │                             ├───Begin training process
+     │                              │                             │   
+     │                              │                             │
+     │                              │                             │
+     │◄──Receive ACK────────────────┼─────────────────────────────┤
+     │    [ACK=0xA7]                │                             │   learning_completed()
+     │    (Learning complete)       │                             │   send_ack(ACK_LEARNING_DONE)
+     │                              │                             │
+     ├───Write Command──────────────┼────────────────────────────►│
+     │    [CMD=2] Delete Class      │                             │
+     │                              │                             │
+     ├───Write Command──────────────┼────────────────────────────►│
+     │    [CMD=3] Select Next Class │                             │
+     │                              │                             │
+
 ### Build the demo_apps Sample.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
 
 ```
 ./scripts/run.sh -d -b --app demo_apps
+```
+### Build the demo_apps Sample with dk board overlay file.
+After compiling the project, MCUBoot is automatically built along with the application.
+The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
+
+```
+./scripts/run.sh -d -b --dk --app demo_apps
 ```
 
 ### Flash the demo_apps Sample.
@@ -222,6 +489,8 @@ This flashes both mcuboot and demo_apps application together
 ./scripts/run.sh -d -r
 ```
 
+### Device ID Display via UART CLI
+A CLI command is provided to display the unique Device ID of the SoC via the UART console. The device ID is read from the FICR registers and printed through the shell interface.
 
 ### FOTA over BLE using nRF Connect Mobile App
 - Copy the updated application image `zephyr.signed.bin` to your mobile device.
@@ -250,21 +519,215 @@ Firmware images are uploaded from the host PC using AuTerm over the configured U
 - The wdt_disable CLI command is implemented for watchdog validation testing. It performs an invalid memory access to generate a system fault. As watchdog feeding stops after the crash, the watchdog timeout occurs and forces a system reset, confirming correct watchdog functionality.
 - An additional CLI command (threads_stop) is available to terminate all running threads for testing purposes, allowing validation of watchdog recovery behavior when the system becomes unresponsive.
 
-### Model Loading
-To load a model, execute the Python script from another terminal in the repository root folder (spark).
+### External SPI NOR Flash Integration
+Added DeviceTree configuration for the external flash (ext_flash) to enable access through Zephyr flash APIs.
 
-Upon execution, the script scans for available Bluetooth devices and displays a list of detected BLE servers.
-Select the index corresponding to `Nordic_LBS` to pair with the device. Once pairing is complete, the client will begin transferring the model to the target device. 
+## Board-specific Overlay Configuration
 
-For loading `KWS` model:
+Different pin configurations are used for the DK board and the Spark board due to pin availability and hardware connections.
+
+The overlay file is selected during the build using the `--dk` flag.
+
+- **DK board overlay file:** `nrf5340dk_nrf5340_cpuapp.overlay`
+- **Spark board overlay file:** `nrf5340_cpuapp_spark.overlay`
+
+### Model Generation and BLE Transfer
+
+### Python Setup
+
+```bash
+cd spark
+pip install -r scripts/requirements.txt
 ```
-./scripts/run.sh -d --app demo_apps --bin source/external/model_files/kws/kws_program_data.bin
+
+### info.yaml – Model Metadata File
+
+`fetch_model.py` generates an `info.yaml` alongside the binary files. It is the single source of truth for model metadata consumed by `send_model_via_ble.py`.
+
+```yaml
+model_name: kws
+flash_address: "0x101000"
+input_shape: [49, 10, 1]
+output_shape: [1, 1, 225]
+edge_learning:
+  enabled: true
+  num_classes: 15
+  num_el_classes: 3
+  num_neurons: 15
 ```
 
+| Field | Description |
+|-------|-------------|
+| `model_name` | Model identifier string (e.g. `kws`, `mnist`) |
+| `flash_address` | Target SPI flash address for the model data segment |
+| `input_shape` | Model input dimensions read from the Akida model |
+| `output_shape` | Model output dimensions read from the Akida model |
+| `edge_learning.enabled` | `true` when the model uses on-device edge learning |
+| `edge_learning.num_classes` | Total number of classes in the base model |
+| `edge_learning.num_el_classes` | Number of novel edge-learning classes to learn on-device (packed into lower 16 bits of the `num_edge_classes` metadata field sent over BLE) |
+| `edge_learning.num_neurons` | Neurons per class (packed into upper 16 bits of the `num_edge_classes` metadata field sent over BLE) |
 
-For loading `MNIST` model:
+> **Edge learning packing:** `num_edge_classes` (32-bit) = `(num_neurons << 16) | num_el_classes`.
+> The firmware unpacks this into `g_num_neurons_per_class` (bits [31:16]) and `g_num_edge_learn_classes` (bits [15:0]).
+
+---
+
+### Step 1 – Generate Bin Files and info.yaml
+
+```bash
+cd spark
+
+# KWS model at flash address 0x101000 with default MapMode=1
+python source/utils/fetch_model.py \
+    --model kws \
+    --prefix kws \
+    --output_dir source/external/model_files/kws \
+    --flash_address 0x101000
+
+# With a direct URL or local .fbz path
+python source/utils/fetch_model.py \
+    --model kws \
+    --prefix kws \
+    --output_dir source/external/model_files/kws \
+    --model_path http://server/akida_model.fbz \
+    --flash_address 0x101000 \
+    --map_mode 1
+
+# MNIST model at its flash address
+python source/utils/fetch_model.py \
+    --model mnist \
+    --prefix mnist \
+    --output_dir source/external/model_files/mnist \
+    --flash_address 0x1000
 ```
-./scripts/run.sh -d --app demo_apps --bin source/external/model_files/mnist/mnist_program_data.bin
+
+**New arguments:**
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--flash_address` | `0x1000` | Flash address written into `info.yaml` |
+| `--map_mode` | `1` | Akida `MapMode` value passed to `model.map()` |
+
+**Outputs** (in `--output_dir`):
+- `<prefix>_program_info.bin` / `_program_data.bin` – binary segments for BLE transfer
+- `<prefix>_program_info.cpp` / `_program_data.cpp` – C++ array files for compile-time inclusion
+- `info.yaml` – metadata bridge consumed by `send_model_via_ble.py`
+- `<prefix>_shapes.json` – shape sidecar (used to skip regeneration on re-runs)
+
+---
+
+### Step 2 – Transfer via BLE
+
+```bash
+cd spark
+
+# Recommended: pass info.yaml as the metadata source
+python source/utils/send_model_via_ble.py \
+    --info source/external/model_files/kws/kws_program_info.bin \
+    --bin  source/external/model_files/kws/kws_program_data.bin \
+    --yaml source/external/model_files/kws/info.yaml
+
+# Legacy: explicit CLI args (still supported, override YAML values)
+python source/utils/send_model_via_ble.py \
+    --info source/external/model_files/kws/kws_program_info.bin \
+    --bin  source/external/model_files/kws/kws_program_data.bin \
+    --flash_address 0x101000 \
+    --input_shape 49,10,1 \
+    --output_shape 1,1,12
+```
+
+**New argument:** `--yaml <path>` — path to `info.yaml`. Explicit CLI args (`--flash_address`, `--input_shape`, etc.) take priority over YAML values when provided.
+
+---
+
+### One-Step Wrapper – run_model_transfer.sh
+
+```bash
+cd spark
+
+# Default KWS model from BrainChip server
+source/utils/run_model_transfer.sh
+
+# KWS at a specific flash address and map mode
+source/utils/run_model_transfer.sh \
+    http://server/akida_model.fbz kws "" 0x101000 "" "" v1 "" 1
+
+# Edge-learning model (10 classes)
+source/utils/run_model_transfer.sh \
+    http://server/akida_model_el.fbz kws "" 0x1000 "" 10
+```
+
+Positional arguments: `MODEL_PATH MODEL_NAME OUTPUT_DIR FLASH_ADDRESS FS_NAME NUM_CLASSES AKIDA_VERSION NEURONS_PER_CLASS MAP_MODE`
+
+---
+
+### Using run.sh (build + flash + model transfer)
+
+```bash
+cd spark
+
+# Fetch model locally → generate bins + info.yaml only (no BLE send)
+./scripts/run.sh \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000
+
+# Fetch inside Docker → generate bins + info.yaml only (no BLE send)
+./scripts/run.sh -d \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000
+
+```
+
+**Flags for `run.sh` model transfer:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--model_transfer <url/path>` | — | Fetch `.fbz`, generate bins + `info.yaml` (fetch only) |
+| `--send_ble` | off | Send model via BLE; requires `--info`, `--bin`, and `--yaml` (cannot be used with `--model_transfer`) |
+| `--model_name <name>` | `kws` | Model name prefix for output files |
+| `--model_flash_addr <addr>` | `0x1000` | Flash address passed to `fetch_model.py` |
+| `--map_mode <int>` | `1` | Akida `MapMode` value |
+| `--info <path>` | — | Path to `_program_info.bin` (use with `--send_ble`) |
+| `--bin <path>` | — | Path to `_program_data.bin` (use with `--send_ble`) |
+| `--yaml <path>` | — | Path to `info.yaml` (use with `--send_ble`) |
+
+Output files are written to `source/external/model_files/<model_name>/`.
+
+---
+
+### Two-Step Workflow (fetch in Docker, BLE send on host)
+
+Run fetch and BLE transfer as two independent commands — useful when the Akida SDK is only available inside Docker but BLE hardware is on the host.
+
+```bash
+cd spark
+
+# Step 1: Fetch model inside Docker → generates bins + info.yaml (no BLE send) 
+For edge learning model
+./scripts/run.sh -d \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000 \
+    --neurons_per_class 15 \
+    --num_el_classes 3 \
+    --map_mode 1
+
+For non-edge learning model
+./scripts/run.sh -d \
+    --model_transfer http://server/akida_model.fbz \
+    --model_name kws \
+    --model_flash_addr 0x101000 \
+    --neurons_per_class 1 \
+    --num_el_classes 0 \
+    --map_mode 1
+
+# Step 2: Send pre-generated files via BLE on the host (no Docker)
+./scripts/run.sh --send_ble \
+    --info source/external/model_files/kws/kws_program_info.bin \
+    --bin  source/external/model_files/kws/kws_program_data.bin \
+    --yaml source/external/model_files/kws/info.yaml
 ```
 
 
@@ -305,6 +768,7 @@ Use the following commands on the console:
 | `dmic_start` | Starts the dmic. |
 | `threads_stop` | Terminate all running threads for testing the WDT. |
 | `wdt_disable` | System crash for watchdog validation. |
+| `device_id` | Print device ID |
 
 __Inference mode__
  -  Default mode, in this mode it captures live audio data and shows the inferred class id.

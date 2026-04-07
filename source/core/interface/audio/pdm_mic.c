@@ -18,6 +18,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/sys_clock.h>
 
+#include "ble_services/ble_initialization.h"
 atomic_t is_dmic_start;
 
 K_MEM_SLAB_DEFINE(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 32);
@@ -75,7 +76,10 @@ static int dc_block_process(dc_block_t *s, int16_t *x, int N, float *rms) {
   // Compute RMS
   float mean = (float)sum_sq / N;
   *rms = sqrtf(mean);
-
+  if (pdm_stream_flag) {
+    uint32_t send_rms = (uint32_t)*rms;
+    send_pdm_data(send_rms);
+  }
   return SUCCESS;
 }
 
@@ -162,6 +166,7 @@ void dmic_capture_thread(void *a, void *b, void *c) {
         /* Queue full → drop buffer safely */
         printk("audio_msgq is full");
       }
+
       memcpy((void *)orig_buf, blk.data, blk.size);
       k_mem_slab_free(&mem_slab, blk.data);
       /*
@@ -173,12 +178,14 @@ void dmic_capture_thread(void *a, void *b, void *c) {
         k_sem_give(&led_sem);
       }
       dmic_capture_thread_cntr++;
-#if IS_ENABLED(CONFIG_WDT_ENABLE)
-      /* Mark thread as healthy */
-      atomic_set(&thread_health[DMIC_CAPTURE], 1);
-#endif
       // printk ("dmic %d\n", dmic_capture_thread_cntr);
     }
+/* Feed WDT regardless of dmic_read() result to avoid trigger when DMIC is
+ * stopped */
+#if IS_ENABLED(CONFIG_WDT_ENABLE)
+    /* Mark thread as healthy */
+    atomic_set(&thread_health[DMIC_CAPTURE], 1);
+#endif
   }
 }
 

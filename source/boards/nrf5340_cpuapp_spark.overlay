@@ -56,7 +56,7 @@
     spi2_default: spi2_default {
         group1 {
             psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
-                    <NRF_PSEL(SPIM_MISO, 1, 8)>,  /* Use P1.08 for MISO on DK board since P0.10 used on custom board is not available */
+                    <NRF_PSEL(SPIM_MISO, 0, 10)>,
                     <NRF_PSEL(SPIM_MOSI, 0, 9)>;
         };
     };
@@ -64,7 +64,7 @@
     spi2_sleep: spi2_sleep {
         group1 {
             psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
-                    <NRF_PSEL(SPIM_MISO, 1, 8)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 10)>,
                     <NRF_PSEL(SPIM_MOSI, 0, 9)>;
             low-power-enable;
         };
@@ -106,25 +106,7 @@
 			low-power-enable;
 		};
 	};
-/* Use alternate SPI pins for camera on nRF5340 DK because P0.17/P0.13/P0.14 are occupied by onboard external flash */
     spi3_default: spi3_default {
-		group1 {
-				psels = <NRF_PSEL(SPIM_SCK, 0, 5)>,
-                        <NRF_PSEL(SPIM_MISO, 0, 6)>,
-                        <NRF_PSEL(SPIM_MOSI, 0, 7)>;
-		};
-	};
-
-	spi3_sleep: spi3_sleep {
-		group1 {
-				psels = <NRF_PSEL(SPIM_SCK, 0, 5)>,
-                        <NRF_PSEL(SPIM_MISO, 0, 6)>,
-                        <NRF_PSEL(SPIM_MOSI, 0, 7)>;
-				low-power-enable;
-		};
-	};
-/* SPI pins for external flash */
-    spi4_default: spi4_default {
 		group1 {
 				psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
 						<NRF_PSEL(SPIM_MOSI, 0, 13)>,
@@ -132,7 +114,7 @@
 		};
 	};
 
-	spi4_sleep: spi4_sleep {
+	spi3_sleep: spi3_sleep {
 		group1 {
 				psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
 						<NRF_PSEL(SPIM_MOSI, 0, 13)>,
@@ -227,27 +209,20 @@ dmic_dev: &pdm0 {
     pinctrl-0 = <&spi3_default>;
     pinctrl-1 = <&spi3_sleep>;
     pinctrl-names = "default", "sleep";
-    cs-gpios = <&gpio0 25 GPIO_ACTIVE_LOW>; /*CS for camera*/
+    cs-gpios = <&gpio0 25 GPIO_ACTIVE_LOW>,
+               <&gpio0 18 GPIO_ACTIVE_LOW>;  /* CS for NRF flash */
+
     /* camera device at index 0 */
     camera: camera@0 {
         compatible = "spi-device";
-        reg = <0>;  /* Uses first CS pin (P0.25) */
+        reg = <0>;  /* Uses first CS pin (P0.11) */
         spi-max-frequency = <16000000>;
         label = "CAMERA";
     };
-};
-&spi4 {
-    compatible = "nordic,nrf-spim";
-    status = "okay";
-    pinctrl-0 = <&spi4_default>;
-    pinctrl-1 = <&spi4_sleep>;
-    pinctrl-names = "default", "sleep";
-    cs-gpios = <&gpio0 18 GPIO_ACTIVE_LOW>;  /* CS for NRF flash */
-
-    /* NRF Flash device at index 0 */
-    ext_flash: flash@0 {
+    /* NRF Flash device at index 1 */
+    ext_flash: flash@1 {
         compatible = "jedec,spi-nor";
-        reg = <0>;
+        reg = <1>;
         spi-max-frequency = <16000000>;
         label = "SPI_FLASH";
 

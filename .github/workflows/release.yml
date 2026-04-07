@@ -1,0 +1,134 @@
+name: Firmware Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [release]
+
+permissions:
+  contents: write
+  packages: read
+
+env:
+  DOCKER_IMAGE: ghcr.io/brainchip-inc/spark-ncs:v3.1.1-py3.12
+
+jobs:
+  build-and-release:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse version from VERSION file
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::VERSION file is empty"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Parsed version: $VERSION"
+
+      - name: Determine release type from PR labels
+        id: release_type
+        run: |
+          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
+          if echo "$LABELS" | grep -q '"release"'; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Release type: official release"
+          elif echo "$LABELS" | grep -q '"pre-release"'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Release type: pre-release"
+          else
+            echo "::error::PR must have either 'release' or 'pre-release' label"
+            exit 1
+          fi
+
+      - name: Check tag does not already exist
+        run: |
+          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ steps.version.outputs.tag }} already exists"
+            exit 1
+          fi
+
+      - name: Free disk space
+        run: |
+          echo "Before cleanup:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
+            /opt/ghc /opt/hostedtoolcache /usr/local/share/boost
+          echo "After cleanup:"
+          df -h /
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull Docker image
+        run: docker pull "$DOCKER_IMAGE"
+
+      - name: Reconstruct production signing key
+        run: |
+          mkdir -p .env
+          echo "${{ secrets.PRODUCTION_SIGNING_KEY_PEM_B64 }}" | base64 -d > .env/signing_key.pem
+          chmod 600 .env/signing_key.pem
+
+      - name: Patch version in prj.conf
+        run: |
+          sed -i 's|CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION=.*|CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION="${{ steps.version.outputs.version }}"|' \
+            source/prj.conf
+          echo "Patched prj.conf:"
+          grep CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION source/prj.conf
+
+      - name: Build firmware (Spark board)
+        run: |
+          ./scripts/run.sh \
+            -d "$DOCKER_IMAGE" \
+            --release \
+            -b \
+            --app demo_apps
+
+      - name: Collect artifacts
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p release-artifacts
+
+          cp build_docker/demo_apps/source/zephyr/zephyr.signed.hex \
+             "release-artifacts/spark-${VERSION}.signed.hex"
+          cp build_docker/demo_apps/source/zephyr/zephyr.signed.bin \
+             "release-artifacts/spark-${VERSION}.signed.bin"
+          cp build_docker/demo_apps/merged.hex \
+             "release-artifacts/spark-${VERSION}-merged.hex"
+          cp build_docker/demo_apps/dfu_application.zip \
+             "release-artifacts/spark-${VERSION}-dfu.zip"
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd release-artifacts
+          sha256sum * > SHA256SUMS.txt
+          echo "Checksums:"
+          cat SHA256SUMS.txt
+
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Spark Firmware ${{ steps.version.outputs.tag }}"
+          prerelease: ${{ steps.release_type.outputs.prerelease }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            release-artifacts/*

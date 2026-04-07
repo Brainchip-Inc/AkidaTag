@@ -73,13 +73,13 @@ macro(setup_akida_engine path)
 		SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/flatbuffers
 	)
 
+	# Disable unneeded FlatBuffers components before fetching
+	set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+	set(FLATBUFFERS_BUILD_FLATC OFF CACHE BOOL "" FORCE)
+
 	FetchContent_MakeAvailable(flatbuffers)
 
 	# Add FlatBuffers include path
 	zephyr_include_directories(${flatbuffers_SOURCE_DIR}/include)
-
-	# Disable unneeded FlatBuffers components
-	set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-	set(FLATBUFFERS_BUILD_FLATC OFF CACHE BOOL "" FORCE)
 	
 endmacro()

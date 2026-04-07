@@ -2,6 +2,10 @@
 #include "akd_spi_flash.h"
 #include "akida.h"
 #include "akida/hardware_device.h"
+extern "C" {
+#include "ble_services/file_transfer.h"
+}
+
 #include "io_objects.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <hardware_device_impl.h>
@@ -132,6 +136,21 @@ void init_akd_1500_spi_flash() {
   printk("Akida1500 SPI Flash initialized on %x %x\n", reg, rw_data.uint_data);
 }
 
+/* helper function to read from SPI flash – used by file_transfer.c for CRC */
+extern "C" void spi_flash_read_helper_func(uint8_t *buf, uint32_t offset,
+                                           uint32_t size) {
+  if (!buf || size == 0) {
+    return;
+  }
+  akida_config_spi(1);
+  int ret = spi_flash_read(spi_driver, offset, buf, size);
+  akida_config_spi(0);
+  if (ret != 0) {
+    printk("spi_flash_read_helper: read failed at 0x%x size=%u (err %d)\n",
+           offset, size, ret);
+  }
+}
+
 /* helper function to invoke flash erase API calls */
 extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
   if (size == 0 || size > (FLASH_MAX_16_MB_SIZE - offset)) {
@@ -212,17 +231,4 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
   if (!ret)
     printk("Flash Write Successful\n");
   akida_config_spi(0);
-}
-
-extern "C" int akida_program_infer() {
-  // program the model info part to AKD1500
-  akida_program_flash((uint8_t *)program_info[app_index],
-                      program_info_len[app_index], flash_offsets[app_index]);
-  akd_device.set_batch_size(1, true);
-  printk("Start inference\n");
-  /* infer function definition should be present in application specific code */
-  if (infer(app_index)) {
-    return 1;
-  }
-  return 0;
 }
