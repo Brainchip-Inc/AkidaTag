@@ -114,6 +114,13 @@ void send_ack(uint8_t ack_code) {
 void learning_completed() { send_ack(ACK_LEARNING_DONE); }
 
 /**
+ * @brief Triggered when the edge learning process is started.
+ *
+ * This function sends an acknowledgement to the BLE central
+ * indicating that the training process has started.
+ */
+void learning_started() { send_ack(ACK_LEARNING_START); }
+/**
  * @brief Handles commands written by the BLE central device.
  *
  * This function is triggered when the mobile application

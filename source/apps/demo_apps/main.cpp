@@ -468,7 +468,9 @@ static void learn_to_ls(void) {
             saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
       saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
           1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
-      learning_completed();
+      if (is_ble_connected() && event_flag) {
+        learning_completed();
+      }
       printk("Save Weights from MESH->MEM \n\r");
     } else {
       printk("Sync:akida_save_learn_weights function has failed for label %d ",
@@ -658,6 +660,9 @@ static void switch_learning_delayed(struct k_work *work) {
 
   if (cur_kws_edge_state == STATE_LEARN_SELECT) {
     cur_kws_edge_state = STATE_LEARNING;
+    if (is_ble_connected() && event_flag) {
+      learning_started();
+    }
     printk("learn_select -> learning");
     last_learn_ts = time_ms();
     k_work_reschedule(&switch_delayed_work, K_SECONDS(5));

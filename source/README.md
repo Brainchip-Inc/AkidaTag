@@ -446,9 +446,9 @@ MOBILE APP                    BLE STACK                    FIRMWARE
      │                              │                             │
      ├───Write Command──────────────┼────────────────────────────►│
      │    [CMD=1] Start Learning    │                             │
-     │                              │                             ├───Begin training process
-     │                              │                             │   
-     │                              │                             │
+     │◄──Receive ACK────────────────┼─────────────────────────────┤───Begin training process
+     │    [ACK=0xA6]                │                             │   
+     │    (Learning started)        │                             │
      │                              │                             │
      │◄──Receive ACK────────────────┼─────────────────────────────┤
      │    [ACK=0xA7]                │                             │   learning_completed()
