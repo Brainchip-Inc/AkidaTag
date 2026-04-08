@@ -377,7 +377,7 @@ void send_event(int cmd, const char *label, float value) {
  *
  * @return void (errors are logged internally)
  */
-static void send_ack(uint8_t ack_code, command_type_t cmd) {
+void send_ack(uint8_t ack_code, command_type_t cmd) {
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
 

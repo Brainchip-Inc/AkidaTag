@@ -29,6 +29,7 @@
 #include "akd_spi_flash_handler.h"
 #include "akida.h"
 #include "akida/hardware_device.h"
+#include "akida_panic_exception.h"
 #include "io_objects.h"
 #include "nrf_spi.h"
 #include "sample_input/kws/kws_inputs.h"
@@ -367,11 +368,13 @@ extern "C" void msleep(uint32_t duration) { k_sleep(K_MSEC(duration)); }
 extern "C" void reset_spectrogram_index(void);
 
 void panic(const char *format, ...) {
+  char buf[128];
   va_list args;
   va_start(args, format);
-  vfprintf(stderr, format, args);
+  vsnprintf(buf, sizeof(buf), format, args);
   va_end(args);
-  exit(EXIT_FAILURE);
+  printk("[PANIC] %s\n", buf);
+  throw AkidaPanicException(buf);
 }
 
 static bool kws_model_present = false;
@@ -1001,28 +1004,33 @@ int main(void) {
   uint32_t s_dma_cycls = akd_device.read_clock_counter();
   uint64_t start_time = time_ms();
 
-  akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len,
-                      kws_meta.flash_address, &is_el_model);
+  if (SUCCESS == akida_program_flash(sram_upload_buffer,
+                                     (int)kws_meta.info_data_len,
+                                     kws_meta.flash_address, &is_el_model)) {
 
-  uint32_t prog_time = (uint32_t)(time_ms() - start_time);
-  uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
-  uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
-  printk("\nModel program: %u dma cycles, %u us dma, %u ms cpu\n", delta_cycle,
-         dma_time, prog_time);
+    uint32_t prog_time = (uint32_t)(time_ms() - start_time);
+    uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+    uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
+    printk("\nModel program: %u dma cycles, %u us dma, %u ms cpu\n",
+           delta_cycle, dma_time, prog_time);
 
-  akd_device.set_batch_size(1, true);
-  kws_model_present = true;
-  update_model_params(kws_meta);
+    akida_batch_size(1, true);
+    kws_model_present = true;
+    update_model_params(kws_meta);
 
-  if (check_model_compatibility(is_el_model, kws_meta) != SUCCESS) {
-    return -1;
+    if (check_model_compatibility(is_el_model, kws_meta) != SUCCESS) {
+      return -1;
+    }
+
+    initiate_kws_inference(is_el_model);
+    is_kws_inference_started = true;
+
+    printk("data to check : model_size %d, class %d \n",
+           kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
+  } else {
+    printk("main: akida_program_flash failure, model is not programmed to "
+           "akida due to a failure \n\r");
   }
-
-  initiate_kws_inference(is_el_model);
-  is_kws_inference_started = true;
-
-  printk("data to check : model_size %d, class %d \n",
-         kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
   start_imu_proc();
 #endif
@@ -1201,6 +1209,9 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       }
     } else {
       printk("akida_forward failure\n");
+      if (is_ble_connected()) {
+        send_ack(ACK_AKIDA_ERROR, CMD_ERROR);
+      }
     }
   }
   return ret;
@@ -1353,8 +1364,14 @@ static int32_t learning_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
 
   int ret = 0;
   if (params.sync_api == 0) {
-    akida_fit(input, input_shape, &label_id);
-    printk("Sync:learning done for class@ %d", cur_kws_edge_novel_class);
+    if (SUCCESS == akida_fit(input, input_shape, &label_id)) {
+      printk("Sync:learning done for class@ %d", cur_kws_edge_novel_class);
+    } else {
+      printk("Sync:learning failed for class@ %d\n", cur_kws_edge_novel_class);
+      if (is_ble_connected()) {
+        send_ack(ACK_AKIDA_ERROR, CMD_ERROR);
+      }
+    }
 
   } else {
 
@@ -1480,10 +1497,15 @@ extern "C" int infer(int app_index_l) {
   update_model_params(infer_meta);
 
   /* Step 6: program Akida */
-  akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
-                      infer_meta.flash_address, &is_el_model);
+  if (SUCCESS != akida_program_flash(sram_upload_buffer,
+                                     (int)infer_meta.info_data_len,
+                                     infer_meta.flash_address, &is_el_model)) {
+    printk("infer: akida_program_flash failure, model is not programmed to "
+           "akida due to a failure \n\r");
+    return -1;
+  }
 
-  akd_device.set_batch_size(1, true);
+  akida_batch_size(1, true);
   app_index = app_index_l;
 
   if (check_model_compatibility(is_el_model, infer_meta) != SUCCESS) {

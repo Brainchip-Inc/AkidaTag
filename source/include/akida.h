@@ -86,8 +86,9 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
  * @param input_dims the input data dimensions
  * @param input_label the class where the input should belong
  *
+ * @return SUCCESS if no error occurred else error code
  */
-void akida_fit(uint8_t *input, uint32_t *input_dims, int32_t *input_label);
+int akida_fit(uint8_t *input, uint32_t *input_dims, int32_t *input_label);
 
 /**
  * Enqueues input to akida

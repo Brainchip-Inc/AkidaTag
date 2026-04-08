@@ -44,6 +44,7 @@ typedef enum {
   CMD_STREAM_START = 9,
   CMD_DEPLOY_STOP = 10,
   CMD_STREAM_STOP = 11,
+  CMD_ERROR = 12,
 } command_type_t;
 
 /* Structure representing a parsed command frame received from the host */
@@ -83,4 +84,18 @@ typedef enum { FLAG_DISABLE = 0, FLAG_ENABLE = 1 } flag_state_t;
  * Includes the detected keyword and its confidence score.
  */
 void send_event(int cmd, const char *label, float value);
+
+/**
+ * @brief Acknowledgement code sent when the Akida engine encounters an error.
+ */
+#define ACK_AKIDA_ERROR 0xAE
+
+/**
+ * @brief Send an acknowledgment response to the mobile app.
+ *
+ * @param ack_code Acknowledgment code
+ * @param cmd The command type being acknowledged
+ */
+void send_ack(uint8_t ack_code, command_type_t cmd);
+
 #endif /* BLE_INITIALIZATION_H */

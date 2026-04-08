@@ -1,4 +1,5 @@
 #include "ble_services/edge_learning.h"
+#include "ble_services/ble_initialization.h"
 
 static void edge_ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,
                                      uint16_t value);
@@ -82,36 +83,12 @@ static void edge_ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,
 }
 
 /**
- * @brief Sends an acknowledgement notification to the BLE central.
- *
- * This function notifies the connected BLE central device
- * that a specific operation has completed.
- *
- * @param ack_code Acknowledgement sent to the central device.
- */
-void send_ack(uint8_t ack_code) {
-  if (!notify_enabled) {
-    printk("Notify not enabled");
-    return;
-  }
-
-  int err =
-      bt_gatt_notify(NULL, &edge_service.attrs[3], &ack_code, sizeof(ack_code));
-
-  if (err) {
-    printk("Failed to send ACK (err %d)", err);
-  } else {
-    printk("ACK sent: 0x%02X", ack_code);
-  }
-}
-
-/**
  * @brief Triggered when the edge learning process is completed.
  *
  * This function sends an acknowledgement to the BLE central
  * indicating that the training process has finished.
  */
-void learning_completed() { send_ack(ACK_LEARNING_DONE); }
+void learning_completed() { send_ack(ACK_LEARNING_DONE, CMD_DEPLOY_START); }
 
 /**
  * @brief Handles commands written by the BLE central device.

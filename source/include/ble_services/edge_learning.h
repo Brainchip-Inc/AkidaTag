@@ -27,4 +27,5 @@ static ssize_t edge_cmd_write(struct bt_conn *conn,
  * @brief Notify that edge learning has completed.
  */
 void learning_completed(void);
+
 #endif /* EDGE_LEARNING_H_ */
