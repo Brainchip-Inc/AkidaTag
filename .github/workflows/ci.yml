@@ -3,6 +3,18 @@ name: HIL_Test
 on:
   pull_request:
     branches: [ main ]
+  push:
+    branches: [ main ]
+
+env:
+  MODEL_NAME: kws
+  MODEL_FLASH_ADDR: 0x101000
+  MODEL_URL: https://drive.usercontent.google.com/download?id=19iPANlklDn_OAmPVgurPpCCfZnxyNkaf&export=download&authuser=0
+  MAP_MODE: 1
+
+concurrency:
+  group: hil-hardware-test
+  cancel-in-progress: false
 
 jobs:
   hardware-test:
@@ -10,27 +22,38 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
+      
+      - name: Run clang-format check
+        timeout-minutes: 5
+        run: |
+          ./scripts/clang_format.sh check
+        
       - name: Generate Signing Key
+        timeout-minutes: 5
         run: |
           ./scripts/run.sh -d --key
 
       - name: Transfer Model
+        timeout-minutes: 10
         run: |
           ./scripts/run.sh -d \
-          --model_transfer "https://drive.usercontent.google.com/download?id=19iPANlklDn_OAmPVgurPpCCfZnxyNkaf&export=download&authuser=0" \
-          --model_name kws \
-          --model_flash_addr 0x101000 \
-          --map_mode 1
+          --model_transfer "${MODEL_URL}" \
+          --model_name "${MODEL_NAME}" \
+          --model_flash_addr "${MODEL_FLASH_ADDR}" \
+          --map_mode "${MAP_MODE}"
+        
       - name: Build and Flash
+        timeout-minutes: 10
         run: |
           ./scripts/run.sh -d -b -f --dk --app demo_apps
 
       - name: Run CLI Test
+        timeout-minutes: 10
         run: |
           ./scripts/run.sh -d -t
       
       - name: Upload Model
+        timeout-minutes: 10
         run: |
           /home/demo/.conda/envs/spark/bin/python source/utils/send_model_via_ble.py \
           --info source/external/model_files/kws/kws_program_info.bin \
@@ -38,5 +61,6 @@ jobs:
           --yaml source/external/model_files/kws/info.yaml
 
       - name: Run inference CLI Test
+        timeout-minutes: 10
         run: |
           ./scripts/run.sh -d -t --infer-test

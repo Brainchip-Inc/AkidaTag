@@ -12,7 +12,24 @@ import os
 import sys
 import yaml
 import zlib
-DEVICE_NAME = "Akida_Tag"
+import re
+
+def get_device_name():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    prj_file = os.path.abspath(os.path.join(script_dir, "..", "prj.conf"))
+
+    if not os.path.exists(prj_file):
+        print("Warning: prj.conf not found")
+        return None
+
+    with open(prj_file, "r") as f:
+        for line in f:
+            match = re.match(r'CONFIG_BT_DEVICE_NAME="(.+)"', line)
+            if match:
+                return match.group(1)
+
+    return None
+
 def compute_data_crc32(data_path):
     """CRC32 over raw model data binary file bytes."""
     crc = 0xFFFFFFFF
@@ -552,7 +569,13 @@ if __name__ == "__main__":
     parser.add_argument("--fs_name", default=None,
                         help="LittleFS path for model metadata "
                              "(default: /model_meta/<prefix>, e.g. /model_meta/kws_el)")
-
     args = parser.parse_args()
+
+    DEVICE_NAME = get_device_name()
+    if DEVICE_NAME is None:
+        print("Error: CONFIG_BT_DEVICE_NAME not found in prj.conf")
+        sys.exit(1)
+
+    print("Device Name:", DEVICE_NAME)
 
     asyncio.run(main(args))

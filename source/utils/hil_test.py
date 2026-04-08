@@ -357,40 +357,43 @@ def run_tests(port, baudrate, timeout, only_infer):
     ser = serial.Serial(port, baudrate=baudrate, timeout=1)
     ser.reset_input_buffer()
 
-    if only_infer:
-        reset_board()
+    try:
+        if only_infer:
+            reset_board()
+            time.sleep(2)
+            result = test_infer_kws(ser, timeout)
+            return 0 if result else 1
+
+        if not test_akida_id(ser, timeout):
+            return 1
+
+        if not test_akida_sram(ser, timeout):
+            return 1
+
+        if not test_akida_flash_id(ser, timeout):
+            return 1
+
+        if not test_akida_full_erase(ser, 360):
+            return 1
+
         time.sleep(2)
-        result = test_infer_kws(ser, timeout)
+        if not test_wdt(ser, timeout):
+            return 1
+
+        if not test_dmic(ser, timeout):
+            return 1
+
+        time.sleep(2)
+
+        if not test_imu(ser, timeout):
+            return 1
+
+        print("\nALL TESTCASES PASSED")
+        return 0
+
+    finally:
+        print("Closing serial port")
         ser.close()
-        return 0 if result else 1
-
-    if not test_akida_id(ser, timeout):
-        return 1
-
-    if not test_akida_sram(ser, timeout):
-        return 1
-
-    if not test_akida_flash_id(ser, timeout):
-        return 1
-
-    if not test_akida_full_erase(ser, 360):
-        return 1
-
-    time.sleep(2)
-    if not test_wdt(ser, timeout):
-        return 1
-
-    if not test_dmic(ser, timeout):
-        return 1
-
-    time.sleep(2)
-
-    if not test_imu(ser, timeout):
-        return 1
-
-    print("\nALL TESTCASES PASSED")
-    ser.close()
-    return 0
 
 
 if __name__ == "__main__":

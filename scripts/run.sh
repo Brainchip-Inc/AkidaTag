@@ -171,7 +171,7 @@ BUILD_DIR="${BUILD_DIR:-}"
 DO_CLI_TEST=false
 CLI_PORT="/dev/ttyUSB0"
 # -----------------------------------------------------------------------------
-# Funcitons
+# Functions
 # -----------------------------------------------------------------------------
 
 die() { echo "Error: $*" >&2; exit 1; }
@@ -332,10 +332,7 @@ if $SEND_BLE && [[ -z "$MODEL_INFO" || -z "$MODEL_BIN" || -z "$MODEL_YAML" ]]; t
     echo "Error: --send_ble requires --info, --bin, and --yaml"
     exit 1
 fi
-# Map the host serial port to Docker container when CLI test is enabled so the test script can communicate with the board
-if $DO_CLI_TEST; then
-    DOCKER_RUN_BASE+=(--device "${CLI_PORT}:${CLI_PORT}")
-fi
+
 # -----------------------------------------------------------------------------
 # BLE needed?
 #   - if --send_ble requested (sending model via BLE), OR
@@ -371,6 +368,11 @@ DOCKER_RUN_BASE=(
 # Add interactive mode only if terminal exists
 if [ -t 1 ]; then
     DOCKER_RUN_BASE+=(-it)
+fi
+
+# Map the host serial port to Docker container when CLI test is enabled so the test script can communicate with the board
+if $DO_CLI_TEST; then
+    DOCKER_RUN_BASE+=(--device "${CLI_PORT}:${CLI_PORT}")
 fi
 
 if $IS_LINUX; then
