@@ -650,6 +650,13 @@ static void init_learn_weights_mem(uint32_t layer_mem_size) {
 }
 
 static struct k_work_delayable switch_delayed_work;
+
+static struct k_work_delayable akd_async_test_work;
+static void akd_async_test_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  k_sem_give(&akd_async_sem);
+}
+
 static void switch_learning_delayed(struct k_work *work) {
   ARG_UNUSED(work);
 
@@ -955,7 +962,8 @@ volatile uint64_t inference_start_ts = 0;
 
 static void akd_async_isr_handler(const struct device *dev,
                                   struct gpio_callback *cb, uint32_t pins) {
-  k_sem_give(&akd_async_sem);
+  
+                                      k_sem_give(&akd_async_sem);
 }
 
 static void akd_async_thread(void *a, void *b, void *c) {
@@ -1153,6 +1161,13 @@ int main(void) {
         &akd_async_thread_data, akd_async_stack, AKD_ASYNC_STACK_SIZE,
         akd_async_thread, NULL, NULL, NULL, AKD_ASYNC_PRIORITY, 0, K_NO_WAIT);
     k_thread_name_set(akd_async_tid, "akd_async");
+    k_work_init_delayable(&akd_async_test_work, akd_async_test_handler);
+
+    printk(" Akida Async is initialized \n\r");
+  }
+  else
+  {
+  printk(" Akida sync is initialized \n\r");
   }
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
@@ -1467,6 +1482,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     do {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akd_device.read_clock_counter();
+    
       ret = akida_enqueue(input, input_shape, NULL);
       uint32_t enq_time = time_ms() - inference_start_ts;
       {
@@ -1475,6 +1491,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         // capture_power(true, &power_tmp, &power_tmp);
       }
     } while (ret);
+    k_work_reschedule(&akd_async_test_work, K_MSEC(35));
+    
   }
   return ret;
 }

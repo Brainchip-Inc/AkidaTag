@@ -146,12 +146,9 @@ CLI_TEST_CMD=""
 DK_OVERLAY=false
 MODEL_TRANSFER_NEURONS_PER_CLASS=1
 MODEL_TRANSFER_NUM_EL_CLASSES=0
-<<<<<<< HEAD
 DO_INFER_TEST=false
-=======
 MODEL_TRANSFER_SYNC_MODE="async"
 
->>>>>>> 689cb63 (chore(run): add support to akida async)
 
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
