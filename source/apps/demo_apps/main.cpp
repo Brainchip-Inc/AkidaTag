@@ -61,6 +61,9 @@ extern "C" {
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 #include "imu_h/imu.h"
 #endif
+#ifdef CONFIG_SPARK_BOARD
+#include "button/user_button.h"
+#endif
 #include "led_init.h"
 #include "littlefs_storage.h"
 #include "pdm_mic.h"
@@ -174,19 +177,6 @@ static const struct gpio_dt_spec enable_akd_0V =
 
 static const struct gpio_dt_spec enable_camera =
     GPIO_DT_SPEC_GET(CAM_ENB_NODE, gpios);
-/* ---------- Buttons ---------- */
-#define USER_BTN_NODE DT_ALIAS(user_button)
-
-static const struct gpio_dt_spec user_btn =
-    GPIO_DT_SPEC_GET(USER_BTN_NODE, gpios);
-
-static struct gpio_callback user_cb;
-
-/* ---------- Button Callbacks ---------- */
-void user_pressed(const struct device *dev, struct gpio_callback *cb,
-                  uint32_t pins) {
-  printf("User button pressed\n");
-}
 #endif
 static struct kws_demo_params {
   int energy_threshold;
@@ -468,6 +458,8 @@ static void learn_to_ls(void) {
             saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
       saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
           1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
+      /* Completed ACK is sent only when BLE is connected and the KWS
+       * application is deployed */
       if (is_ble_connected() && event_flag) {
         learning_completed();
       }
@@ -660,6 +652,8 @@ static void switch_learning_delayed(struct k_work *work) {
 
   if (cur_kws_edge_state == STATE_LEARN_SELECT) {
     cur_kws_edge_state = STATE_LEARNING;
+    /* Started ACK is sent only when BLE is connected and the KWS application is
+     * deployed */
     if (is_ble_connected() && event_flag) {
       learning_started();
     }
@@ -964,10 +958,6 @@ static int gpio_init(void) {
     printk("Camera enable GPIO not ready\n");
     return -ENODEV;
   }
-  if (!gpio_is_ready_dt(&user_btn)) {
-    printf("User button GPIO not ready\n");
-    return -ENODEV;
-  }
 
   /* --- Configure control pins as output inactive --- */
   err = gpio_pin_configure_dt(&enable_akd, GPIO_OUTPUT_INACTIVE);
@@ -999,29 +989,7 @@ static int gpio_init(void) {
     return err;
   }
 
-  /* --- Configure buttons as input --- */
-  err = gpio_pin_configure_dt(&user_btn, GPIO_INPUT);
-  if (err) {
-    printf("Failed to configure user button (err %d)\n", err);
-    return err;
-  }
-
-  /* --- Configure button interrupts --- */
-  err = gpio_pin_interrupt_configure_dt(&user_btn, GPIO_INT_EDGE_TO_ACTIVE);
-  if (err) {
-    printf("Failed to configure user button interrupt (err %d)\n", err);
-    return err;
-  }
-
-  /* --- Register button callbacks --- */
-  gpio_init_callback(&user_cb, user_pressed, BIT(user_btn.pin));
-  err = gpio_add_callback(user_btn.port, &user_cb);
-  if (err) {
-    printf("Failed to add user button callback (err %d)\n", err);
-    return err;
-  }
-
-  printf("GPIO + Buttons initialized\n");
+  printf("GPIO initialized\n");
   return 0;
 }
 /**
@@ -1039,15 +1007,10 @@ static int gpio_init(void) {
  */
 static void spark_peripherals_power_enable(void) {
   gpio_pin_set_dt(&enable_akd_0V, GPIO_ENABLE);
-  k_msleep(2); /* 0V rail settle time */
   gpio_pin_set_dt(&enable_akd, GPIO_ENABLE);
-  k_msleep(2); /* AKD1500 power-up time */
   gpio_pin_set_dt(&enable_acc, GPIO_ENABLE);
-  k_msleep(2);
   gpio_pin_set_dt(&enable_pdm, GPIO_ENABLE);
-  k_msleep(2);
   gpio_pin_set_dt(&enable_camera, GPIO_ENABLE);
-  k_msleep(2);
 }
 #endif
 int main(void) {
@@ -1067,6 +1030,10 @@ int main(void) {
   if (err_gpio) {
     printf("GPIO init failed (err %d)\n", err_gpio);
     return -1;
+  }
+  int err_button = user_button_init();
+  if (err_button) {
+    printk("User button init failed\n");
   }
   spark_peripherals_power_enable();
 #endif
@@ -1360,6 +1327,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
           printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
                  confidence * 100.0f, score, inf_time, dma_time);
         }
+        /* KWS data is sent only when BLE is connected and the KWS application
+         * is deployed */
         if (is_ble_connected() && event_flag) {
           send_event(CMD_DEPLOY_START, kws_new_tags[found],
                      confidence * 100.0f);

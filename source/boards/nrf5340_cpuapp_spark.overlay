@@ -192,7 +192,7 @@ dmic_dev: &pdm0 {
         compatible = "jedec,spi-nor";
         reg = <1>;
         spi-max-frequency = <8000000>;
-        size = <DT_SIZE_M(16)>;
+        size = <DT_SIZE_M(128)>;
         jedec-id = [20 bb 18];
         has-dpd;
         t-enter-dpd = <10000>;
