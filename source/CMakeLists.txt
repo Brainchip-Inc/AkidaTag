@@ -76,6 +76,11 @@ if(CONFIG_SPARK_BOARD)
         core/common/button/user_button.c
     )
 endif()
+if(CONFIG_SPARK_BOARD)
+    target_sources(app PRIVATE
+        core/common/gpio/gpio.c
+    )
+endif()
 target_sources(app PRIVATE
     core/common/audio/kissfft/kiss_fft.c
     core/common/audio/kissfft/kiss_fftr.c
