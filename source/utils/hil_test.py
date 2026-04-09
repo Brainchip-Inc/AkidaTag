@@ -50,7 +50,7 @@ def test_akida_id(ser, timeout):
             print(f"RX: {line}")
 
             if "word 0:" in line.lower():
-                value = line.split("Word 0:")[-1].strip().lower()
+                value = line.lower().split("word 0:")[-1].strip()
 
                 if value == "0x0903a1bc":
                     print("TESTCASE 1 PASSED - Correct Akida Device ID")

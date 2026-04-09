@@ -674,7 +674,7 @@ static int32_t cmd_imu_stop(const struct shell *shell, size_t argc,
   printk("Overflows:     %u\n", overflow_count);
   printk("Errors:        %u\n", error_count);
 #endif
-  printk("IMU_STOPPED");
+  printk("IMU_STOPPED\n\r");
   return 0;
 }
 

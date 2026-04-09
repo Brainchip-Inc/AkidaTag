@@ -231,6 +231,33 @@ static int cmd_dmic_start(const struct shell *shell, size_t argc, char **argv) {
   return 0;
 }
 
+/**
+ * @brief DMIC functional test command.
+ *
+ * This CLI command initializes and starts the DMIC (Digital Microphone) and
+ * verifies that audio data blocks are received at the expected interval.
+ *
+ * The function reads audio blocks using dmic_read() and measures the time
+ * difference between consecutive reads using k_uptime_get(). If the interval
+ * between reads falls within the expected range (50 ms to 70 ms), it is
+ * considered a valid cycle. The test passes after detecting 5 consecutive
+ * valid cycles.
+ *
+ * A global timeout of 5 seconds is used to prevent the loop from running
+ * indefinitely if the expected timing condition is not met.
+ *
+ * Test outcomes:
+ * - PASS: 5 consecutive valid cycles detected within the expected timing range.
+ * - TIMEOUT: Test duration exceeds the allowed timeout period.
+ * - FAIL: DMIC initialization/start failure or read timeout.
+ *
+ * @param shell Pointer to the Zephyr shell instance.
+ * @param argc  Number of command-line arguments.
+ * @param argv  Array of command-line arguments.
+ *
+ * @return 0 on successful execution of the command, negative error code on
+ * failure.
+ */
 static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
     printk("Invalid command\n");
@@ -253,9 +280,15 @@ static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
   int valid_cycles = 0;
 
   int64_t prev_time = k_uptime_get();
+  int64_t test_start = k_uptime_get();
 
   while (1) {
 
+    /* Global timeout check (5 seconds) */
+    if (k_uptime_get() - test_start > 5000) {
+      printk("DMIC TEST TIMEOUT\n");
+      break;
+    }
     int ret = dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT);
 
     if (ret == 0) {
@@ -265,7 +298,8 @@ static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
       prev_time = now;
 
       printk("DMIC data received: %lld ms\n", diff);
-
+      // Check if the interval between consecutive DMIC data blocks is within
+      // the expected 50–70 ms range
       if (diff >= 50 && diff <= 70) {
         valid_cycles++;
         printk("Cycle %d OK\n", valid_cycles);
