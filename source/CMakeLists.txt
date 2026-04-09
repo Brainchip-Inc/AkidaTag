@@ -73,8 +73,9 @@ if(CONFIG_CAMERA_ENABLE_THREAD)
 endif()
 if(CONFIG_SPARK_BOARD)
     target_sources(app PRIVATE
-        core/interface/button/user_button.c
         core/interface/gpio/gpio.c
+        core/interface/button/user_button.c
+        core/interface/current_ic/current_ic.c
     )
 endif()
 

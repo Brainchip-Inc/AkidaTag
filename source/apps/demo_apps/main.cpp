@@ -64,6 +64,7 @@ extern "C" {
 #endif
 #ifdef CONFIG_SPARK_BOARD
 #include "button/user_button.h"
+#include "current_ic/current_ic.h"
 #include "gpio/gpio.h"
 #endif
 #include "led_init.h"
@@ -1083,6 +1084,16 @@ int main(void) {
     printk("User button init failed\n");
   }
   spark_peripherals_power_enable();
+  err_gpio = bat_sts_gpio_init();
+  if (err_gpio) {
+    printf("Battery status GPIO init failed (err %d)\n", err_gpio);
+    return -1;
+  }
+  int ret = current_ic_init();
+  if (ret) {
+    printf("Current ic init failed (err %d)\n", ret);
+  }
+
 #endif
   uart_init();
   start_led_ind();
@@ -1238,6 +1249,9 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
     if (all_threads_healthy()) {
       wdt_feed(wdt, wdt_channel_id);
     }
+#endif
+#ifdef CONFIG_SPARK_BOARD
+    read_current_ic();
 #endif
     prcess_led();
   }
