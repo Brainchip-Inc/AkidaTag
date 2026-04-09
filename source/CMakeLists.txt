@@ -71,6 +71,12 @@ if(CONFIG_CAMERA_ENABLE_THREAD)
         core/interface/camera/spi_camera.c
     )
 endif()
+if(CONFIG_SPARK_BOARD)
+    target_sources(app PRIVATE
+        core/interface/button/user_button.c
+        core/interface/gpio/gpio.c
+    )
+endif()
 
 target_sources(app PRIVATE
     core/common/audio/kissfft/kiss_fft.c

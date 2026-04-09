@@ -91,16 +91,16 @@ uint8_t pdm_stream_flag = FLAG_DISABLE;
  *   - Bytes 2-4: Firmware Version (e.g., "241" for v2.4.1)
  *   - Bytes 5-11: Chip ID (e.g., "AKD1500")
  */
-static const uint8_t adv_manufacturer_data[] = {
+uint8_t adv_manufacturer_data[] = {
 
     /* BLE Protocol Version (2 bytes) - BLE 5.3 */
     0x35, // (decimal) 53 = ASCII '5'
     0x33, // (decimal) 51 = ASCII '3'
 
-    /* Firmware Version (3 bytes) - v2.4.1 */
-    0x32, // (decimal) 50 = ASCII '2'
-    0x34, // (decimal) 52 = ASCII '4'
-    0x31, // (decimal) 49 = ASCII '1'
+    /* Firmware Version (3 bytes) - v0.0.0 */
+    0x30, // (decimal) 50 = ASCII '2'
+    0x30, // (decimal) 52 = ASCII '4'
+    0x30, // (decimal) 49 = ASCII '1'
 
     /* Chip ID - AKD1500 */
     0x41, // (decimal) 65 = ASCII 'A'

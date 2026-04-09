@@ -1,4 +1,5 @@
 #include "boot_manager.h"
+#include "ble_services/ble_initialization.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -8,7 +9,6 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/storage/flash_map.h>
-
 LOG_MODULE_REGISTER(boot_manager, LOG_LEVEL_INF);
 
 static uint32_t total_boot_count = 0;
@@ -186,6 +186,10 @@ void print_image_version(uint8_t area_id, const char *name) {
     LOG_INF("%s Version: %d.%d.%d+%d\n", name, header.h.v1.sem_ver.major,
             header.h.v1.sem_ver.minor, header.h.v1.sem_ver.revision,
             header.h.v1.sem_ver.build_num);
+    /* Update Firmware Version in Manufacturer Data */
+    adv_manufacturer_data[2] = '0' + header.h.v1.sem_ver.major;
+    adv_manufacturer_data[3] = '0' + header.h.v1.sem_ver.minor;
+    adv_manufacturer_data[4] = '0' + header.h.v1.sem_ver.revision;
   } else {
     LOG_ERR("Failed to read %s image header\n", name);
   }
