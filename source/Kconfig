@@ -86,7 +86,10 @@ config DK_BOARD
     depends on BT
     help
       This enables the DK Board specific initialization.
-
+config SPARK_BOARD
+    bool "Enable spark Board specific initialization"
+    help
+      This enables the spark Board specific initialization.
 config SAMPLING_RATE
     int "Sampling Rate"
     default 16000

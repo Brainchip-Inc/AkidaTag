@@ -61,6 +61,10 @@ extern "C" {
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 #include "imu_h/imu.h"
 #endif
+#ifdef CONFIG_SPARK_BOARD
+#include "button/user_button.h"
+#include "gpio/gpio.h"
+#endif
 #include "led_init.h"
 #include "littlefs_storage.h"
 #include "pdm_mic.h"
@@ -152,6 +156,7 @@ static void reset_kws_spectrogram(void);
 #else
 #define DEFAULT_INFERENCE_SAMPLE_THRESHOLD 3
 #endif
+
 static struct kws_demo_params {
   int energy_threshold;
   int bin0_threshold;
@@ -432,7 +437,11 @@ static void learn_to_ls(void) {
             saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
       saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
           1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
-      learning_completed();
+      /* Completed ACK is sent only when BLE is connected and the KWS
+       * application is deployed */
+      if (is_ble_connected() && event_flag) {
+        learning_completed();
+      }
       printk("Save Weights from MESH->MEM \n\r");
     } else {
       printk("Sync:akida_save_learn_weights function has failed for label %d ",
@@ -622,6 +631,11 @@ static void switch_learning_delayed(struct k_work *work) {
 
   if (cur_kws_edge_state == STATE_LEARN_SELECT) {
     cur_kws_edge_state = STATE_LEARNING;
+    /* Started ACK is sent only when BLE is connected and the KWS application is
+     * deployed */
+    if (is_ble_connected() && event_flag) {
+      learning_started();
+    }
     printk("learn_select -> learning");
     last_learn_ts = time_ms();
     k_work_reschedule(&switch_delayed_work, K_SECONDS(5));
@@ -898,6 +912,18 @@ int main(void) {
   watchdog_init(&wdt, &wdt_channel_id);
 #endif
 
+#ifdef CONFIG_SPARK_BOARD
+  int err_gpio = gpio_init();
+  if (err_gpio) {
+    printf("GPIO init failed (err %d)\n", err_gpio);
+    return -1;
+  }
+  int err_button = user_button_init();
+  if (err_button) {
+    printk("User button init failed\n");
+  }
+  spark_peripherals_power_enable();
+#endif
   uart_init();
   start_led_ind();
   led_set_state(LED_STATE_NORMAL_APP);
@@ -1188,7 +1214,9 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
           printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
                  confidence * 100.0f, score, inf_time, dma_time);
         }
-        if (is_ble_connected()) {
+        /* KWS data is sent only when BLE is connected and the KWS application
+         * is deployed */
+        if (is_ble_connected() && event_flag) {
           send_event(CMD_DEPLOY_START, kws_new_tags[found],
                      confidence * 100.0f);
         }
