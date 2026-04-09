@@ -1,5 +1,6 @@
 
 #include "ble_services/ble_initialization.h"
+#include "current_ic/current_ic.h"
 #include "led_init.h"
 #include <hal/nrf_ficr.h>
 #include <zephyr/logging/log.h>
@@ -13,7 +14,7 @@ LOG_MODULE_REGISTER(ble_initialization, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define RUN_STATUS_LED DK_LED1
 #define CON_STATUS_LED DK_LED2
-#define RUN_LED_BLINK_INTERVAL 1000
+#define RUN_LED_BLINK_INTERVAL 100
 #define USER_LED DK_LED3
 #define USER_BUTTON DK_BTN1_MSK
 #define ACK_DONE 0xAA
@@ -72,7 +73,7 @@ char processor[] = "AKIDA_1500";
 char model_version[] = "v1.1.0";
 static uint16_t akd_nodes = 8;
 float pwr_con = 2.3f;
-
+bat_status bat_sts;
 /* Flag indicating whether deployment mode is active.
  * Set when CMD_DEPLOY_START is received and cleared on CMD_DEPLOY_STOP.
  */
@@ -216,14 +217,15 @@ static bool parse_incoming_frame(const char *data, parsed_frame_t *frame) {
 /**
  * @brief Send battery level response to phone
  *
- * Format: "0,0,<size>,0:<level>\r"
+ * Format: "0,0,<size>,0:<level>,<Status>\r"
  * Updates GATT characteristic and sends via NUS.
  */
 static void send_battery_response(void) {
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
-
-  snprintf(data_part, sizeof(data_part), "%d:%d\r", CMD_BATTERY, battery_level);
+  bat_sts = check_bat_status();
+  snprintf(data_part, sizeof(data_part), "%d:%d,%d\r", CMD_BATTERY,
+           battery_level, bat_sts);
   int data_len = strlen(data_part);
 
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,

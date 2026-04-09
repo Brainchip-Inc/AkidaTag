@@ -431,6 +431,36 @@ Phone displays the data - The app receives and presents the information to the u
 
 NOTE: A static MAC address is required for phone app testing. Hence, CONFIG_BT_PRIVACY is disabled(CONFIG_BT_PRIVACY = n). Ensure this is re-enabled for the final production build.
 
+## Current Monitoring IC & Battery Status
+This module provides battery charger status monitoring and current sensing capabilities using GPIO status pins and an external current monitoring IC (ADC-based). It enables real-time tracking of battery charging state and current consumption for power management and diagnostics.
+
+1. Current Monitoring IC (ADC)
+The application uses a multi-channel ADC to measure current through a shunt resistor. The ADC is configured for single-ended measurements (AIN0 and AIN1 relative to ground) as defined in the DeviceTree.
+
+## Configuration
+Channels: 2 (1V8_AKD rail on AIN0, 0V8_AKD rail on AIN1)
+Resolution: 12-bit (0-4095)
+Reference: 1800 mV internal
+Gain: 1/3 
+
+Sampling & Averaging:
+Each channel is sampled continuously to obtain stable and reliable current measurements.
+AVG_SAMPLES = 20 samples per averaging window
+Per-channel moving average calculated every 20 samples
+Total combined average printed after all channels report
+
+2. Battery Charger Status Monitoring
+The battery charger status is monitored using two GPIO input pins (chgr_sts1 and chgr_sts2) connected to the charger IC. These pins provide real-time charging state and fault detection.
+
+## Pin Status:
+STS1	STS2	Status	                    Description
+
+High	High	BAT_NOT_CHARGING	        Battery not charging (idle/standby)
+High	Low	    BAT_CHARGING	            Battery actively charging
+Low	    High	BAT_FAULT_RECOVERABLE	    Recoverable fault (e.g., over-temperature, timeout)
+Low	    Low	    BAT_FAULT_NON_RECOVERABLE	Non-recoverable fault (e.g., battery over-voltage)
+
+
 ### Edge Learning BLE Service
 
 MOBILE APP                    BLE STACK                    FIRMWARE

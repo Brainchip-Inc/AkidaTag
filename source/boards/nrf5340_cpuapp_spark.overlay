@@ -278,6 +278,12 @@ dmic_dev: &pdm0 {
 		cam_enb: cam_enb {
             gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
         };
+        chgr_sts1: chgr_sts1 {
+            gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
+        };
+        chgr_sts2: chgr_sts2 {
+            gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
+        };
 	};
 
         /* ---------- Buttons ---------- */
@@ -314,5 +320,41 @@ dmic_dev: &pdm0 {
         cam-enb = &cam_enb;
         user-button = &user_btn;
         akd-async  = &akd_async;
+        chgr-sts1 = &chgr_sts1;
+        chgr-sts2 = &chgr_sts2;
+    };
+};
+/ {
+    zephyr,user {
+        /* Two ADC channels — index 0 = 1V8 rail, index 1 = 0V8 rail */
+        io-channels = <&adc 0>, <&adc 1>;
+    };
+};
+
+&adc {
+    status = "okay";
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    /* CH0: 1V8_AKD rail — AIN0 = P0.04 */
+    channel@0 {
+        reg = <0>;
+        zephyr,gain              = "ADC_GAIN_1_3";
+        zephyr,reference         = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time  = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,input-positive    = <NRF_SAADC_AIN0>;
+        zephyr,resolution        = <12>;
+        /* NO oversampling — nRF SAADC only supports it for single channel */
+    };
+
+    /* CH1: 0V8_AKD rail — AIN1 = P0.05 */
+    channel@1 {
+        reg = <1>;
+        zephyr,gain              = "ADC_GAIN_1_3";
+        zephyr,reference         = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time  = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,input-positive    = <NRF_SAADC_AIN1>;
+        zephyr,resolution        = <12>;
+        /* NO oversampling — nRF SAADC only supports it for single channel */
     };
 };
