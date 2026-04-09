@@ -230,6 +230,8 @@ int audio_processor_start(bool single, float *spectrogram_buff,
   return SUCCESS;
 }
 
+int get_audio_frames_cb(void) { return MFCC_PER_BLOCK * g_inference_period; }
+
 int audio_processor_stop() {
 
   mfcc_deinit();

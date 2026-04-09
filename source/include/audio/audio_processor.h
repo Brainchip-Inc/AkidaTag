@@ -39,6 +39,8 @@ int audio_processor_start(bool is_stream, float *spectrogram_buff,
  */
 int audio_processor_stop();
 
+int get_audio_frames_cb();
+
 void audio_process_thread(void *a, void *b, void *c);
 
 #define PROCESS_STACK_SIZE 4096

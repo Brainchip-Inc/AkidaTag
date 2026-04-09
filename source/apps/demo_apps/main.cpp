@@ -211,14 +211,15 @@ typedef enum {
 
 typedef struct {
   learn_sub_state_t sub_state;
-  uint8_t current_utterance;            /**< 0 to LEARN_NUM_UTTERANCES-1 */
-  uint16_t total_fit_calls;             /**< Running total (up to 150) */
-  uint16_t augmentations_per_utterance; /**< 2 * g_num_neurons_per_class */
-  uint64_t waiting_since_ts; /**< When we started waiting for speech */
-  uint64_t last_callback_ts; /**< Last time learning_on_spectrogram fired */
-  float captured_mfcc[LEARN_CAPTURE_MAX_FRAMES][SPECTROGRAM_RES]; /**< ~3.2KB */
-  int capture_write_idx; /**< Write index into captured_mfcc */
+  uint8_t current_utterance;             /**< 0 to LEARN_NUM_UTTERANCES-1 */
   bool speech_detected;
+  uint16_t total_fit_calls;              /**< Running total (up to 150) */
+  uint16_t augmentations_per_utterance;  /**< 2 * g_num_neurons_per_class */
+  uint8_t  dummy[2];
+  uint64_t waiting_since_ts;             /**< When we started waiting for speech */
+  uint64_t last_callback_ts;             /**< Last time learning_on_spectrogram fired */
+  float captured_mfcc[LEARN_CAPTURE_MAX_FRAMES][SPECTROGRAM_RES]; /**< ~3.2KB */
+  int capture_write_idx;                 /**< Write index into captured_mfcc */
 } structured_learn_state_t;
 
 static structured_learn_state_t learn_state;
@@ -1294,11 +1295,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
                      confidence * 100.0f);
         }
 
-        // Reset scoring state for next detection
-        memset(smoothed_scores, 0, sizeof(smoothed_scores));
-        memset(chiming_counters, 0, sizeof(chiming_counters));
-        reset_kws_spectrogram();
-        last_trigger_time_ms = time_ms();
+        reset_stale_inference_data();
       }
     } else {
       printk("predict failure\n");
@@ -1779,7 +1776,7 @@ static void learning_on_spectrogram(int spectrogram_index) {
 
   /* Number of MFCC frames produced between consecutive do_inference() calls.
    * MFCC_PER_BLOCK (3) * g_inference_period (default 3) = 9 frames per cb. */
-  const int frames_per_cb = 9;
+  const int frames_per_cb = get_audio_frames_cb();
 
   switch (learn_state.sub_state) {
 

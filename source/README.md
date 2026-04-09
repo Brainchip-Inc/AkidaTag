@@ -900,7 +900,7 @@ These GPIOs are defined in the **DeviceTree overlay** and are used to manage pow
 
 The scoring pipeline uses **dequantized inference** with **softmax EMA smoothing** to produce stable, confidence-based keyword triggers:
 
-1. **Dequantized forward pass** — `akida_forward_dequantized()` runs inference on the Akida SNN and applies per-neuron shift and scale factors (from the model's program info) to convert discrete spike potentials into float values suitable for softmax.
+1. **Dequantized inference** — `predict` runs inference on the Akida SNN and applies per-neuron shift and scale factors (from the model's program info) to convert discrete spike potentials into float values suitable for softmax.
 
 2. **Per-class max pooling** — For models with multiple neurons per class, the maximum dequantized value across all neurons for each class is selected. This produces one logit per class.
 
