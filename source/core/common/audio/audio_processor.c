@@ -188,8 +188,7 @@ int audio_processor(void) {
   ap_counter++;
   if ((ap_counter % g_inference_period) == 0) {
     if (verbose_on) {
-      printk("inference: starting (spec_idx=%d)\n\r",
-             state->spectrogram_index);
+      printk("inference: starting (spec_idx=%d)\n\r", state->spectrogram_index);
     }
     state->inference_cb(state->spectrogram_index);
   }
@@ -312,7 +311,8 @@ void audio_process_thread(void *a, void *b, void *c) {
         }
         was_in_debounce = false;
         if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
-          /* ok to lose fraction part resolution, comparing with int value only */
+          /* ok to lose fraction part resolution, comparing with int value only
+           */
           if (((int)rms_val >= rms_threshold)) {
             if (verbose_on && speech_state == SPEECH_IDLE) {
               printk("speech: ACTIVE (rms=%.0f >= %d)\n\r", rms_val,
@@ -330,9 +330,9 @@ void audio_process_thread(void *a, void *b, void *c) {
           } else if ((time_ms() - speech_start_time) > speech_active_time_ms) {
             /* If the speech state is active and control reaches this point, it
              * means that the rms_val has remained below the threshold for
-             * speech_active_time_ms. This indicates that no valid speech command
-             * was detected. Therefore, the system transitions back to the IDLE
-             * state and clears any stale inference data */
+             * speech_active_time_ms. This indicates that no valid speech
+             * command was detected. Therefore, the system transitions back to
+             * the IDLE state and clears any stale inference data */
             if (verbose_on) {
               printk("speech: IDLE (rms=%.0f, timeout %dms)\n\r", rms_val,
                      speech_active_time_ms);
