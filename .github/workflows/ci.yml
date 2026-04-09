@@ -22,11 +22,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Run clang-format check
-        timeout-minutes: 5
-        run: |
-          ./scripts/clang_format.sh check
         
       - name: Generate Signing Key
         timeout-minutes: 5

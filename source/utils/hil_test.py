@@ -359,8 +359,6 @@ def run_tests(port, baudrate, timeout, only_infer):
 
     try:
         if only_infer:
-            reset_board()
-            time.sleep(2)
             result = test_infer_kws(ser, timeout)
             return 0 if result else 1
 
