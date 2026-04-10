@@ -5,6 +5,7 @@
 #include "akida/tensor.h"
 #include "error.h"
 #include "io_objects.h"
+#include <stdint.h>
 
 uint8_t *current_program;
 static bool current_learn_en = false;
@@ -180,7 +181,7 @@ int akida_update_learn_weights(const uint32_t *weights_ptr, uint32_t size) {
 }
 
 int32_t get_inferred_class(int32_t *result, int num_classes, int num_neurons) {
-  int32_t max_val = 0, max_index = -1, n_activations = 0;
+  int32_t max_val = INT32_MIN, max_index = 0, n_activations = 0;
   n_activations = num_classes * num_neurons;
   if (num_neurons > 0) {
     for (int i = 0; i < n_activations; i++) {

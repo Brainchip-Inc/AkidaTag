@@ -22,7 +22,6 @@ int rms_threshold = RMS_THRESHOLD;
 #define SPEECH_IDLE 0
 #define SPEECH_ACTIVE 1
 int speech_active_time_ms = 1300;
-int g_min_inference_frames = 16;
 static atomic_t g_inference_period = 3;
 static int g_frames_since_reset = 0;
 /** Number of channels in audio capture = 1, as it is stereo data */
@@ -69,14 +68,18 @@ static uint32_t block_index = 0;
 uint32_t offset = 0;
 #endif
 extern uint8_t is_kws_debounce_complete(void);
+extern uint32_t kws_debounce_time;
 extern void set_feature_buff_full(void);
 extern uint8_t is_feature_buff_full(void);
 extern void reset_stale_inference_data(void);
 extern int64_t time_ms();
 
+static uint32_t ap_counter = 0;
+
 void reset_spectrogram_index(void) {
   state->spectrogram_index = 0;
   g_frames_since_reset = 0;
+  ap_counter = 0;
 }
 
 /**
@@ -160,7 +163,6 @@ int audio_processor(void) {
 
   int min = 128000;
   int max = -128000;
-  static uint32_t ap_counter = 0;
 
   /* Select only one channel */
   for (int i = 0; i < state->mfcc_len; i++) {
@@ -178,12 +180,17 @@ int audio_processor(void) {
 
   mfcc_process_input(input, g_mfcc_input);
 
-  if (g_frames_since_reset >= g_min_inference_frames) {
+  if (verbose_on) {
+    printk("mfcc: 3 frames computed, buffer %d/%d\n\r",
+           state->spectrogram_index, state->spectrogram_len);
+  }
 
-    if ((ap_counter % g_inference_period) == 0) {
-      state->inference_cb(state->spectrogram_index);
+  ap_counter++;
+  if ((ap_counter % g_inference_period) == 0) {
+    if (verbose_on) {
+      printk("inference: starting (spec_idx=%d)\n\r", state->spectrogram_index);
     }
-    ap_counter++;
+    state->inference_cb(state->spectrogram_index);
   }
 
   return SUCCESS;
@@ -222,6 +229,8 @@ int audio_processor_start(bool single, float *spectrogram_buff,
 
   return SUCCESS;
 }
+
+int get_audio_frames_cb(void) { return MFCC_PER_BLOCK * g_inference_period; }
 
 int audio_processor_stop() {
 
@@ -271,6 +280,7 @@ void audio_process_thread(void *a, void *b, void *c) {
   float rms_val = 0.0f;
   int speech_state = SPEECH_IDLE;
   uint64_t speech_start_time = 0;
+  bool was_in_debounce = false;
   while (1) {
 
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
@@ -288,40 +298,53 @@ void audio_process_thread(void *a, void *b, void *c) {
 #else
 
       if (!is_kws_debounce_complete()) {
-        // debounce period, dont do anything
+        /* Debounce cooldown active: skip all processing */
         speech_state = SPEECH_IDLE;
-        if (verbose_on) {
-          printk("state idle \n\r");
+        if (verbose_on && !was_in_debounce) {
+          printk("debounce: %ums cooldown active\n\r", kws_debounce_time);
         }
+        was_in_debounce = true;
       }
 
       /* remove DC offset and compute RMS based on compute_rms, flag */
-      else if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
-        /* ok to lose fraction part resolution, comparing with int value only */
-        if (((int)rms_val >= rms_threshold)) {
-          speech_state = SPEECH_ACTIVE;
-
-          speech_start_time = time_ms();
-          if (verbose_on) {
-            printk("rms_threshold %f\n\r", rms_val);
-          }
-
-        } else if (speech_state == SPEECH_IDLE) {
-
-          /* do not process as state is idle */
-          continue;
-        } else if ((time_ms() - speech_start_time) > speech_active_time_ms) {
-          /* If the speech state is active and control reaches this point, it
-           * means that the rms_val has remained below the threshold for
-           * speech_active_time_ms. This indicates that no valid speech command
-           * was detected. Therefore, the system transitions back to the IDLE
-           * state and clears any stale inference data */
-          speech_state = SPEECH_IDLE;
-          reset_stale_inference_data();
-          continue;
+      else {
+        if (was_in_debounce && verbose_on) {
+          printk("debounce: cooldown complete\n\r");
         }
-        /* */
-        audio_processor();
+        was_in_debounce = false;
+        if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
+          /* ok to lose fraction part resolution, comparing with int value only
+           */
+          if (((int)rms_val >= rms_threshold)) {
+            if (verbose_on && speech_state == SPEECH_IDLE) {
+              printk("speech: ACTIVE (rms=%.0f >= %d)\n\r", rms_val,
+                     rms_threshold);
+            }
+            speech_state = SPEECH_ACTIVE;
+            speech_start_time = time_ms();
+
+          } else if (speech_state == SPEECH_IDLE) {
+            if (verbose_on >= 2) {
+              printk("speech: idle (rms=%.0f)\n\r", rms_val);
+            }
+            /* do not process as state is idle */
+            continue;
+          } else if ((time_ms() - speech_start_time) > speech_active_time_ms) {
+            /* If the speech state is active and control reaches this point, it
+             * means that the rms_val has remained below the threshold for
+             * speech_active_time_ms. This indicates that no valid speech
+             * command was detected. Therefore, the system transitions back to
+             * the IDLE state and clears any stale inference data */
+            if (verbose_on) {
+              printk("speech: IDLE (rms=%.0f, timeout %dms)\n\r", rms_val,
+                     speech_active_time_ms);
+            }
+            speech_state = SPEECH_IDLE;
+            reset_stale_inference_data();
+            continue;
+          }
+          audio_processor();
+        }
       }
 
       audio_process_thread_cntr++;
