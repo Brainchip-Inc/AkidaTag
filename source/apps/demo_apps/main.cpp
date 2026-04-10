@@ -1294,7 +1294,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
           send_event(CMD_DEPLOY_START, kws_new_tags[triggered_class],
                      confidence * 100.0f);
         }
-
+        last_trigger_time_ms = time_ms();
         reset_stale_inference_data();
       }
     } else {
