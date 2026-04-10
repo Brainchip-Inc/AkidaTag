@@ -12,6 +12,23 @@ import os
 import sys
 import yaml
 import zlib
+import re
+
+def get_device_name():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    prj_file = os.path.abspath(os.path.join(script_dir, "..", "prj.conf"))
+
+    if not os.path.exists(prj_file):
+        print("Warning: prj.conf not found")
+        return None
+
+    with open(prj_file, "r") as f:
+        for line in f:
+            match = re.match(r'CONFIG_BT_DEVICE_NAME="(.+)"', line)
+            if match:
+                return match.group(1)
+
+    return None
 
 def compute_data_crc32(data_path):
     """CRC32 over raw model data binary file bytes."""
@@ -471,19 +488,25 @@ async def main(args):
 
     print("\nScanning for BLE devices...")
     devices = await BleakScanner.discover(timeout=5.0)
+
     if not devices:
         print("No BLE devices found.")
         return
 
-    for i, d in enumerate(devices):
-        print(f"[{i}] {d.name or 'Unknown'} - {d.address}")
+    target_device = None
 
-    try:
-        index = int(input("Select device index: "))
-        address = devices[index].address
-    except (IndexError, ValueError):
-        print("Invalid selection.")
+    for d in devices:
+        print(f"{d.name or 'Unknown'} - {d.address}")
+        if d.name == DEVICE_NAME:
+            target_device = d
+            break
+
+    if not target_device:
+        print(f"{DEVICE_NAME} not found.")
         return
+
+    address = target_device.address
+    print(f"Connecting to {DEVICE_NAME} ({address})...")
 
     # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_el_classes
     packed_classes = None
@@ -546,7 +569,13 @@ if __name__ == "__main__":
     parser.add_argument("--fs_name", default=None,
                         help="LittleFS path for model metadata "
                              "(default: /model_meta/<prefix>, e.g. /model_meta/kws_el)")
-
     args = parser.parse_args()
+
+    DEVICE_NAME = get_device_name()
+    if DEVICE_NAME is None:
+        print("Error: CONFIG_BT_DEVICE_NAME not found in prj.conf")
+        sys.exit(1)
+
+    print("Device Name:", DEVICE_NAME)
 
     asyncio.run(main(args))

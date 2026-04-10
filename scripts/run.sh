@@ -32,7 +32,8 @@ Options:
   -r, --reset        | (flag) | Do Board Reset
   -h, --help         | (flag) | Show this help message
   --dk               | (flag) | Select dk board pin configuration overlay file.
-
+  -t, --test-cli     | (flag) | Run CLI-based hardware validation test (Python)
+  -t --infer-test, --test-cli --infer-test   | (flag) | Run CLI-based hardware validation test (Python) only for inference test of kws
 ###################################################################################################
 Run the script from project root.
 
@@ -102,6 +103,12 @@ How to use script - Examples runs:
   # Create signing key inside docker
   $SCRIPT_INVOCATION -d --shell
 
+  # Run CLI hardware validation test
+  $SCRIPT_INVOCATION -d -t
+
+  # Full workflow: build, flash, and run CLI test
+  $SCRIPT_INVOCATION -d -b -f -t --app demo_apps
+  
 There is a BUILD_DIR env variable that can be set to override the default build
 directory location. For example:
   BUILD_DIR=custom_build_dir $SCRIPT_INVOCATION -b --app blinky
@@ -134,10 +141,11 @@ MODEL_TRANSFER_NAME="kws"
 MODEL_TRANSFER_FLASH_ADDR="0x1000"
 MODEL_TRANSFER_MAP_MODE=1
 SEND_BLE=false
+CLI_TEST_CMD=""
 DK_OVERLAY=false
 MODEL_TRANSFER_NEURONS_PER_CLASS=1
 MODEL_TRANSFER_NUM_EL_CLASSES=0
-
+DO_INFER_TEST=false
 
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
@@ -160,9 +168,10 @@ case "$(uname -s)" in
 esac
 
 BUILD_DIR="${BUILD_DIR:-}"
-
+DO_CLI_TEST=false
+CLI_PORT="/dev/ttyUSB0"
 # -----------------------------------------------------------------------------
-# Funcitons
+# Functions
 # -----------------------------------------------------------------------------
 
 die() { echo "Error: $*" >&2; exit 1; }
@@ -248,6 +257,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         -r|--reset) DO_RESET=true; shift;;
         -h|--help) print_help; exit 0;;
+        -t|--test-cli)
+            DO_CLI_TEST=true
+            shift
+            ;;
+        --infer-test)
+            DO_INFER_TEST=true
+            shift
+            ;;
         *) echo "Unknown option $1"; shift;;
     esac
 done
@@ -262,7 +279,7 @@ if $DO_SHELL && ! $DOCKER; then
 fi
 
 # If not shell/minicom, require at least one action: build/flash/send_ble/model_transfer
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE && [[ -z "$MODEL_TRANSFER_PATH" ]]; then
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && [[ -z "$MODEL_TRANSFER_PATH" ]] && ! $DO_CLI_TEST; then
     echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --model_transfer, and/or --key or use --shell / --minicom"
     exit 1
 fi
@@ -348,9 +365,14 @@ DOCKER_RUN_BASE=(
     -e CCACHE_DIR="/home/demo/.ccache"
 )
 
-# Add interactive TTY flags only when not in release/CI mode (no TTY available in CI)
-if ! $DO_RELEASE; then
+# Add interactive mode only if terminal exists
+if [ -t 1 ]; then
     DOCKER_RUN_BASE+=(-it)
+fi
+
+# Map the host serial port to Docker container when CLI test is enabled so the test script can communicate with the board
+if $DO_CLI_TEST; then
+    DOCKER_RUN_BASE+=(--device "${CLI_PORT}:${CLI_PORT}")
 fi
 
 if $IS_LINUX; then
@@ -392,7 +414,14 @@ if $DO_MINICOM; then
     "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" minicom -D "$MINICOM_DEV"
     exit $?
 fi
+# Build the CLI hardware validation test command when -t is enabled, using the configured serial port
+if $DO_CLI_TEST; then
+    CLI_TEST_CMD="python source/utils/hil_test.py --port ${CLI_PORT}"
 
+    if $DO_INFER_TEST; then
+        CLI_TEST_CMD="${CLI_TEST_CMD} --only-infer"
+    fi
+fi
 # -----------------------------------------------------------------------------
 # SHELL MODE (interactive)
 # NOTE: -it MUST be before the image name
@@ -549,13 +578,6 @@ if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
 --neurons_per_class \"${MODEL_TRANSFER_NEURONS_PER_CLASS}\" \
 --num_el_classes \"${MODEL_TRANSFER_NUM_EL_CLASSES}\""
 
-
-  if $SEND_BLE; then
-    SEND_MODEL_YAML_CMD="python source/utils/send_model_via_ble.py \
---info \"${MT_INFO_BIN}\" \
---bin \"${MT_DATA_BIN}\" \
---yaml \"${MT_YAML}\""
-  fi
 fi
 
 # -----------------------------------------------------------------------------
@@ -571,6 +593,8 @@ $DO_FLASH && DOCKER_STEPS+=("$FLASH_CMD")
 [[ -n "$FETCH_MODEL_CMD" ]] && DOCKER_STEPS+=("$FETCH_MODEL_CMD")
 # BLE send always runs on the host (needs direct BLE hardware access)
 [[ -n "$SEND_YAML_CMD"   ]] && LOCAL_STEPS+=("$SEND_YAML_CMD")
+# If CLI test command is defined, add it to the Docker execution steps
+[[ -n "$CLI_TEST_CMD" ]] && DOCKER_STEPS+=("$CLI_TEST_CMD")
 
 if [[ ${#DOCKER_STEPS[@]} -eq 0 && ${#LOCAL_STEPS[@]} -eq 0 ]]; then
   echo "Nothing to do"

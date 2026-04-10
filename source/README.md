@@ -134,7 +134,7 @@ during `spi_write()` and `spi_transceive()` calls. No manual GPIO toggling is re
 	The IMU parameters can also be configured at runtime using the shell command:
 	imu_start <acc_odr> <acc_fs> <gyro_odr> <gyro_fs> <fifo_acc_odr> <fifo_gyro_odr> <watermark>
 	Example:
-			imu_set 5 3 5 1 5 5 8
+			imu_start 5 3 5 1 5 5 8
 			This means:
 					ACC ODR = 208 Hz
 					ACC FS = ±8g
