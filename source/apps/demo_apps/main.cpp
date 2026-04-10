@@ -211,15 +211,15 @@ typedef enum {
 
 typedef struct {
   learn_sub_state_t sub_state;
-  uint8_t current_utterance;             /**< 0 to LEARN_NUM_UTTERANCES-1 */
+  uint8_t current_utterance; /**< 0 to LEARN_NUM_UTTERANCES-1 */
   bool speech_detected;
-  uint16_t total_fit_calls;              /**< Running total (up to 150) */
-  uint16_t augmentations_per_utterance;  /**< 2 * g_num_neurons_per_class */
-  uint8_t  dummy[2];
-  uint64_t waiting_since_ts;             /**< When we started waiting for speech */
-  uint64_t last_callback_ts;             /**< Last time learning_on_spectrogram fired */
+  uint16_t total_fit_calls;             /**< Running total (up to 150) */
+  uint16_t augmentations_per_utterance; /**< 2 * g_num_neurons_per_class */
+  uint8_t dummy[2];
+  uint64_t waiting_since_ts; /**< When we started waiting for speech */
+  uint64_t last_callback_ts; /**< Last time learning_on_spectrogram fired */
   float captured_mfcc[LEARN_CAPTURE_MAX_FRAMES][SPECTROGRAM_RES]; /**< ~3.2KB */
-  int capture_write_idx;                 /**< Write index into captured_mfcc */
+  int capture_write_idx; /**< Write index into captured_mfcc */
 } structured_learn_state_t;
 
 static structured_learn_state_t learn_state;
@@ -658,7 +658,7 @@ static void switch_learning_delayed(struct k_work *work) {
     if (is_ble_connected() && event_flag) {
       learning_started();
     }
-     printk("learn_select -> learning\n\r");
+    printk("learn_select -> learning\n\r");
     last_learn_ts = time_ms();
 
     /* Initialize structured learning state */
