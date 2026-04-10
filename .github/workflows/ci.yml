@@ -24,12 +24,12 @@ jobs:
       - uses: actions/checkout@v4
         
       - name: Generate Signing Key
-        timeout-minutes: 5
+        timeout-minutes: 4
         run: |
           ./scripts/run.sh -d --key
 
       - name: Transfer Model
-        timeout-minutes: 10
+        timeout-minutes: 4
         run: |
           ./scripts/run.sh -d \
           --model_transfer "${MODEL_URL}" \
@@ -38,17 +38,17 @@ jobs:
           --map_mode "${MAP_MODE}"
         
       - name: Build and Flash
-        timeout-minutes: 10
+        timeout-minutes: 4
         run: |
           ./scripts/run.sh -d -b -f --dk --app demo_apps
 
       - name: Run CLI Test
-        timeout-minutes: 10
+        timeout-minutes: 4
         run: |
           ./scripts/run.sh -d -t
       
       - name: Upload Model
-        timeout-minutes: 10
+        timeout-minutes: 4
         run: |
           /home/demo/.conda/envs/spark/bin/python source/utils/send_model_via_ble.py \
           --info source/external/model_files/kws/kws_program_info.bin \
@@ -56,6 +56,6 @@ jobs:
           --yaml source/external/model_files/kws/info.yaml
 
       - name: Run inference CLI Test
-        timeout-minutes: 10
+        timeout-minutes: 4
         run: |
           ./scripts/run.sh -d -t --infer-test

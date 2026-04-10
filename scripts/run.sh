@@ -578,13 +578,6 @@ if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
 --neurons_per_class \"${MODEL_TRANSFER_NEURONS_PER_CLASS}\" \
 --num_el_classes \"${MODEL_TRANSFER_NUM_EL_CLASSES}\""
 
-
-  if $SEND_BLE; then
-    SEND_MODEL_YAML_CMD="python source/utils/send_model_via_ble.py \
---info \"${MT_INFO_BIN}\" \
---bin \"${MT_DATA_BIN}\" \
---yaml \"${MT_YAML}\""
-  fi
 fi
 
 # -----------------------------------------------------------------------------
