@@ -10,7 +10,7 @@ quantizeml==1.0.1 ; python_version == "3.12"
 akida_models==1.11.1 ; python_version == "3.12"
 python-dotenv==1.1.0 ; python_version == "3.12"
 PyYAML>=6.0 ; python_version == "3.12"
-
+pyserial==3.5 ; python_version == "3.12"
 
 # Only install these when Python is 3.11
 west==1.5.0; python_version == "3.11"
@@ -20,3 +20,4 @@ cnn2snn==2.7.2 ; python_version == "3.11"
 akida_models==1.5.0 ; python_version == "3.11"
 python-dotenv==1.0.1 ; python_version == "3.11"
 PyYAML>=6.0 ; python_version == "3.11"
+pyserial==3.5 ; python_version == "3.11"

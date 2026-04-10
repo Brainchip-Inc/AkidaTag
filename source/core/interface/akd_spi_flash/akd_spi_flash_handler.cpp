@@ -9,8 +9,8 @@ extern "C" {
 #include "io_objects.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <hardware_device_impl.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/types.h>
-
 #if FLASH_READ_BACK_CHECK
 uint8_t read_back_flash[HALF_OF_SRAM_BUFFER_SIZE];
 #endif
@@ -24,10 +24,15 @@ uint32_t flash_offsets[] = {AKD_FLASH_OFFSET,
                             AKD_FLASH_OFFSET + AKD_MODEL_OFFSET};
 int app_index = -1;
 
-void akida_spiflash_init(void) {
+/**
+ * @brief Reads and prints the AKIDA device ID.
+ *
+ * This function reads the device identification registers from the
+ * AKD1500 (AKIDA) chip over SPI and prints the device ID words
+ * to the console for verification.
+ */
+void get_akida_device_id(void) {
   static uint8_t read_data[READ_LEN];
-  /* Set MCU as SPI-Master */
-  akida_config_spi(1);
   /* read Akida Device ID */
   akd1500.read(0xFCC00000, read_data, READ_LEN);
   printk("Akida Device ID: \n");
@@ -35,8 +40,19 @@ void akida_spiflash_init(void) {
     printk("Word %d: 0x%02X%02X%02X%02X\n", i / WORD_SIZE, read_data[i],
            read_data[i + 1], read_data[i + 2], read_data[i + 3]);
   }
+}
 
-  uint8_t msg[SRAM_128_BYTES_LEN] =
+/**
+ * @brief Performs a sanity test on AKIDA SRAM.
+ *
+ * This function writes a test pattern to the AKD1500 SRAM and reads it back
+ * to verify data integrity. The comparison is done to detect any mismatch
+ * between written and read data. Currently, the test is limited to a single
+ * 128-byte block. To test the full 1 MB SRAM, update the loop condition
+ * to iterate across the entire memory range.
+ */
+void akida_sram_test(void) {
+  static uint8_t msg[SRAM_128_BYTES_LEN] =
       "Hello world!!! This is a test for writing and reading 128 bytes of data "
       "to and from 1MB of RAM within Brainchip's AKD1500 chip";
   uint8_t sram_read_data[SRAM_128_BYTES_LEN] = "kkkkkkkkk";
@@ -71,6 +87,14 @@ void akida_spiflash_init(void) {
   } else {
     printk("Sanity test of 1 MB SRAM is failed\n");
   }
+}
+
+void akida_spiflash_init(void) {
+  /* Set MCU as SPI-Master */
+  akida_config_spi(1);
+
+  get_akida_device_id();
+  akida_sram_test();
 
   /* Initialize the AKD1500 SPI-Flash functionality */
   init_akd_1500_spi_flash();
@@ -165,7 +189,7 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
   uint64_t e_tick = 0;
   uint32_t erase_time = 0;
 
-  printk("Flase erase offset %x and size = %d bytes\n", offset, size);
+  printk("Flash erase offset %x and size = %d bytes\n", offset, size);
 
   s_tick = time_ms();
   int ret = spi_flash_erase(spi_driver, offset, size);
@@ -232,3 +256,77 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
     printk("Flash Write Successful\n");
   akida_config_spi(0);
 }
+
+/**
+ * @brief CLI command to read the AKIDA device ID.
+ *
+ * This command enables the SPI interface, reads the device ID from the
+ * AKD1500 (AKIDA) chip using get_akida_device_id(), and then disables
+ * the SPI interface.
+ *
+ * @param shell Pointer to the shell instance.
+ * @param argc  Number of command arguments.
+ * @param argv  Command arguments.
+ *
+ * @return 0 on success.
+ */
+static int cmd_akida_device_id(const struct shell *shell, size_t argc,
+                               char **argv) {
+  akida_config_spi(1);
+  get_akida_device_id();
+  akida_config_spi(0);
+  return 0;
+}
+
+/**
+ * @brief CLI command to perform AKIDA SRAM sanity test.
+ *
+ * This command enables the SPI interface, runs a SRAM read/write
+ * verification test on the AKD1500 using akida_sram_test(), and
+ * then disables the SPI interface.
+ *
+ * @param shell Pointer to the shell instance.
+ * @param argc  Number of command arguments.
+ * @param argv  Command arguments.
+ *
+ * @return 0 on completion.
+ */
+static int cmd_akida_sram_test(const struct shell *shell, size_t argc,
+                               char **argv) {
+  akida_config_spi(1);
+  akida_sram_test();
+  akida_config_spi(0);
+  return 0;
+}
+
+/**
+ * @brief CLI command to read the SPI flash device ID.
+ *
+ * This command enables the SPI interface, reads the SPI flash ID
+ * using spi_flash_read_id(), prints the result to the shell, and
+ * then disables the SPI interface.
+ *
+ * @param shell Pointer to the shell instance.
+ * @param argc  Number of command arguments.
+ * @param argv  Command arguments.
+ *
+ * @return 0 on success.
+ */
+static int cmd_flash_id(const struct shell *shell, size_t argc, char **argv) {
+
+  akida_config_spi(1);
+  spi_flash_read_id(spi_driver);
+  akida_config_spi(0);
+  shell_print(shell, "SPI Flash ID read completed");
+
+  return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+    akida_cmds,
+    SHELL_CMD(device_id, NULL, "Read Akida device ID", cmd_akida_device_id),
+    SHELL_CMD(sram_test, NULL, "Run SRAM test", cmd_akida_sram_test),
+    SHELL_CMD(flash_id, NULL, "Read Flash ID", cmd_flash_id),
+    SHELL_SUBCMD_SET_END);
+
+SHELL_CMD_REGISTER(akida, &akida_cmds, "Akida commands", NULL);

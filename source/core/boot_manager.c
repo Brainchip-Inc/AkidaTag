@@ -8,6 +8,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/storage/flash_map.h>
 LOG_MODULE_REGISTER(boot_manager, LOG_LEVEL_INF);
 
@@ -198,3 +199,15 @@ void print_image_version(uint8_t area_id, const char *name) {
 uint32_t boot_count_get_total(void) { return total_boot_count; }
 uint32_t boot_count_get_firmware(void) { return fw_boot_count; }
 uint32_t boot_count_get_watchdog(void) { return wdt_boot_count; }
+
+static int cmd_wdt_count(const struct shell *shell, size_t argc, char **argv) {
+  uint32_t wdt_count;
+
+  wdt_count = boot_count_get_watchdog();
+
+  shell_print(shell, "Watchdog Reset Count: %u", wdt_count);
+
+  return 0;
+}
+
+SHELL_CMD_REGISTER(wdt_count, NULL, "Get watchdog reset count", cmd_wdt_count);

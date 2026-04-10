@@ -574,7 +574,7 @@ static int32_t cmd_imu_start(const struct shell *shell, size_t argc,
                              char **argv) {
   if (argc != 8) {
     shell_print(shell, "Usage:\n"
-                       "imu_set <acc_odr> <acc_fs> "
+                       "imu_start <acc_odr> <acc_fs> "
                        "<gyro_odr> <gyro_fs> "
                        "<fifo_acc_odr> <fifo_gyro_odr> "
                        "<watermark>");
@@ -674,6 +674,7 @@ static int32_t cmd_imu_stop(const struct shell *shell, size_t argc,
   printk("Overflows:     %u\n", overflow_count);
   printk("Errors:        %u\n", error_count);
 #endif
+  printk("IMU_STOPPED\n\r");
   return 0;
 }
 
@@ -731,7 +732,7 @@ void imu_data_thread(void *a, void *b, void *c) {
       float gy = (data.gyro[1] * gyr_sens) / MDPS_PER_DPS;
       float gz = (data.gyro[2] * gyr_sens) / MDPS_PER_DPS;
 
-      printk("%f,%f,%f,%f,%f,%f\n", ax, ay, az, gx, gy, gz);
+      // printk("%f,%f,%f,%f,%f,%f\n", ax, ay, az, gx, gy, gz);
     }
 
     k_msleep(SAMPLE_DELAY_MS);

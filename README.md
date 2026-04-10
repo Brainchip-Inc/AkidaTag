@@ -25,6 +25,214 @@ This project works with the following devices:
 
 ---
 
+# Hardware-in-the-Loop (HIL) Testing
+
+This repository includes an automated **Hardware-in-the-Loop (HIL)
+testing pipeline** that validates firmware functionality on real
+hardware using CLI commands and log verification.
+
+The tests are executed on a **self-hosted GitHub Actions runner**
+connected to the target hardware.
+
+------------------------------------------------------------------------
+
+# Implemented Test Cases
+
+## Testcase 1 --- AKIDA Device ID
+
+Sends the CLI command:
+
+    akida device_id
+
+Verifies the expected device ID from the logs:
+
+    Word 0: 0x0903a1bc
+
+------------------------------------------------------------------------
+
+## Testcase 2 --- AKIDA SRAM Test
+
+Sends the CLI command:
+
+    akida sram_test
+
+Waits for the SRAM self-test result:
+
+    Sanity test of 1 MB SRAM passed
+
+------------------------------------------------------------------------
+
+## Testcase 3 --- AKIDA Flash ID
+
+Sends the CLI command:
+
+    akida flash_id
+
+Verifies the external flash device ID:
+
+    Serial flash device id: 0x1018bb20
+
+------------------------------------------------------------------------
+
+## Testcase 4 --- AKIDA Full Erase
+
+Sends the CLI command:
+
+    full_erase
+
+Verifies the flash erase result:
+
+    Erase successful
+
+------------------------------------------------------------------------
+
+## Testcase 5 — Watchdog Disable
+
+This test checks whether disabling the watchdog causes a reboot and increases the watchdog reset count.
+
+### Steps
+
+1. Send the CLI command:
+   `wdt_count`
+2. Read the current value:
+   `Watchdog Reset Count: <value>`
+3. Store this as the **initial count**.
+4. Send the command:
+   `wdt_disable`
+5. Wait **10 seconds** for the device to reboot.
+6. Send the command again:
+   `wdt_count`
+7. Read the **new watchdog count**.
+
+### Pass Condition
+
+The test passes if:
+
+`new_wdt_count > previous_wdt_count`
+
+### Fail Condition
+
+The test fails if:
+
+- The watchdog count cannot be read.
+- The new count is **not greater** than the previous count.
+
+### Example Output
+
+
+------------------------------------------------------------------------
+
+## Testcase 6 --- DMIC Test
+
+Sends the CLI command:
+
+    test_dmic
+
+Expected output:
+
+    DMIC test pass
+
+Failure conditions include:
+
+    DMIC timeout
+    DMIC init failed
+    DMIC start failed
+
+------------------------------------------------------------------------
+
+## Testcase 7 --- IMU CLI Validation
+
+Sends the command:
+
+    imu_start 5 3 5 1 5 5 8
+
+Waits for the response:
+
+    IMU started
+
+Stops the IMU using:
+
+    imu_stop
+
+------------------------------------------------------------------------
+
+## Testcase 8 --- KWS Inference Validation
+
+Runs the inference command:
+
+    infer kws
+
+The script verifies that the output contains:
+
+    Class : 1
+    Word : go
+    App inference completed
+
+------------------------------------------------------------------------
+
+# Test Execution Modes
+
+## Full Hardware Test
+
+Runs **Testcases 1--7**.
+    ./scripts/run.sh -d -t (python source/utils/hil_test.py --port /dev/ttyUSB0)
+
+------------------------------------------------------------------------
+
+## Inference Test Only
+
+Runs **Testcase 8 only** (typically executed after the model is
+uploaded).
+
+    ./scripts/run.sh -d -t --infer-test (python source/utils/hil_test.py --port /dev/ttyUSB0 --only-infer)
+
+------------------------------------------------------------------------
+
+# Test Result Behavior
+
+If all executed testcases pass:
+
+    ALL TESTCASES PASSED
+
+If any testcase fails or times out, the **CI pipeline fails**.
+
+------------------------------------------------------------------------
+
+# CI Trigger
+
+The Hardware-in-the-Loop (HIL) CI pipeline runs automatically when:
+
+-   A **pull request is opened**
+-   A **pull request is updated**
+
+against the **main branch**.
+
+This ensures firmware changes are validated on **real hardware before
+merging**.
+
+------------------------------------------------------------------------
+
+# CI Pipeline Overview
+
+The GitHub Actions workflow performs the following steps:
+
+1.  Generate firmware signing key
+2.  Download and prepare the model
+3.  Build firmware
+4.  Flash firmware to the device
+5.  Run CLI hardware tests (Testcases 1--7)
+6.  Upload model via BLE
+7.  Run inference validation (Testcase 8)
+
+This ensures that the firmware, peripherals, and **Akida KWS inference
+pipeline** function correctly on the target hardware.
+
+### Requirements
+
+- Self-hosted GitHub runner configured for the repository.
+- Hardware board connected to the runner machine via USB.
+- Serial interface access available (e.g., `/dev/ttyUSB0`).
+
 ## Repository Structure
 
 ```text
