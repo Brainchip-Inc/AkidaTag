@@ -27,6 +27,6 @@ int current_ic_init(void);
 int read_current_ic(void);
 
 /* Gets current battery charger status from GPIO pins */
-bat_status check_bat_status(void);
+uint8_t check_bat_status(void);
 
 #endif

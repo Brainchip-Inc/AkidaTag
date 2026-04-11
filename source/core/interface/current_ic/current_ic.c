@@ -116,7 +116,7 @@ int current_ic_init(void) {
  *         - BAT_FAULT_RECOVERABLE: Recoverable fault condition detected
  *         - BAT_FAULT_NON_RECOVERABLE: Non-recoverable fault condition detected
  */
-bat_status check_bat_status(void) {
+uint8_t check_bat_status(void) {
   int sts1 = gpio_pin_get_dt(&chgr_sts1);
   int sts2 = gpio_pin_get_dt(&chgr_sts2);
   if (sts1 == 1 && sts2 == 1) {

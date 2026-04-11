@@ -22,7 +22,6 @@
 
 #define FLASH_MAX_16_MB_SIZE (16777216) // total max size of SPI-Flash => 16 MB
 
-
 extern volatile size_t akd_flash_offset;
 extern uint32_t buff_size;
 extern uint32_t flash_offsets[];
