@@ -1,6 +1,8 @@
 
 #include "ble_services/ble_initialization.h"
+#ifdef CONFIG_SPARK_BOARD
 #include "current_ic/current_ic.h"
+#endif
 #include "led_init.h"
 #include <hal/nrf_ficr.h>
 #include <zephyr/logging/log.h>
@@ -73,7 +75,7 @@ char processor[] = "AKIDA_1500";
 char model_version[] = "v1.1.0";
 static uint16_t akd_nodes = 8;
 float pwr_con = 2.3f;
-bat_status bat_sts;
+static uint8_t bat_sts;
 /* Flag indicating whether deployment mode is active.
  * Set when CMD_DEPLOY_START is received and cleared on CMD_DEPLOY_STOP.
  */
@@ -223,7 +225,9 @@ static bool parse_incoming_frame(const char *data, parsed_frame_t *frame) {
 static void send_battery_response(void) {
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
+#ifdef CONFIG_SPARK_BOARD
   bat_sts = check_bat_status();
+#endif
   snprintf(data_part, sizeof(data_part), "%d:%d,%d\r", CMD_BATTERY,
            battery_level, bat_sts);
   int data_len = strlen(data_part);
