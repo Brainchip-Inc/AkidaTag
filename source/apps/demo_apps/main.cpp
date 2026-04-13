@@ -962,8 +962,8 @@ volatile uint64_t inference_start_ts = 0;
 
 static void akd_async_isr_handler(const struct device *dev,
                                   struct gpio_callback *cb, uint32_t pins) {
-  
-                                      k_sem_give(&akd_async_sem);
+
+  k_sem_give(&akd_async_sem);
 }
 
 static void akd_async_thread(void *a, void *b, void *c) {
@@ -975,7 +975,7 @@ static void akd_async_thread(void *a, void *b, void *c) {
     k_sem_take(&akd_async_sem, K_FOREVER);
 
     uint64_t fetch_start_ts = time_ms();
-    if (-EAGAIN != akida_fetch((uint8_t *)akida_output, akd_op_size, false)) {
+    if (-EAGAIN != akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
       uint64_t fetch_end_ts = time_ms();
       uint32_t inference_dma_ts =
           akd_device.read_clock_counter() - inference_start_dma_ts;
@@ -1164,10 +1164,8 @@ int main(void) {
     k_work_init_delayable(&akd_async_test_work, akd_async_test_handler);
 
     printk(" Akida Async is initialized \n\r");
-  }
-  else
-  {
-  printk(" Akida sync is initialized \n\r");
+  } else {
+    printk(" Akida sync is initialized \n\r");
   }
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
@@ -1242,99 +1240,109 @@ static void reset_kws_spectrogram(void) {
 }
 
 static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
-  static int class_history[SCORE_WINDOW_SIZE] = {-1, -1, -1, -1, -1};
-  static int history_idx = 0;
-  int32_t max_val = 0;
-  int32_t akida_output_l[g_num_classes] = {0};
-  for (int num_cls = 0; num_cls < g_num_classes; num_cls++) {
-    max_val = 0;
-    for (int i = 0; i < g_num_neurons_per_class; i++) {
-      /* identify the biggest value within the g_num_neurons_per_class and
-      use the max value for that class */
-      int32_t current_val =
-          akida_output[(num_cls * g_num_neurons_per_class) + i];
-      if (current_val > max_val) {
-        max_val = current_val;
+  // Step 1: Per-class max pooling from dequantized output
+  int num_cls_capped =
+      (g_num_classes < MAX_KWS_CLASSES) ? g_num_classes : MAX_KWS_CLASSES;
+  float class_maxes[MAX_KWS_CLASSES];
+  for (int c = 0; c < num_cls_capped; c++) {
+    float max_val = akida_output_dq[c * g_num_neurons_per_class];
+    for (int n = 1; n < g_num_neurons_per_class; n++) {
+      float val = akida_output_dq[c * g_num_neurons_per_class + n];
+      if (val > max_val) {
+        max_val = val;
       }
     }
-
-    /* copy the max value per class */
-    akida_output_l[num_cls] = max_val;
+    class_maxes[c] = max_val;
   }
 
-  int found = get_inferred_class(akida_output_l, g_num_classes, 1);
-
-  if (found == -1) {
-    if (verbose_on) {
-      printk("no class detected (zero activations)\n\r");
+  // Step 2: Softmax over per-class max values (with max subtraction for
+  // stability)
+  float max_logit = class_maxes[0];
+  int found = 0;
+  for (int c = 1; c < num_cls_capped; c++) {
+    if (class_maxes[c] > max_logit) {
+      max_logit = class_maxes[c];
+      found = c;
     }
-    return;
   }
-
-  if (found == KWS_SILENCE_CLASS || found == KWS_UNKNOWN_CLASS) {
-    if (verbose_on) {
-      printk("suppressed: %s\n\r",
-             (found < kws_new_tags_count) ? kws_new_tags[found] : "?");
+  float softmax_scores[MAX_KWS_CLASSES] = {0};
+  float exp_sum = 0.0f;
+  for (int c = 0; c < num_cls_capped; c++) {
+    softmax_scores[c] = expf(class_maxes[c] - max_logit);
+    exp_sum += softmax_scores[c];
+  }
+  if (exp_sum > 0.0f) {
+    for (int c = 0; c < num_cls_capped; c++) {
+      softmax_scores[c] /= exp_sum;
     }
-    return;
   }
 
-  // Sliding window score smoothing
-  class_history[history_idx % score_window_size] = found;
-  history_idx++;
-
-  // Compute smoothing score for this class
-  uint32_t match_count = 0;
-  for (uint32_t i = 0; i < score_window_size; i++) {
-    if (class_history[i] == found)
-      match_count++;
+  // Step 3: EMA smoothing of softmax scores
+  for (int c = 0; c < num_cls_capped; c++) {
+    smoothed_scores[c] = smoothing_alpha * softmax_scores[c] +
+                         (1.0f - smoothing_alpha) * smoothed_scores[c];
   }
-  float score = (float)match_count / score_window_size;
+
+  // Step 4: Update chiming counters for keyword classes
+  // (skip silence and unknown classes)
+  int triggered_class = -1;
+  float triggered_score = 0.0f;
+  for (int c = 0; c < num_cls_capped; c++) {
+    if (c == KWS_SILENCE_CLASS || c == KWS_UNKNOWN_CLASS) {
+      continue;
+    }
+    if (smoothed_scores[c] >= score_threshold) {
+      chiming_counters[c]++;
+    } else {
+      chiming_counters[c] = 0;
+    }
+    // Check if this class has reached the chiming threshold
+    if (chiming_counters[c] >= chiming_threshold) {
+      if (triggered_class == -1 || smoothed_scores[c] > triggered_score) {
+        triggered_class = c;
+        triggered_score = smoothed_scores[c];
+      }
+    }
+  }
 
   if (verbose_on) {
-    printk("class=%d (%s) score=%.2f\n\r", found,
-           (found < kws_new_tags_count) ? kws_new_tags[found] : "?", score);
+    printk("scores: argmax=%d (%s) softmax=%.2f smoothed=%.2f "
+           "chiming=%d/%d\n\r",
+           found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
+           softmax_scores[found], smoothed_scores[found],
+           (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
+           chiming_threshold);
   }
 
-  if (score >= score_threshold) {
-    current_class = found;
-    // Compute softmax confidence over class-level spike sums
-
-    float class_sums[g_num_classes] = {0};
-
-    for (uint32_t c = 0; c < g_num_classes; c++) {
-      for (uint32_t n = 0; n < g_num_neurons_per_class; n++) {
-        class_sums[c] += (float)akida_output[c * g_num_neurons_per_class + n];
-      }
+  // Step 5: Trigger if chiming threshold reached
+  if (triggered_class >= 0) {
+    if (verbose_on) {
+      printk("trigger: keyword=%s chiming=%d/%d\n\r",
+             (triggered_class < kws_new_tags_count)
+                 ? kws_new_tags[triggered_class]
+                 : "?",
+             chiming_counters[triggered_class], chiming_threshold);
     }
-    float max_sum = class_sums[0];
-    for (uint32_t c = 1; c < g_num_classes; c++) {
-      if (class_sums[c] > max_sum) {
-        max_sum = class_sums[c];
-      }
-    }
-    float exp_sum = 0.0f;
-    for (uint32_t c = 0; c < g_num_classes; c++) {
-      exp_sum += expf(class_sums[c] - max_sum);
-    }
-    float confidence =
-        (exp_sum > 0.0f) ? expf(class_sums[found] - max_sum) / exp_sum : 0.0f;
+    current_class = triggered_class;
+    float confidence = smoothed_scores[triggered_class];
 
-    printk("\nKeyword Detected: %s\n\r",
-           (found < kws_new_tags_count) ? kws_new_tags[found] : "?");
+    printk("\nKeyword Detected: %s\n\r", (triggered_class < kws_new_tags_count)
+                                             ? kws_new_tags[triggered_class]
+                                             : "?");
     if (metrics_on) {
-      printk("  confidence=%.1f%% vote=%.2f cpu=%ums dma=%uus\n\r",
-             confidence * 100.0f, score, inf_time, dma_time);
+      printk("  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
+             "dma=%uus\n\r",
+             confidence * 100.0f, triggered_score * 100.0f,
+             chiming_counters[triggered_class], inf_time, dma_time);
     }
-    if (is_ble_connected()) {
-      send_event(CMD_DEPLOY_START, kws_new_tags[found], confidence * 100.0f);
+    /* KWS data is sent only when BLE is connected and the KWS application
+     * is deployed */
+    if (is_ble_connected() && event_flag) {
+      send_event(CMD_DEPLOY_START, kws_new_tags[triggered_class],
+                 confidence * 100.0f);
     }
-
-    // Clear history so next word starts fresh
-    memset(class_history, -1, sizeof(class_history));
-    history_idx = 0;
-    reset_kws_spectrogram();
     last_trigger_time_ms = time_ms();
+    reset_stale_inference_data();
   }
   return;
 }
@@ -1363,126 +1371,19 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       }
     }
     if (pred.size()) {
-      uint32_t inf_time = time_ms() - start_time;
+      uint32_t inf_time = time_ms() - inference_start_ts;
       uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
       uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
       if (verbose_on) {
         printk("inference: done (cpu=%ums dma=%uus)\n\r", inf_time, dma_time);
       }
-
-      // Step 1: Per-class max pooling from dequantized output
-      int num_cls_capped =
-          (g_num_classes < MAX_KWS_CLASSES) ? g_num_classes : MAX_KWS_CLASSES;
-      float class_maxes[MAX_KWS_CLASSES];
-      for (int c = 0; c < num_cls_capped; c++) {
-        float max_val = akida_output_dq[c * g_num_neurons_per_class];
-        for (int n = 1; n < g_num_neurons_per_class; n++) {
-          float val = akida_output_dq[c * g_num_neurons_per_class + n];
-          if (val > max_val) {
-            max_val = val;
-          }
-        }
-        class_maxes[c] = max_val;
-      }
-
-      // Step 2: Softmax over per-class max values (with max subtraction for
-      // stability)
-      float max_logit = class_maxes[0];
-      int found = 0;
-      for (int c = 1; c < num_cls_capped; c++) {
-        if (class_maxes[c] > max_logit) {
-          max_logit = class_maxes[c];
-          found = c;
-        }
-      }
-      float softmax_scores[MAX_KWS_CLASSES] = {0};
-      float exp_sum = 0.0f;
-      for (int c = 0; c < num_cls_capped; c++) {
-        softmax_scores[c] = expf(class_maxes[c] - max_logit);
-        exp_sum += softmax_scores[c];
-      }
-      if (exp_sum > 0.0f) {
-        for (int c = 0; c < num_cls_capped; c++) {
-          softmax_scores[c] /= exp_sum;
-        }
-      }
-
-      // Step 3: EMA smoothing of softmax scores
-      for (int c = 0; c < num_cls_capped; c++) {
-        smoothed_scores[c] = smoothing_alpha * softmax_scores[c] +
-                             (1.0f - smoothing_alpha) * smoothed_scores[c];
-      }
-
-      // Step 4: Update chiming counters for keyword classes
-      // (skip silence and unknown classes)
-      int triggered_class = -1;
-      float triggered_score = 0.0f;
-      for (int c = 0; c < num_cls_capped; c++) {
-        if (c == KWS_SILENCE_CLASS || c == KWS_UNKNOWN_CLASS) {
-          continue;
-        }
-        if (smoothed_scores[c] >= score_threshold) {
-          chiming_counters[c]++;
-        } else {
-          chiming_counters[c] = 0;
-        }
-        // Check if this class has reached the chiming threshold
-        if (chiming_counters[c] >= chiming_threshold) {
-          if (triggered_class == -1 || smoothed_scores[c] > triggered_score) {
-            triggered_class = c;
-            triggered_score = smoothed_scores[c];
-          }
-        }
-      }
-
-      if (verbose_on) {
-        printk("scores: argmax=%d (%s) softmax=%.2f smoothed=%.2f "
-               "chiming=%d/%d\n\r",
-               found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
-               softmax_scores[found], smoothed_scores[found],
-               (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
-               chiming_threshold);
-      }
-
-      // Step 5: Trigger if chiming threshold reached
-      if (triggered_class >= 0) {
-        if (verbose_on) {
-          printk("trigger: keyword=%s chiming=%d/%d\n\r",
-                 (triggered_class < kws_new_tags_count)
-                     ? kws_new_tags[triggered_class]
-                     : "?",
-                 chiming_counters[triggered_class], chiming_threshold);
-        }
-        current_class = triggered_class;
-        float confidence = smoothed_scores[triggered_class];
-
-        printk("\nKeyword Detected: %s\n\r",
-               (triggered_class < kws_new_tags_count)
-                   ? kws_new_tags[triggered_class]
-                   : "?");
-        if (metrics_on) {
-          printk("  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
-                 "dma=%uus\n\r",
-                 confidence * 100.0f, triggered_score * 100.0f,
-                 chiming_counters[triggered_class], inf_time, dma_time);
-        }
-        /* KWS data is sent only when BLE is connected and the KWS application
-         * is deployed */
-        if (is_ble_connected() && event_flag) {
-          send_event(CMD_DEPLOY_START, kws_new_tags[triggered_class],
-                     confidence * 100.0f);
-        }
-        last_trigger_time_ms = time_ms();
-        reset_stale_inference_data();
-      }
-    } else {
-      printk("predict failure\n");
+      kws_post_processing(dma_time, inf_time);
     }
   } else {
     do {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akd_device.read_clock_counter();
-    
+
       ret = akida_enqueue(input, input_shape, NULL);
       uint32_t enq_time = time_ms() - inference_start_ts;
       {
@@ -1492,7 +1393,6 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       }
     } while (ret);
     k_work_reschedule(&akd_async_test_work, K_MSEC(35));
-    
   }
   return ret;
 }
