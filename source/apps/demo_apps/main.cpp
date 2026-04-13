@@ -185,7 +185,7 @@ static uint32_t mesh_learn_weights_size = 0;
 
 /** Timestamp of last sample enqueued for learning */
 static uint64_t last_learn_ts = 0;
-
+static int cnt;
 /*---------------------------------------------------------------------------
  * Structured Edge Learning - sub-state machine, capture buffer, augmentation
  *---------------------------------------------------------------------------*/
@@ -962,7 +962,7 @@ volatile uint64_t inference_start_ts = 0;
 
 static void akd_async_isr_handler(const struct device *dev,
                                   struct gpio_callback *cb, uint32_t pins) {
-
+  cnt++;
   k_sem_give(&akd_async_sem);
 }
 
@@ -975,11 +975,16 @@ static void akd_async_thread(void *a, void *b, void *c) {
     k_sem_take(&akd_async_sem, K_FOREVER);
 
     uint64_t fetch_start_ts = time_ms();
+    int value = gpio_pin_get_dt(&enable_akd_async);
+    printk("Before fetch INT value= %d\n",value);
     if (-EAGAIN != akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
+      value = gpio_pin_get_dt(&enable_akd_async);
+
       uint64_t fetch_end_ts = time_ms();
       uint32_t inference_dma_ts =
           akd_device.read_clock_counter() - inference_start_dma_ts;
       uint32_t inference_time = fetch_end_ts - inference_start_ts;
+      printk("After fetch INT value= %d,inference_dma_ts= %d,inference_time= %d\n",value,inference_dma_ts,inference_time);
       kws_post_processing(inference_dma_ts, inference_time);
     } else {
       printk("Fetch returned EAGAIN or Error\n");
@@ -1033,12 +1038,16 @@ int main(void) {
     printk("Failed to configure AKD ASYNC enable pin (err %d)\n", err);
     return err;
   }
+  int value = gpio_pin_get_dt(&enable_akd_async);
+  printk("After input config= %d\n",value);
   err = gpio_pin_interrupt_configure_dt(&enable_akd_async,
                                         GPIO_INT_EDGE_TO_ACTIVE);
   if (err) {
     printf("Failed to configure AKD ASYNC interrupt (err %d)\n", err);
     return err;
   }
+  value = gpio_pin_get_dt(&enable_akd_async);
+  printk("After interrupt config value= %d\n",value);
   gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
                      BIT(enable_akd_async.pin));
   err = gpio_add_callback(enable_akd_async.port, &akd_async_cb);
@@ -1196,7 +1205,14 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
       wdt_feed(wdt, wdt_channel_id);
     }
 #endif
-    prcess_led();
+  if(cnt >= 1){
+    printk("ISR cnt= %d\n",cnt);
+  }
+  // if ( gpio_pin_get_dt(&enable_akd_async) == 1){
+  //   printk("Interrupt triggerd in main \n");
+  // }
+  k_usleep(10);
+    // prcess_led();
   }
 }
 
@@ -1383,7 +1399,8 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     do {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akd_device.read_clock_counter();
-
+      int value = gpio_pin_get_dt(&enable_akd_async);
+      printk("Before AKD enqueue INT value= %d\n",value);
       ret = akida_enqueue(input, input_shape, NULL);
       uint32_t enq_time = time_ms() - inference_start_ts;
       {

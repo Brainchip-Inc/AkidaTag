@@ -255,7 +255,7 @@ dmic_dev: &pdm0 {
 		};
 
         akd_async: akd_async {
-            gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+            gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
         };
 	
         imui: imui {
