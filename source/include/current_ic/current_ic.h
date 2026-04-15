@@ -6,8 +6,9 @@
 #define ADC_CH_1 1
 #define AVG_SAMPLES 20
 #define ADC_MAX_VALUE 4095.0f
-#define ADC_REF_MV 1800.0f
-#define SHUNT_RESISTOR_GAIN_1V8 (25.0f * 0.7f) /*(GAIN * Resistor)*/
+#define ADC_REF_MV_1v8 1800.0f
+#define ADC_REF_MV_0v8 800.0f
+#define SHUNT_RESISTOR_GAIN_1V8 (25.0f * 1.0f) /*(GAIN * Resistor)*/
 #define SHUNT_RESISTOR_GAIN_0V8 (25.0f * 0.2f) /*(GAIN * Resistor)*/
 
 typedef enum {

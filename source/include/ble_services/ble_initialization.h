@@ -69,9 +69,9 @@ extern model_meta_t kws_meta;
 extern model_data_meta_t kws_data_meta;
 extern uint32_t g_num_classes;
 extern uint8_t adv_manufacturer_data[];
-int ble_init(void);
-void prcess_led(void);
 
+int ble_init(void);
+void send_battery_response(void);
 /*
  * Send PDM audio data to the phone.
  * Used for real-time audio level visualization over BLE.

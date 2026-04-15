@@ -18,6 +18,7 @@ static atomic_t current_state = ATOMIC_INIT(LED_STATE_NORMAL_APP);
 
 static atomic_t ble_connected = ATOMIC_INIT(0);
 
+static int blink_status = 0;
 /**
  * @brief Turn ON the RED LED.
  *
@@ -237,3 +238,17 @@ void led_ind_thread(void *a, void *b, void *c) {
  * @param state New LED state to apply.
  */
 void led_set_state(led_state_t state) { atomic_set(&current_state, state); }
+/**
+ * @brief Blink the run status LED to indicate system is alive
+ *
+ * The LED toggles every RUN_LED_BLINK_INTERVAL milliseconds:
+ *
+ * Note: This function is only available when CONFIG_DK_BOARD is enabled.
+ * @return void
+ */
+void process_led(void) {
+#ifdef CONFIG_DK_BOARD
+  dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
+#endif
+  k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
+}

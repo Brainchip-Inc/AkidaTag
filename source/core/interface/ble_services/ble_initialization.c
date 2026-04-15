@@ -14,9 +14,7 @@ LOG_MODULE_REGISTER(ble_initialization, CONFIG_LOG_DEFAULT_LEVEL);
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 
-#define RUN_STATUS_LED DK_LED1
 #define CON_STATUS_LED DK_LED2
-#define RUN_LED_BLINK_INTERVAL 100
 #define USER_LED DK_LED3
 #define USER_BUTTON DK_BTN1_MSK
 #define ACK_DONE 0xAA
@@ -47,7 +45,7 @@ LOG_MODULE_REGISTER(ble_initialization, CONFIG_LOG_DEFAULT_LEVEL);
 #define NUM_STATES 3
 #ifdef CONFIG_DK_BOARD
 static bool app_button_state;
-static int blink_status = 0;
+
 #endif
 
 static uint8_t battery_level = 97; // dummy battery level for testing
@@ -75,7 +73,6 @@ char processor[] = "AKIDA_1500";
 char model_version[] = "v1.1.0";
 static uint16_t akd_nodes = 8;
 float pwr_con = 2.3f;
-static uint8_t bat_sts;
 /* Flag indicating whether deployment mode is active.
  * Set when CMD_DEPLOY_START is received and cleared on CMD_DEPLOY_STOP.
  */
@@ -222,9 +219,10 @@ static bool parse_incoming_frame(const char *data, parsed_frame_t *frame) {
  * Format: "0,0,<size>,0:<level>,<Status>\r"
  * Updates GATT characteristic and sends via NUS.
  */
-static void send_battery_response(void) {
+void send_battery_response(void) {
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
+  uint8_t bat_sts = 0;
 #ifdef CONFIG_SPARK_BOARD
   bat_sts = check_bat_status();
 #endif
@@ -969,13 +967,6 @@ int ble_init(void)
 
   LOG_INF("Advertising successfully started\n");
   return 0;
-}
-
-void prcess_led(void) {
-#ifdef CONFIG_DK_BOARD
-  dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
-#endif
-  k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 }
 
 static int cmd_get_device_id(const struct shell *shell, size_t argc,

@@ -1087,7 +1087,6 @@ int main(void) {
   err_gpio = bat_sts_gpio_init();
   if (err_gpio) {
     printf("Battery status GPIO init failed (err %d)\n", err_gpio);
-    return -1;
   }
   int ret = current_ic_init();
   if (ret) {
@@ -1251,9 +1250,9 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
     }
 #endif
 #ifdef CONFIG_SPARK_BOARD
-    read_current_ic();
+    check_bat_status();
 #endif
-    prcess_led();
+    process_led();
   }
 }
 
