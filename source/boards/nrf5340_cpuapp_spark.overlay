@@ -248,8 +248,8 @@ dmic_dev: &pdm0 {
 / {
     gpios {
 		compatible = "gpio-keys";
-		akdsleep: akdsleep {
-			gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
+		akd_lp: akd_lp {
+			gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
 		};
 
         akdreset: akdreset {
@@ -309,7 +309,7 @@ dmic_dev: &pdm0 {
     };
 
     aliases {
-        akdsleep = &akdsleep;
+        akd-lp = &akd_lp;
         akdreset = &akdreset;
         spi2 = &spi2;
         imui = &imui;

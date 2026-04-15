@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ble_services/ble_initialization.h"
 #include "current_ic/current_ic.h"
 #include <stdio.h>
 #include <zephyr/device.h>
@@ -9,6 +10,7 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
@@ -24,6 +26,10 @@
 static const struct adc_dt_spec adc_channels[] = {
     DT_FOREACH_PROP_ELEM(DT_PATH(zephyr_user), io_channels, DT_SPEC_AND_COMMA)};
 
+static uint8_t previous_bat_status = 0xFF; // Initialize to invalid value
+
+static const float adc_scale = ADC_REF_MV_1v8 / (float)ADC_MAX_VALUE;
+
 #define CHRG_STS1_NODE DT_NODELABEL(chgr_sts1)
 #define CHRG_STS2_NODE DT_NODELABEL(chgr_sts2)
 
@@ -33,8 +39,8 @@ static const struct gpio_dt_spec chgr_sts1 =
 static const struct gpio_dt_spec chgr_sts2 =
     GPIO_DT_SPEC_GET(CHRG_STS2_NODE, gpios);
 
-uint16_t buf;
-struct adc_sequence sequence = {
+static uint16_t buf;
+static struct adc_sequence sequence = {
     .buffer = &buf,
     /* buffer size in bytes, not number of samples */
     .buffer_size = sizeof(buf),
@@ -119,17 +125,31 @@ int current_ic_init(void) {
 uint8_t check_bat_status(void) {
   int sts1 = gpio_pin_get_dt(&chgr_sts1);
   int sts2 = gpio_pin_get_dt(&chgr_sts2);
+  uint8_t current_status;
+
   if (sts1 == 1 && sts2 == 1) {
-    return BAT_NOT_CHARGING;
+    current_status = BAT_NOT_CHARGING;
   } else if (sts1 == 1 && sts2 == 0) {
-    return BAT_CHARGING;
+    current_status = BAT_CHARGING;
   } else if (sts1 == 0 && sts2 == 1) {
     printk("Charger Status: Recoverable fault\n");
-    return BAT_FAULT_RECOVERABLE;
+    current_status = BAT_FAULT_RECOVERABLE;
   } else {
     printk("Charger Status: Non-recoverable fault\n");
-    return BAT_FAULT_NON_RECOVERABLE;
+    current_status = BAT_FAULT_NON_RECOVERABLE;
   }
+  // Check if status changed
+  if (current_status != previous_bat_status) {
+    previous_bat_status = current_status;
+    if (is_ble_connected()) {
+      // Send BLE notification on status change
+      send_battery_response();
+      printk("Battery status changed to: %d, BLE notification sent\n",
+             current_status);
+    }
+  }
+
+  return current_status;
 }
 /**
  * @brief Read and average current measurements from the current monitoring IC
@@ -148,60 +168,72 @@ int read_current_ic(void) {
   int32_t raw_val;
   float val_mv;
   float current_ma;
-  static float sum[NUM_CHANNELS] = {0};
-  static int cnt[NUM_CHANNELS] = {0};
-  static float total_sum = 0.0f;
-  static int total_cnt = 0;
+  /* Reset per-channel accumulators */
+  float sum_1v8 = 0.0f;
+  float sum_0v8 = 0.0f;
+  for (int cnt = 0; cnt < AVG_SAMPLES; cnt++) {
+    for (size_t ch = 0U; ch < NUM_CHANNELS; ch++) {
 
-  for (size_t i = 0U; i < NUM_CHANNELS; i++) {
+      adc_sequence_init_dt(&adc_channels[ch], &sequence);
 
-    (void)adc_sequence_init_dt(&adc_channels[i], &sequence);
+      err = adc_read_dt(&adc_channels[ch], &sequence);
+      if (err < 0) {
+        printk("CH%zu: read error (%d)\n", ch, err);
+        continue;
+      }
 
-    err = adc_read_dt(&adc_channels[i], &sequence);
-    if (err < 0) {
-      printk("CH%zu: read error (%d)\n", i, err);
-      continue;
+      /* RAW value */
+      raw_val = (int32_t)buf;
+
+      // /* RAW → mV */
+      val_mv = (float)raw_val * adc_scale;
+      /* mV → mA */
+      if (ch == ADC_CH_0) {
+        current_ma = val_mv / SHUNT_RESISTOR_GAIN_1V8;
+        sum_1v8 += current_ma;
+      } else {
+        current_ma = val_mv / SHUNT_RESISTOR_GAIN_0V8;
+        sum_0v8 += current_ma;
+      }
     }
-
-    /* RAW value */
-    raw_val = (int32_t)buf;
-
-    /* RAW → mV */
-    val_mv = ((float)raw_val / ADC_MAX_VALUE) * ADC_REF_MV;
-
-    /* mV → mA */
-    if (i == ADC_CH_0)
-      current_ma = val_mv / SHUNT_RESISTOR_GAIN_1V8;
-    else
-      current_ma = val_mv / SHUNT_RESISTOR_GAIN_0V8;
-
-    /* Per-channel accumulate */
-    sum[i] += current_ma;
-    cnt[i]++;
-
-    /* Per-channel print + feed into total once window is complete */
-    if (cnt[i] >= AVG_SAMPLES) {
-      float avg = sum[i] / cnt[i];
-
-      printk("CH%zu Avg Current: %.3f mA\n", i, (double)avg);
-
-      /* Accumulate channel AVERAGE (not raw samples) into total */
-      total_sum += avg;
-      total_cnt++;
-
-      /* Reset per-channel accumulators */
-      sum[i] = 0.0f;
-      cnt[i] = 0;
-    }
+    k_msleep(50);
   }
-
-  /* Print total only when all channels have contributed their average */
-  if (total_cnt >= NUM_CHANNELS) {
-    printk("TOTAL Avg Current (CH0+CH1): %.3f mA\n", (double)total_sum);
-
-    /* Reset total accumulators */
-    total_sum = 0.0f;
-    total_cnt = 0;
-  }
+  float avg_1v8 = sum_1v8 / AVG_SAMPLES;
+  float avg_0v8 = sum_0v8 / AVG_SAMPLES;
+  printk("CH0 1V8 Avg Current: %.3f mA\n", avg_1v8);
+  printk("CH1 0V8 Avg Current: %.3f mA\n", avg_0v8);
   return 0;
 }
+/**
+ * @brief Read current measurements from the current monitoring IC
+ *
+ * Samples both ADC channels (1V8 and 0V8 rails) multiple times and
+ * calculates the average current for each rail.
+ *
+ * Usage:
+ *   uart:~$ read_current_ic
+ *
+ * The function performs AVG_SAMPLES (default 20) iterations, reading
+ * both ADC channels each iteration with a 50ms delay between iterations.
+ * After collecting all samples, it calculates and displays the average
+ * current for each rail:
+ *
+ *   CH0 1V8 Avg Current: XXX.XXX mA
+ *   CH1 0V8 Avg Current: XXX.XXX mA
+ *
+ * @param shell Shell structure pointer
+ * @param argc Argument count (should be 1 for no arguments)
+ * @param argv Argument vector
+ * @return 0 on success, -EINVAL if invalid arguments provided
+ */
+static int cli_read_current_ic(const struct shell *shell, size_t argc,
+                               char **argv) {
+  if (argc > 1) {
+    printk("invalid command\n");
+    return -EINVAL;
+  }
+  read_current_ic();
+}
+
+SHELL_CMD_REGISTER(read_current_ic, NULL, "Read Current IC",
+                   cli_read_current_ic);

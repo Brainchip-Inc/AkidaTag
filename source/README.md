@@ -820,6 +820,7 @@ Use the following commands on the console:
 | `kws_mode async` | Switches the system to Async mode. |
 | `kws_mode sync` | Switches the system to Sync mode. |
 | `kws_mode_get` | Displays the currently active KWS mode (Sync or Async). |
+| `read_current_ic` | Print both ADC channels (1V8 and 0V8 rails) current |
 
 __Inference mode__
  -  Default mode, in this mode it captures live audio data and shows the inferred class id.

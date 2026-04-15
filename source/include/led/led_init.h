@@ -38,6 +38,9 @@ extern struct k_sem led_sem;
  */
 #define LED_TICK_MS 120
 
+#define RUN_STATUS_LED DK_LED1
+
+#define RUN_LED_BLINK_INTERVAL 1000
 /**
  * @brief LED indication states.
  *
@@ -87,6 +90,8 @@ void led_set_state(led_state_t state);
  * @param c Unused
  */
 void led_ind_thread(void *a, void *b, void *c);
+
+void process_led(void);
 
 /* Get current BLE connection status. */
 bool is_ble_connected(void);
