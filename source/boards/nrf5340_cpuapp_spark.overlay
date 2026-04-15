@@ -41,7 +41,9 @@
 &pwm0 {
     status = "disabled";
 };
-
+&uicr {
+    nfct-pins-as-gpios;
+};
 /* Disable the entire gpio-keys and leds nodes if needed */
 / {
     buttons {

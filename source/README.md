@@ -893,6 +893,7 @@ The following GPIOs are added in the board overlay to control **power enabling f
 | `pdm_enb`     | P0.21 | Enable pin for the PDM microphone |
 | `akd_0v_enb`  | P0.22 | Enable control for AKIDA 0V supply |
 | `cam_enb`     | P1.15 | Enable pin for the camera module |
+| `akd_async`   | P0.03 | Enable pin for the AKIDA ASYNC |
 
 These GPIOs are defined in the **DeviceTree overlay** and are used to manage power enabling of onboard components in the Spark board.
 

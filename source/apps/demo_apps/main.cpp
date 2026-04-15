@@ -90,15 +90,7 @@ int infer(int app_index_l);
 
 void cli_worker_proc_thread(void *a, void *b, void *c);
 
-#define AKD_ASYNC_ENB_NODE DT_NODELABEL(akd_async)
-static const struct gpio_dt_spec enable_akd_async =
-    GPIO_DT_SPEC_GET(AKD_ASYNC_ENB_NODE, gpios);
-
-static struct gpio_callback akd_async_cb;
 static uint8_t akd_async_var = 0;
-
-/* Semaphore signaled by ISR when Akida asserts its done interrupt */
-K_SEM_DEFINE(akd_async_sem, 0, 1);
 
 /* Thread for processing Akida async results */
 #define AKD_ASYNC_STACK_SIZE 2048
@@ -185,7 +177,6 @@ static uint32_t mesh_learn_weights_size = 0;
 
 /** Timestamp of last sample enqueued for learning */
 static uint64_t last_learn_ts = 0;
-static int cnt;
 /*---------------------------------------------------------------------------
  * Structured Edge Learning - sub-state machine, capture buffer, augmentation
  *---------------------------------------------------------------------------*/
@@ -651,12 +642,6 @@ static void init_learn_weights_mem(uint32_t layer_mem_size) {
 
 static struct k_work_delayable switch_delayed_work;
 
-static struct k_work_delayable akd_async_test_work;
-static void akd_async_test_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  k_sem_give(&akd_async_sem);
-}
-
 static void switch_learning_delayed(struct k_work *work) {
   ARG_UNUSED(work);
 
@@ -960,12 +945,6 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
 volatile uint32_t inference_start_dma_ts = 0;
 volatile uint64_t inference_start_ts = 0;
 
-static void akd_async_isr_handler(const struct device *dev,
-                                  struct gpio_callback *cb, uint32_t pins) {
-  cnt++;
-  k_sem_give(&akd_async_sem);
-}
-
 static void akd_async_thread(void *a, void *b, void *c) {
   ARG_UNUSED(a);
   ARG_UNUSED(b);
@@ -975,16 +954,12 @@ static void akd_async_thread(void *a, void *b, void *c) {
     k_sem_take(&akd_async_sem, K_FOREVER);
 
     uint64_t fetch_start_ts = time_ms();
-    int value = gpio_pin_get_dt(&enable_akd_async);
-    printk("Before fetch INT value= %d\n",value);
     if (-EAGAIN != akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
-      value = gpio_pin_get_dt(&enable_akd_async);
 
       uint64_t fetch_end_ts = time_ms();
       uint32_t inference_dma_ts =
           akd_device.read_clock_counter() - inference_start_dma_ts;
       uint32_t inference_time = fetch_end_ts - inference_start_ts;
-      printk("After fetch INT value= %d,inference_dma_ts= %d,inference_time= %d\n",value,inference_dma_ts,inference_time);
       kws_post_processing(inference_dma_ts, inference_time);
     } else {
       printk("Fetch returned EAGAIN or Error\n");
@@ -1025,36 +1000,9 @@ int main(void) {
   shared_buf_init();
   file_transfer_init();
   ble_init();
-  if (!gpio_is_ready_dt(&enable_akd_async)) {
-    printk("AKD ASYBC enable GPIO not ready\n");
-    return -ENODEV;
-  }
 
   init_akd_object();
   akida_spiflash_init();
-
-  int err = gpio_pin_configure_dt(&enable_akd_async, GPIO_INPUT);
-  if (err) {
-    printk("Failed to configure AKD ASYNC enable pin (err %d)\n", err);
-    return err;
-  }
-  int value = gpio_pin_get_dt(&enable_akd_async);
-  printk("After input config= %d\n",value);
-  err = gpio_pin_interrupt_configure_dt(&enable_akd_async,
-                                        GPIO_INT_EDGE_TO_ACTIVE);
-  if (err) {
-    printf("Failed to configure AKD ASYNC interrupt (err %d)\n", err);
-    return err;
-  }
-  value = gpio_pin_get_dt(&enable_akd_async);
-  printk("After interrupt config value= %d\n",value);
-  gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
-                     BIT(enable_akd_async.pin));
-  err = gpio_add_callback(enable_akd_async.port, &akd_async_cb);
-  if (err) {
-    printk("Failed to add AKD ASYNC callback (err %d)\n", err);
-    return err;
-  }
 
   /* Get the SPI NOR flash device defined in the device tree (node label:
    * ext_flash) and verify that the driver has initialized successfully before
@@ -1067,7 +1015,7 @@ int main(void) {
   } else {
     printk("SPI flash device ready: %s\n", spi_flash->name);
   }
-  err = storage_init();
+  int err = storage_init();
   if (err != 0) {
     printk("LittleFS mount failed %d", err);
   } else {
@@ -1170,7 +1118,6 @@ int main(void) {
         &akd_async_thread_data, akd_async_stack, AKD_ASYNC_STACK_SIZE,
         akd_async_thread, NULL, NULL, NULL, AKD_ASYNC_PRIORITY, 0, K_NO_WAIT);
     k_thread_name_set(akd_async_tid, "akd_async");
-    k_work_init_delayable(&akd_async_test_work, akd_async_test_handler);
 
     printk(" Akida Async is initialized \n\r");
   } else {
@@ -1205,14 +1152,7 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
       wdt_feed(wdt, wdt_channel_id);
     }
 #endif
-  if(cnt >= 1){
-    printk("ISR cnt= %d\n",cnt);
-  }
-  // if ( gpio_pin_get_dt(&enable_akd_async) == 1){
-  //   printk("Interrupt triggerd in main \n");
-  // }
-  k_usleep(10);
-    // prcess_led();
+    prcess_led();
   }
 }
 
@@ -1399,8 +1339,6 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     do {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akd_device.read_clock_counter();
-      int value = gpio_pin_get_dt(&enable_akd_async);
-      printk("Before AKD enqueue INT value= %d\n",value);
       ret = akida_enqueue(input, input_shape, NULL);
       uint32_t enq_time = time_ms() - inference_start_ts;
       {
@@ -1409,7 +1347,6 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         // capture_power(true, &power_tmp, &power_tmp);
       }
     } while (ret);
-    k_work_reschedule(&akd_async_test_work, K_MSEC(35));
   }
   return ret;
 }

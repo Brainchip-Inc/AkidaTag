@@ -5,12 +5,16 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 
+/* Semaphore signaled by ISR when Akida asserts its done interrupt */
+K_SEM_DEFINE(akd_async_sem, 0, 1);
+
 /* ---------- Control GPIOs ---------- */
 #define AKD_ENB_NODE DT_NODELABEL(akd_enb)
 #define ACC_ENB_NODE DT_NODELABEL(acc_enb)
 #define PDM_ENB_NODE DT_NODELABEL(pdm_enb)
 #define AKD_0V_ENB_NODE DT_NODELABEL(akd_0v_enb)
 #define CAM_ENB_NODE DT_NODELABEL(cam_enb)
+#define AKD_ASYNC_ENB_NODE DT_NODELABEL(akd_async)
 
 static const struct gpio_dt_spec enable_akd =
     GPIO_DT_SPEC_GET(AKD_ENB_NODE, gpios);
@@ -27,14 +31,40 @@ static const struct gpio_dt_spec enable_akd_0V =
 static const struct gpio_dt_spec enable_camera =
     GPIO_DT_SPEC_GET(CAM_ENB_NODE, gpios);
 
+static const struct gpio_dt_spec enable_akd_async =
+    GPIO_DT_SPEC_GET(AKD_ASYNC_ENB_NODE, gpios);
+
+static struct gpio_callback akd_async_cb;
+
 /**
- * @brief Initialize all GPIO pins and button interrupts.
+ * @brief Interrupt handler for AKD asynchronous GPIO pin.
+ *
+ * This function is called when the AKD async GPIO pin triggers an interrupt
+ * on edge-to-active transition. It signals the presence of an asynchronous
+ * event from the Akida processor by releasing the akd_async_sem semaphore.
+ *
+ * @param dev    GPIO device structure (unused)
+ * @param cb     GPIO callback structure (unused)
+ * @param pins   Bitmask of pins that triggered the interrupt (unused)
+ */
+
+static void akd_async_isr_handler(const struct device *dev,
+                                  struct gpio_callback *cb, uint32_t pins) {
+  k_sem_give(&akd_async_sem);
+}
+/**
+ * @brief Initialize all GPIO pins and configure AKD async interrupt.
  *
  * This function performs the full GPIO bring-up sequence:
- *  - Verifies readiness of all GPIO devices
+ *  - Verifies readiness of all GPIO devices (AKD, ACC, PDM, Camera, AKD_0V,
+ * AKD_ASYNC)
  *  - Configures power enable pins as output inactive
- *  - Configures user button as input with edge interrupt
- *  - Registers the user button callback (user_pressed)
+ *  - Sets up AKD async GPIO as input with interrupt on edge-to-active
+ *  - Registers callback handler for AKD async interrupts
+ *
+ * The AKD async pin is configured to trigger an interrupt when the signal
+ * transitions to active state, allowing the system to respond to asynchronous
+ * events from the Akida processor.
  *
  * @return 0 on success
  * @return -ENODEV if any GPIO device is not ready
@@ -62,6 +92,10 @@ int gpio_init(void) {
   }
   if (!gpio_is_ready_dt(&enable_camera)) {
     printk("Camera enable GPIO not ready\n");
+    return -ENODEV;
+  }
+  if (!gpio_is_ready_dt(&enable_akd_async)) {
+    printk("AKD ASYBC enable GPIO not ready\n");
     return -ENODEV;
   }
 
@@ -92,6 +126,24 @@ int gpio_init(void) {
   err = gpio_pin_configure_dt(&enable_camera, GPIO_OUTPUT_INACTIVE);
   if (err) {
     printk("Failed to configure camera enable pin (err %d)\n", err);
+    return err;
+  }
+  err = gpio_pin_configure_dt(&enable_akd_async, GPIO_INPUT);
+  if (err) {
+    printk("Failed to configure AKD ASYNC enable pin (err %d)\n", err);
+    return err;
+  }
+  err = gpio_pin_interrupt_configure_dt(&enable_akd_async,
+                                        GPIO_INT_EDGE_TO_ACTIVE);
+  if (err) {
+    printf("Failed to configure AKD ASYNC interrupt (err %d)\n", err);
+    return err;
+  }
+  gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
+                     BIT(enable_akd_async.pin));
+  err = gpio_add_callback(enable_akd_async.port, &akd_async_cb);
+  if (err) {
+    printk("Failed to add AKD ASYNC callback (err %d)\n", err);
     return err;
   }
 
