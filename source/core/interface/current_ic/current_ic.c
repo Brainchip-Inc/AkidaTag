@@ -2,7 +2,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "ble_services/ble_initialization.h"
 #include "current_ic/current_ic.h"
 #include <stdio.h>
 #include <zephyr/device.h>
@@ -26,8 +25,6 @@
 static const struct adc_dt_spec adc_channels[] = {
     DT_FOREACH_PROP_ELEM(DT_PATH(zephyr_user), io_channels, DT_SPEC_AND_COMMA)};
 
-static uint8_t previous_bat_status = 0xFF; // Initialize to invalid value
-
 static const float adc_scale = ADC_REF_MV_1v8 / (float)ADC_MAX_VALUE;
 
 #define CHRG_STS1_NODE DT_NODELABEL(chgr_sts1)
@@ -40,11 +37,7 @@ static const struct gpio_dt_spec chgr_sts2 =
     GPIO_DT_SPEC_GET(CHRG_STS2_NODE, gpios);
 
 static uint16_t buf;
-static struct adc_sequence sequence = {
-    .buffer = &buf,
-    /* buffer size in bytes, not number of samples */
-    .buffer_size = sizeof(buf),
-};
+static struct adc_sequence sequence;
 
 /**
  * @brief Initialize GPIO pins for battery charger status monitoring
@@ -122,34 +115,30 @@ int current_ic_init(void) {
  *         - BAT_FAULT_RECOVERABLE: Recoverable fault condition detected
  *         - BAT_FAULT_NON_RECOVERABLE: Non-recoverable fault condition detected
  */
-uint8_t check_bat_status(void) {
+bat_status check_bat_status(void) {
   int sts1 = gpio_pin_get_dt(&chgr_sts1);
+  if (sts1 < 0) {
+    printk("Failed to read CHGR_STS1: %d", sts1);
+    return BAT_READ_FAILED;
+  }
+
   int sts2 = gpio_pin_get_dt(&chgr_sts2);
-  uint8_t current_status;
+  if (sts2 < 0) {
+    printk("Failed to read CHGR_STS2: %d", sts2);
+    return BAT_READ_FAILED;
+  }
 
   if (sts1 == 1 && sts2 == 1) {
-    current_status = BAT_NOT_CHARGING;
+    return BAT_NOT_CHARGING;
   } else if (sts1 == 1 && sts2 == 0) {
-    current_status = BAT_CHARGING;
+    return BAT_CHARGING;
   } else if (sts1 == 0 && sts2 == 1) {
     printk("Charger Status: Recoverable fault\n");
-    current_status = BAT_FAULT_RECOVERABLE;
+    return BAT_FAULT_RECOVERABLE;
   } else {
     printk("Charger Status: Non-recoverable fault\n");
-    current_status = BAT_FAULT_NON_RECOVERABLE;
+    return BAT_FAULT_NON_RECOVERABLE;
   }
-  // Check if status changed
-  if (current_status != previous_bat_status) {
-    previous_bat_status = current_status;
-    if (is_ble_connected()) {
-      // Send BLE notification on status change
-      send_battery_response();
-      printk("Battery status changed to: %d, BLE notification sent\n",
-             current_status);
-    }
-  }
-
-  return current_status;
 }
 /**
  * @brief Read and average current measurements from the current monitoring IC
@@ -165,43 +154,50 @@ uint8_t check_bat_status(void) {
  */
 int read_current_ic(void) {
   int err;
-  int32_t raw_val;
-  float val_mv;
-  float current_ma;
-  /* Reset per-channel accumulators */
   float sum_1v8 = 0.0f;
   float sum_0v8 = 0.0f;
+
+  // Channel 0 — 1V8 rail
+  // Initialize sequence ONCE for this channel
+  adc_sequence_init_dt(&adc_channels[ADC_CH_0], &sequence);
+  sequence.buffer = &buf;
+  sequence.buffer_size = sizeof(buf);
+
   for (int cnt = 0; cnt < AVG_SAMPLES; cnt++) {
-    for (size_t ch = 0U; ch < NUM_CHANNELS; ch++) {
-
-      adc_sequence_init_dt(&adc_channels[ch], &sequence);
-
-      err = adc_read_dt(&adc_channels[ch], &sequence);
-      if (err < 0) {
-        printk("CH%zu: read error (%d)\n", ch, err);
-        continue;
-      }
-
-      /* RAW value */
-      raw_val = (int32_t)buf;
-
-      // /* RAW → mV */
-      val_mv = (float)raw_val * adc_scale;
-      /* mV → mA */
-      if (ch == ADC_CH_0) {
-        current_ma = val_mv / SHUNT_RESISTOR_GAIN_1V8;
-        sum_1v8 += current_ma;
-      } else {
-        current_ma = val_mv / SHUNT_RESISTOR_GAIN_0V8;
-        sum_0v8 += current_ma;
-      }
+    err = adc_read_dt(&adc_channels[ADC_CH_0], &sequence);
+    if (err < 0) {
+      printk("CH0: read error (%d)\n", err);
+      return -1;
     }
-    k_msleep(50);
+    float val_mv = (float)(int32_t)buf * adc_scale;
+    sum_1v8 += val_mv / SHUNT_RESISTOR_GAIN_1V8;
+    k_msleep(10);
   }
+
+  // Settling delay when switching channels
+  k_msleep(20);
+
+  // Channel 1 — 0V8 rail
+  // Re-initialize sequence for the new channel
+  adc_sequence_init_dt(&adc_channels[ADC_CH_1], &sequence);
+  sequence.buffer = &buf;
+  sequence.buffer_size = sizeof(buf);
+
+  for (int cnt = 0; cnt < AVG_SAMPLES; cnt++) {
+    err = adc_read_dt(&adc_channels[ADC_CH_1], &sequence);
+    if (err < 0) {
+      printk("CH1: read error (%d)\n", err);
+      return -1;
+    }
+    float val_mv = (float)(int32_t)buf * adc_scale;
+    sum_0v8 += val_mv / SHUNT_RESISTOR_GAIN_0V8;
+    k_msleep(10);
+  }
+
   float avg_1v8 = sum_1v8 / AVG_SAMPLES;
   float avg_0v8 = sum_0v8 / AVG_SAMPLES;
-  printk("CH0 1V8 Avg Current: %.3f mA\n", avg_1v8);
-  printk("CH1 0V8 Avg Current: %.3f mA\n", avg_0v8);
+  printk("CH0 1V8 Avg Current: %.2f mA\n", (double)avg_1v8);
+  printk("CH1 0V8 Avg Current: %.2f mA\n", (double)avg_0v8);
   return 0;
 }
 /**
@@ -232,7 +228,10 @@ static int cli_read_current_ic(const struct shell *shell, size_t argc,
     printk("invalid command\n");
     return -EINVAL;
   }
-  read_current_ic();
+  if (read_current_ic() < 0) {
+    return -1;
+  }
+  return 0;
 }
 
 SHELL_CMD_REGISTER(read_current_ic, NULL, "Read Current IC",

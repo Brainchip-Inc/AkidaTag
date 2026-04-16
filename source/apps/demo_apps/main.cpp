@@ -1250,7 +1250,9 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
     }
 #endif
 #ifdef CONFIG_SPARK_BOARD
-    check_bat_status();
+    if (is_ble_connected() && app_start_flag) {
+      send_battery_response(CMD_STREAM_STS);
+    }
 #endif
     process_led();
   }
