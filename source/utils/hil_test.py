@@ -353,7 +353,7 @@ def test_infer_kws(ser, timeout):
 
 
 def run_tests(port, baudrate, timeout, only_infer):
-
+    time.sleep(5)
     ser = serial.Serial(port, baudrate=baudrate, timeout=1)
     ser.reset_input_buffer()
 

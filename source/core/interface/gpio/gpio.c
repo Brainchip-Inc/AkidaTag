@@ -95,7 +95,7 @@ int gpio_init(void) {
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&enable_akd_async)) {
-    printk("AKD ASYBC enable GPIO not ready\n");
+    printk("AKD ASYNC enable GPIO not ready\n");
     return -ENODEV;
   }
 
@@ -136,7 +136,7 @@ int gpio_init(void) {
   err = gpio_pin_interrupt_configure_dt(&enable_akd_async,
                                         GPIO_INT_EDGE_TO_ACTIVE);
   if (err) {
-    printf("Failed to configure AKD ASYNC interrupt (err %d)\n", err);
+    printk("Failed to configure AKD ASYNC interrupt (err %d)\n", err);
     return err;
   }
   gpio_init_callback(&akd_async_cb, akd_async_isr_handler,

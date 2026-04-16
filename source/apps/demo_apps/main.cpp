@@ -90,15 +90,14 @@ int infer(int app_index_l);
 
 void cli_worker_proc_thread(void *a, void *b, void *c);
 
-static uint8_t akd_async_var = 0;
-
+#ifdef CONFIG_SPARK_BOARD
 /* Thread for processing Akida async results */
 #define AKD_ASYNC_STACK_SIZE 2048
 #define AKD_ASYNC_PRIORITY 5
 K_THREAD_STACK_DEFINE(akd_async_stack, AKD_ASYNC_STACK_SIZE);
 static struct k_thread akd_async_thread_data;
 static k_tid_t akd_async_tid;
-
+#endif
 /*
 FLash offset indices
 KWS - 0
@@ -944,7 +943,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
 
 volatile uint32_t inference_start_dma_ts = 0;
 volatile uint64_t inference_start_ts = 0;
-
+#ifdef CONFIG_SPARK_BOARD
 static void akd_async_thread(void *a, void *b, void *c) {
   ARG_UNUSED(a);
   ARG_UNUSED(b);
@@ -966,7 +965,7 @@ static void akd_async_thread(void *a, void *b, void *c) {
     }
   }
 }
-
+#endif
 int main(void) {
 
   check_reset_reason();
@@ -1111,8 +1110,12 @@ int main(void) {
   if (check_model_compatibility(is_el_model, kws_meta) != SUCCESS) {
     return -1;
   }
+#ifndef CONFIG_SPARK_BOARD
+  kws_meta.sync_api = DEFAULT_API_SELECTION_SYNC;
+#endif
 
   if (kws_meta.sync_api == DEFAULT_API_SELECTION_ASYNC) {
+#ifdef CONFIG_SPARK_BOARD
     /* Start dedicated thread for Akida async result processing */
     akd_async_tid = k_thread_create(
         &akd_async_thread_data, akd_async_stack, AKD_ASYNC_STACK_SIZE,
@@ -1120,6 +1123,7 @@ int main(void) {
     k_thread_name_set(akd_async_tid, "akd_async");
 
     printk(" Akida Async is initialized \n\r");
+#endif
   } else {
     printk(" Akida sync is initialized \n\r");
   }

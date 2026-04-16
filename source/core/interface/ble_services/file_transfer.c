@@ -269,8 +269,8 @@ static bool build_fs_paths_from_name(const char *fs_name) {
 /* -------------------------------------------------------------------------
  * SRAM upload buffer – used by DATA transfers (chunk staging)
  * ---------------------------------------------------------------------- */
-__attribute__((section(".sram_upload_buf"),
-               used)) uint8_t sram_upload_buffer[BUFFER_SIZE];
+__attribute__((section(".sram_upload_buf"), used))
+uint8_t sram_upload_buffer[BUFFER_SIZE];
 
 /* Flash write cursor – updated as chunks are flushed to SPI flash */
 static uint32_t app_flash_offset = AKD_FLASH_OFFSET;
