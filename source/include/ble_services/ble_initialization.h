@@ -13,6 +13,8 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/settings/settings.h>
+
+#define DUMMY_BATTERY_STATUS 0
 /**
  * @brief 128-bit unsigned integer using two 64-bit values.
  *
@@ -44,6 +46,7 @@ typedef enum {
   CMD_STREAM_START = 9,
   CMD_DEPLOY_STOP = 10,
   CMD_STREAM_STOP = 11,
+  CMD_STREAM_STS = 12,
 } command_type_t;
 
 /* Structure representing a parsed command frame received from the host */
@@ -64,6 +67,11 @@ extern uint8_t event_flag;
  */
 extern uint8_t pdm_stream_flag;
 
+/* Flag set when phone enters main app page -
+ * controls app-specific features and streaming battery status
+ */
+extern uint8_t app_start_flag;
+
 /* Access in main.c, and variable changes based on info.yaml */
 extern model_meta_t kws_meta;
 extern model_data_meta_t kws_data_meta;
@@ -71,7 +79,7 @@ extern uint32_t g_num_classes;
 extern uint8_t adv_manufacturer_data[];
 
 int ble_init(void);
-void send_battery_response(void);
+void send_battery_response(command_type_t cmd);
 /*
  * Send PDM audio data to the phone.
  * Used for real-time audio level visualization over BLE.

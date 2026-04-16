@@ -81,6 +81,16 @@ uint8_t event_flag = FLAG_DISABLE;
  * Used to control real-time audio data transmission to the phone.
  */
 uint8_t pdm_stream_flag = FLAG_DISABLE;
+
+/* Flag set when phone enters main app page.
+ * Enables app-specific features that should only run when user is actively
+ * using the main application interface.
+ */
+uint8_t app_start_flag = FLAG_DISABLE;
+
+#ifdef CONFIG_SPARK_BOARD
+static bat_status previous_bat_status = BAT_NOT_CHARGING;
+#endif
 /*==================== ADVERTISING DATA ====================
  * Manufacturer data is encoded in ASCII (hex values of characters)
  * instead of raw numeric values. This allows the mobile phone BLE application
@@ -218,16 +228,30 @@ static bool parse_incoming_frame(const char *data, parsed_frame_t *frame) {
  *
  * Format: "0,0,<size>,0:<level>,<Status>\r"
  * Updates GATT characteristic and sends via NUS.
+ * @param cmd Command type - CMD_BATTERY for on-demand, CMD_STREAM_STS for
+ * streaming
  */
-void send_battery_response(void) {
+void send_battery_response(command_type_t cmd) {
   char frame[FRAME_BUFFER_SIZE];
   char data_part[DATA_PART_SIZE];
-  uint8_t bat_sts = 0;
 #ifdef CONFIG_SPARK_BOARD
-  bat_sts = check_bat_status();
+  bat_status current_status = BAT_NOT_CHARGING;
+  current_status = check_bat_status();
+  if (current_status == BAT_READ_FAILED) {
+    LOG_ERR("Failed to read battery status (err=%d)\n", current_status);
+    return;
+  } else if (cmd != CMD_BATTERY) {
+    if (current_status == previous_bat_status) {
+      return;
+    }
+    previous_bat_status = current_status;
+  }
+#else
+  int current_status = DUMMY_BATTERY_STATUS; // default / dummy for DK
 #endif
+
   snprintf(data_part, sizeof(data_part), "%d:%d,%d\r", CMD_BATTERY,
-           battery_level, bat_sts);
+           battery_level, current_status);
   int data_len = strlen(data_part);
 
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
@@ -235,9 +259,9 @@ void send_battery_response(void) {
 
   int err = send_frame(frame);
   if (err) {
-    LOG_ERR(" Failed to send (err=%d)\n", err);
+    LOG_ERR("Failed to send (err=%d)\n", err);
   } else {
-    LOG_INF("  Data part: \"%s\" (len=%d)\n", data_part, data_len);
+    LOG_INF("Data part: \"%s\" (len=%d) [cmd=%d]\n", data_part, data_len, cmd);
   }
 }
 
@@ -357,7 +381,8 @@ void send_event(int cmd, const char *label, float value) {
   char data_part[DATA_PART_SIZE];
 
   /* Format data part: CMD:<label>,<value>\r */
-  snprintf(data_part, sizeof(data_part), "%d:%s,%.2f\r", cmd, label, value);
+  snprintf(data_part, sizeof(data_part), "%d:%s,%.2f\r", cmd, label,
+           (double)value);
   int data_len = strlen(data_part);
 
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
@@ -367,7 +392,8 @@ void send_event(int cmd, const char *label, float value) {
   if (err) {
     LOG_ERR("Failed to send event (cmd=%d label=%s err=%d)", cmd, label, err);
   } else {
-    LOG_INF("Event sent: cmd=%d label=\"%s\" value=%.2f", cmd, label, value);
+    LOG_INF("Event sent: cmd=%d label=\"%s\" value=%.2f", cmd, label,
+            (double)value);
   }
 }
 /**
@@ -677,10 +703,12 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
   case CMD_APPS:
     LOG_INF("APPS command received\n");
     app_display();
+    app_start_flag = FLAG_ENABLE;
     break;
+
   case CMD_BATTERY:
     LOG_INF("BATTERY command received\n");
-    send_battery_response();
+    send_battery_response(CMD_BATTERY);
     break;
 
   case CMD_DEVICE_INFO:
@@ -787,6 +815,8 @@ static void disconnected_ble(struct bt_conn *conn, uint8_t reason) {
   dk_set_led_off(CON_STATUS_LED);
   led_set_state(LED_STATE_NORMAL_APP);
   ble_connection_callback(BLE_NOT_CONNECTED);
+  app_start_flag = FLAG_DISABLE;
+  send_in_progress = false;
 }
 
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED

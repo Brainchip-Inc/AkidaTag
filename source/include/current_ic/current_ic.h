@@ -1,17 +1,16 @@
 #ifndef CURRENT_IC_H
 #define CURRENT_IC_H
 
-#define NUM_CHANNELS ARRAY_SIZE(adc_channels)
 #define ADC_CH_0 0
 #define ADC_CH_1 1
 #define AVG_SAMPLES 20
 #define ADC_MAX_VALUE 4095.0f
 #define ADC_REF_MV_1v8 1800.0f
-#define ADC_REF_MV_0v8 800.0f
 #define SHUNT_RESISTOR_GAIN_1V8 (25.0f * 1.0f) /*(GAIN * Resistor)*/
 #define SHUNT_RESISTOR_GAIN_0V8 (25.0f * 0.2f) /*(GAIN * Resistor)*/
 
 typedef enum {
+  BAT_READ_FAILED = -1,
   BAT_NOT_CHARGING = 0,
   BAT_CHARGING = 1,
   BAT_FAULT_RECOVERABLE = 2,
@@ -28,6 +27,6 @@ int current_ic_init(void);
 int read_current_ic(void);
 
 /* Gets current battery charger status from GPIO pins */
-uint8_t check_bat_status(void);
+bat_status check_bat_status(void);
 
 #endif
