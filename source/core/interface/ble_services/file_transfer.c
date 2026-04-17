@@ -72,9 +72,6 @@ static ssize_t get_num_edge_classes(struct bt_conn *conn,
 static ssize_t get_fs_name(struct bt_conn *conn,
                            const struct bt_gatt_attr *attr, const void *buf,
                            uint16_t len, uint16_t offset, uint8_t flags);
-static ssize_t get_sync_api(struct bt_conn *conn,
-                            const struct bt_gatt_attr *attr, const void *buf,
-                            uint16_t len, uint16_t offset, uint8_t flags);
 
 /* -------------------------------------------------------------------------
  * UUID definitions – must match Python send_model_via_ble.py
@@ -110,8 +107,6 @@ static ssize_t get_sync_api(struct bt_conn *conn,
   BT_UUID_128_ENCODE(0xf000aa0d, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FS_NAME_CHAR_VAL                                               \
   BT_UUID_128_ENCODE(0xf000aa0e, 0x0451, 0x4000, 0xb000, 0x000000000000)
-#define BT_UUID_SYNC_API_CHAR_VAL                                              \
-  BT_UUID_128_ENCODE(0xf000aa0f, 0x0451, 0x4000, 0xb000, 0x000000000000)
 
 /* UUID struct instances */
 static struct bt_uuid_128 file_transfer_service_uuid =
@@ -142,8 +137,6 @@ static struct bt_uuid_128 num_edge_classes_uuid =
     BT_UUID_INIT_128(BT_UUID_NUM_EDGE_CLASSES_CHAR_VAL);
 static struct bt_uuid_128 fs_name_uuid =
     BT_UUID_INIT_128(BT_UUID_FS_NAME_CHAR_VAL);
-static struct bt_uuid_128 sync_api_uuid =
-    BT_UUID_INIT_128(BT_UUID_SYNC_API_CHAR_VAL);
 
 /* UUID pointer macros */
 #define FILE_SVC_UUID (&file_transfer_service_uuid.uuid)
@@ -160,7 +153,6 @@ static struct bt_uuid_128 sync_api_uuid =
 #define IS_EDGE_LEARNED_UUID (&is_edge_learned_uuid.uuid)
 #define NUM_EDGE_CLASSES_UUID (&num_edge_classes_uuid.uuid)
 #define FS_NAME_UUID (&fs_name_uuid.uuid)
-#define SYNC_API_UUID (&sync_api_uuid.uuid)
 
 /* Permission shorthand */
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED
@@ -198,7 +190,6 @@ static uint32_t meta_flash_address = 0;
 static uint32_t meta_is_edge_learned = 0;
 static uint32_t meta_num_edge_classes = 0;
 static char meta_fs_name[MAX_FS_NAME_LEN] = {0};
-static uint32_t meta_sync_api = 0;
 
 extern int infer(int app_index_l);
 
@@ -269,8 +260,8 @@ static bool build_fs_paths_from_name(const char *fs_name) {
 /* -------------------------------------------------------------------------
  * SRAM upload buffer – used by DATA transfers (chunk staging)
  * ---------------------------------------------------------------------- */
-__attribute__((section(".sram_upload_buf"), used))
-uint8_t sram_upload_buffer[BUFFER_SIZE];
+__attribute__((section(".sram_upload_buf"),
+               used)) uint8_t sram_upload_buffer[BUFFER_SIZE];
 
 /* Flash write cursor – updated as chunks are flushed to SPI flash */
 static uint32_t app_flash_offset = AKD_FLASH_OFFSET;
@@ -349,11 +340,7 @@ BT_GATT_SERVICE_DEFINE(
 
     /* aa0e – LittleFS metadata path (UTF-8, optional) */
     BT_GATT_CHARACTERISTIC(FS_NAME_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
-                           get_fs_name, NULL),
-
-    /* aa0f – sync_api (32-bit, 0=sync 1=async) */
-    BT_GATT_CHARACTERISTIC(SYNC_API_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
-                           get_sync_api, NULL));
+                           get_fs_name, NULL));
 
 static void send_ack_to_host(uint8_t ack_code) {
   if (!notify_enabled) {
@@ -509,25 +496,12 @@ static ssize_t get_fs_name(struct bt_conn *conn,
   return len;
 }
 
-static ssize_t get_sync_api(struct bt_conn *conn,
-                            const struct bt_gatt_attr *attr, const void *buf,
-                            uint16_t len, uint16_t offset, uint8_t flags) {
-  if (len != 4) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
-  memcpy(&meta_sync_api, buf, 4);
-  LOG_INF("Sync API: %u (%s)\n", meta_sync_api,
-          meta_sync_api == 1 ? "ASYNC" : "SYNC");
-  return len;
-}
-
 /* -------------------------------------------------------------------------
  * Helpers
  * ---------------------------------------------------------------------- */
 int file_transfer_init(void) {
   LOG_INF("File transfer service initialised\n");
   memset(&current_meta, 0, sizeof(current_meta));
-  meta_sync_api = 0;
   return 0;
 }
 
@@ -643,7 +617,6 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     m->flash_address = meta_flash_address;
     m->is_edge_learned = meta_is_edge_learned;
     m->num_edge_classes = meta_num_edge_classes;
-    m->sync_api = meta_sync_api;
     m->info_data_len = (uint32_t)sram_info_offset;
     /* Extract and store model name from meta_fs_name (e.g. "kws" from
      * "/model_meta/kws") */

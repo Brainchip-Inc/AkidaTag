@@ -734,7 +734,20 @@ For non-edge learning model
     --bin  source/external/model_files/kws/kws_program_data.bin \
     --yaml source/external/model_files/kws/info.yaml
 ```
-
+### UICR Configuration: nfct-pins-as-gpios
+ This setting repurposes the NFC antenna pins (P0.02 and P0.03) as GPIOs.
+ In this design, P0.03 is used for AKD async functionality, so enabling this
+ configuration is required.
+```
+&uicr {
+    nfct-pins-as-gpios;
+};
+```
+**Note:** 
+ - On nRF5340, P0.02 and P0.03 are dedicated NFC pins by default.
+ - Enabling 'nfct-pins-as-gpios' writes to UICR (User Information Configuration Registers).
+ - This is a one-time programmable setting and permanently disables NFC functionality
+   on the chip until a full chip erase is performed.
 
 ### Application Security
 This project utilizes Secure Boot and Secure DFU (Device Firmware Update) via MCUboot. Security is enforced through an RSA-3072 digital signature.
@@ -774,6 +787,9 @@ Use the following commands on the console:
 | `threads_stop` | Terminate all running threads for testing the WDT. |
 | `wdt_disable` | System crash for watchdog validation. |
 | `device_id` | Print device ID |
+| `kws_mode async` | Switches the system to Async mode. |
+| `kws_mode sync` | Switches the system to Sync mode. |
+| `kws_mode_get` | Displays the currently active KWS mode (Sync or Async). |
 
 __Inference mode__
  -  Default mode, in this mode it captures live audio data and shows the inferred class id.

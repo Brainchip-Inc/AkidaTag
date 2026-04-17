@@ -47,8 +47,7 @@ def _load_shapes_json(output_dir, prefix):
 
 
 def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                     flash_address, is_el, neurons_per_class, num_el_classes,
-                     sync_mode="async"):
+                     flash_address, is_el, neurons_per_class, num_el_classes):
     """Write info.yaml metadata alongside the bin files."""
     npc = int(neurons_per_class) if neurons_per_class else 1
     num_classes = 0
@@ -69,7 +68,6 @@ def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
             "num_el_classes": int(num_el_classes) if is_el else 0,
             "num_neurons":  npc,
         },
-        "sync_mode": sync_mode,
     }
 
     yaml_path = os.path.join(output_dir, "info.yaml")
@@ -94,8 +92,7 @@ def fetch_and_convert(args):
         input_shape, output_shape, is_el_cached = _load_shapes_json(output_dir, prefix)
         _write_info_yaml(output_dir, prefix, input_shape, output_shape,
                          flash_address, is_el_cached,
-                         args.neurons_per_class, args.num_el_classes,
-                         sync_mode=args.sync_mode)
+                         args.neurons_per_class, args.num_el_classes)
         _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
         return input_shape, output_shape
 
@@ -216,8 +213,7 @@ def fetch_and_convert(args):
     _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el)
     _write_info_yaml(output_dir, prefix, input_shape, output_shape,
                      flash_address, is_el,
-                     args.neurons_per_class, args.num_el_classes,
-                     sync_mode=args.sync_mode)
+                     args.neurons_per_class, args.num_el_classes)
     _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
     return input_shape, output_shape
 
@@ -268,9 +264,6 @@ if __name__ == "__main__":
                         help="Akida MapMode value passed to model.map() (default: 1)")
     parser.add_argument("--num_el_classes", type=int, default=0,
                         help="Number of edge learning classes")
-    parser.add_argument("--sync_mode", default="async", choices=["sync", "async"],
-                        help="Akida API mode: 'sync' uses akida_forward/akida_fit, "
-                             "'async' uses akida_enqueue (default: async)")
 
     args = parser.parse_args()
     fetch_and_convert(args)

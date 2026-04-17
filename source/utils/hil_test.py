@@ -353,7 +353,6 @@ def test_infer_kws(ser, timeout):
 
 
 def run_tests(port, baudrate, timeout, only_infer):
-    time.sleep(5)
     ser = serial.Serial(port, baudrate=baudrate, timeout=1)
     ser.reset_input_buffer()
 
@@ -405,5 +404,8 @@ if __name__ == "__main__":
                         help="Run only TESTCASE 8")
 
     args = parser.parse_args()
+    reset_board()
 
+    print("Waiting for board to boot...")
+    time.sleep(10)
     sys.exit(run_tests(args.port, args.baud, args.timeout, args.only_infer))

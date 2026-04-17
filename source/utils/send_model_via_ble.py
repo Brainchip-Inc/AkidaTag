@@ -41,7 +41,7 @@ def compute_data_crc32(data_path):
 
 def compute_combined_crc32(total_length, input_shape, output_shape,
                            flash_address, is_edge_learned, num_edge_classes,
-                           info_path, model_name="", sync_api=0):
+                           info_path, model_name=""):
     """CRC32 over header fields [total_length..model_name] + info file bytes.
 
     Matches the firmware's model_info_hdr_crc32 computation in file_transfer.c.
@@ -60,7 +60,7 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
     #                       flash_address, is_edge_learned, num_edge_classes,
     #                       info_data_len
     header_bytes = struct.pack(
-        "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 5),
+        "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 4),
         total_length,
         *in_pad,
         *out_pad,
@@ -68,7 +68,6 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
         int(is_edge_learned),
         num_edge_classes,
         info_data_len,
-        int(sync_api),
     )
     # Append model_name as MAX_FS_NAME_LEN bytes, null-padded
     name_bytes = model_name.encode("utf-8")[:MAX_FS_NAME_LEN]
@@ -101,7 +100,6 @@ TOTAL_LENGTH_CHAR_UUID       = "f000aa0b-0451-4000-b000-000000000000"  # info+da
 IS_EDGE_LEARNED_CHAR_UUID    = "f000aa0c-0451-4000-b000-000000000000"  # 1 = edge-learned model (32-bit LE)
 NUM_EDGE_CLASSES_CHAR_UUID   = "f000aa0d-0451-4000-b000-000000000000"  # number of EL classes (32-bit LE)
 FS_NAME_CHAR_UUID            = "f000aa0e-0451-4000-b000-000000000000"  # LittleFS metadata path (UTF-8)
-SYNC_API_CHAR_UUID           = "f000aa0f-0451-4000-b000-000000000000"  # sync_api (32-bit LE, 0=sync 1=async)
 
 TRANSFER_TYPE_INFO = 0x00
 TRANSFER_TYPE_DATA = 0x01
@@ -153,7 +151,7 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
                              input_shape=None, output_shape=None,
                              flash_address=0x1000,
                              is_edge_learned=False, num_edge_classes=None,
-                             fs_name=None, sync_api=0):
+                             fs_name=None):
     """Transfer one binary file over BLE.
 
     Metadata fields (CRC, total_length, shapes, address, EL fields) are sent
@@ -271,14 +269,6 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent neurons in higher order 16 bites and num_edge_classes in lower 16bits: {classes}")
 
-        # 9b. sync_api – always sent (0=sync, 1=async)
-        await client.write_gatt_char(
-            SYNC_API_CHAR_UUID,
-            sync_api.to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent sync_api: {sync_api}")
-
         # (fs_name already sent before file_size – see step 1b above)
 
     # Stream file data in chunks
@@ -325,7 +315,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
                     input_shape=None, output_shape=None,
                     flash_address=0x1000,
                     is_edge_learned=False, num_edge_classes=None,
-                    fs_name=None, model_name="", sync_api=0):
+                    fs_name=None, model_name=""):
     source_file = filepath or info_path
     try:
         APP = detect_app_index(source_file)
@@ -350,7 +340,6 @@ async def send_file(address, filepath, info_path, write_to_sram,
             num_edge_classes=num_edge_classes if num_edge_classes is not None else 0,
             info_path=info_path,
             model_name=model_name,
-            sync_api=sync_api,
         )
     elif info_path and Path(info_path).exists():
         # Shapes not available – warn; CRC will be 0 (skipped at load time)
@@ -387,7 +376,6 @@ async def send_file(address, filepath, info_path, write_to_sram,
                 is_edge_learned=is_edge_learned,
                 num_edge_classes=num_edge_classes,
                 fs_name=fs_name,
-                sync_api=sync_api,
             )
             if not ok:
                 print("Info transfer failed, aborting.")
@@ -431,7 +419,6 @@ def _load_info_yaml(yaml_path):
         "num_classes":      int(el.get("num_classes",  0)),
         "neurons_per_class": int(el.get("num_neurons", 1)),
         "num_el_classes":   int(el.get("num_el_classes", 0)),
-        "sync_mode":        str(data.get("sync_mode", "async")),
     }
 
 
@@ -484,14 +471,6 @@ async def main(args):
     # model_name: from YAML field (e.g. "kws"), falls back to empty string
     model_name = yaml_meta["model_name"] if yaml_meta else ""
 
-    # sync_mode: explicit CLI > YAML > default "async"
-    sync_mode = args.sync_mode
-    if sync_mode is None and yaml_meta:
-        sync_mode = yaml_meta["sync_mode"]
-    if sync_mode is None:
-        sync_mode = "async"
-    sync_api = 1 if sync_mode == "async" else 0
-
     # Default fs_name derived from prefix when not supplied
     fs_name = args.fs_name
     if not fs_name:
@@ -505,7 +484,6 @@ async def main(args):
     if output_shape is not None: print(f"Output shape: {output_shape}")
     print(f"Flash address: {flash_address_str}")
     print(f"Edge-learned:  {is_edge_learned}")
-    print(f"Sync mode:     {sync_mode} (sync_api={sync_api})")
     print(f"FS name:       {fs_name}")
 
     print("\nScanning for BLE devices...")
@@ -551,7 +529,6 @@ async def main(args):
         num_edge_classes=packed_classes,
         fs_name=fs_name,
         model_name=model_name,
-        sync_api=sync_api,
     )
 
 
@@ -592,10 +569,6 @@ if __name__ == "__main__":
     parser.add_argument("--fs_name", default=None,
                         help="LittleFS path for model metadata "
                              "(default: /model_meta/<prefix>, e.g. /model_meta/kws_el)")
-    parser.add_argument("--sync_mode", default=None, choices=["sync", "async"],
-                        help="Akida API mode override: 'sync' (0) or 'async' (1). "
-                             "Defaults to value from --yaml if not specified.")
-
     args = parser.parse_args()
 
     DEVICE_NAME = get_device_name()

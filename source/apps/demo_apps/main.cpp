@@ -160,6 +160,11 @@ static void reset_kws_spectrogram(void);
 /*Akida Sync */
 #define DEFAULT_API_SELECTION_SYNC 0
 
+/** Timeout for enqueue operation in milliseconds */
+#define ENQUEUE_TIMEOUT_MS 5000
+/** Default KWS API mode (Async) */
+static uint8_t kws_api_selection = DEFAULT_API_SELECTION_ASYNC;
+
 static uint64_t last_trigger_time_ms = 0ULL;
 int verbose_on = 0;
 /** Current state of the application */
@@ -950,7 +955,12 @@ static void akd_async_thread(void *a, void *b, void *c) {
   ARG_UNUSED(c);
 
   while (1) {
-    k_sem_take(&akd_async_sem, K_FOREVER);
+    int ret = akd_async_sem_take(K_SECONDS(5));
+
+    if (ret == -EAGAIN) {
+      printk("No interrupt for 5 sec\n");
+      continue;
+    }
 
     uint64_t fetch_start_ts = time_ms();
     if (-EAGAIN != akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
@@ -966,6 +976,71 @@ static void akd_async_thread(void *a, void *b, void *c) {
   }
 }
 #endif
+
+/**
+ * @brief Initialize Akida API mode (Sync / Async)
+ *
+ * This function configures the Akida execution mode based on the selected mode
+ * and board configuration.
+ *
+ * Behavior:
+ * - On CONFIG_SPARK_BOARD:
+ *   - Supports both Sync and Async modes.
+ *   - If Async mode is selected:
+ *       - Enables GPIO interrupt (used for async triggering).
+ *       - Creates a dedicated thread for async result processing.
+ *   - If Sync mode is selected:
+ *       - Disables GPIO interrupt.
+ *       - Runs in blocking/synchronous mode.
+ *   - If an async thread is already running, it is safely stopped before
+ * switching modes.
+ *
+ * - On non-SPARK boards:
+ *   - Only Sync mode is supported.
+ *   - Async mode is not allowed and is ignored.
+ *
+ * @param mode
+ *   - DEFAULT_API_SELECTION_ASYNC : Enables async mode (interrupt +
+ * thread-based processing)
+ *   - DEFAULT_API_SELECTION_SYNC  : Enables sync mode (blocking execution)
+ */
+void akida_init(int mode) {
+#ifdef CONFIG_SPARK_BOARD
+
+  /* Stop existing async thread if running */
+  if (akd_async_tid != NULL) {
+    k_thread_abort(akd_async_tid);
+    akd_async_tid = NULL;
+    printk("Stopped existing async thread\n");
+  }
+
+  if (mode == DEFAULT_API_SELECTION_ASYNC) {
+    akd_irq_enable();
+    kws_api_selection = DEFAULT_API_SELECTION_ASYNC;
+
+    akd_async_tid = k_thread_create(
+        &akd_async_thread_data, akd_async_stack, AKD_ASYNC_STACK_SIZE,
+        akd_async_thread, NULL, NULL, NULL, AKD_ASYNC_PRIORITY, 0, K_NO_WAIT);
+
+    k_thread_name_set(akd_async_tid, "akd_async");
+
+    printk("Akida Async is initialized\n");
+  } else {
+    akd_irq_disable();
+    kws_api_selection = DEFAULT_API_SELECTION_SYNC;
+    printk("Akida Sync is initialized\n");
+  }
+
+#else
+  /* Non-SPARK boards: only sync supported */
+  kws_api_selection = DEFAULT_API_SELECTION_SYNC;
+
+  printk("Akida Sync is initialized\n");
+  printk("Note: Async mode is not supported on this board configuration\n");
+
+#endif
+}
+
 int main(void) {
 
   check_reset_reason();
@@ -1028,6 +1103,11 @@ int main(void) {
       K_FOREVER // START SUSPENDED
   );
   k_thread_start(cli_worker_tid);
+#ifdef CONFIG_SPARK_BOARD
+  akida_init(DEFAULT_API_SELECTION_ASYNC);
+#else
+  akida_init(DEFAULT_API_SELECTION_SYNC);
+#endif
   /* Load model metadata from LittleFS (written there by a previous BLE upload).
    * The metadata contains the flash address and program_info binary so we do
    * not need to rely on compile-time flash_offsets[] or hardcoded program_info
@@ -1110,23 +1190,7 @@ int main(void) {
   if (check_model_compatibility(is_el_model, kws_meta) != SUCCESS) {
     return -1;
   }
-#ifndef CONFIG_SPARK_BOARD
-  kws_meta.sync_api = DEFAULT_API_SELECTION_SYNC;
-#endif
 
-  if (kws_meta.sync_api == DEFAULT_API_SELECTION_ASYNC) {
-#ifdef CONFIG_SPARK_BOARD
-    /* Start dedicated thread for Akida async result processing */
-    akd_async_tid = k_thread_create(
-        &akd_async_thread_data, akd_async_stack, AKD_ASYNC_STACK_SIZE,
-        akd_async_thread, NULL, NULL, NULL, AKD_ASYNC_PRIORITY, 0, K_NO_WAIT);
-    k_thread_name_set(akd_async_tid, "akd_async");
-
-    printk(" Akida Async is initialized \n\r");
-#endif
-  } else {
-    printk(" Akida sync is initialized \n\r");
-  }
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
 
@@ -1310,7 +1374,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
 static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   int ret = 0;
 
-  if (kws_meta.sync_api == DEFAULT_API_SELECTION_SYNC) {
+  if (kws_api_selection == DEFAULT_API_SELECTION_SYNC) {
 
     inference_start_ts = time_ms();
     uint32_t s_dma_cycls = akd_device.read_clock_counter();
@@ -1340,6 +1404,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       kws_post_processing(dma_time, inf_time);
     }
   } else {
+    uint32_t start_time = time_ms();
     do {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akd_device.read_clock_counter();
@@ -1349,6 +1414,13 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         // uint32_t power_tmp;
         /* clear , accumulated power before enqueue */
         // capture_power(true, &power_tmp, &power_tmp);
+      }
+      // Check timeout
+      if ((time_ms() - start_time) > ENQUEUE_TIMEOUT_MS) {
+        printk("ERROR: akida_enqueue timeout after %d ms\n",
+               ENQUEUE_TIMEOUT_MS);
+        ret = EFAILURE;
+        break;
       }
     } while (ret);
   }
@@ -2269,6 +2341,89 @@ static int cmd_threads_stop(const struct shell *shell, size_t argc,
 SHELL_CMD_REGISTER(threads_stop, NULL, "Stop all worker threads",
                    cmd_threads_stop);
 #endif
+
+/**
+ * @brief Shell command to set KWS (Keyword Spotting) API mode
+ *
+ * This command allows switching between Sync and Async modes at runtime.
+ *
+ * Usage:
+ *   kws_mode <sync|async>
+ *
+ * @param shell Shell instance used for printing output
+ * @param argc  Argument count
+ * @param argv  Argument vector (expects mode as argv[1])
+ *
+ * @return 0 on success, negative error code on failure
+ */
+static int cmd_kws_mode(const struct shell *shell, size_t argc, char **argv) {
+  if (argc < 2) {
+    shell_print(shell, "Usage: kws_mode <sync|async>");
+    return -EINVAL;
+  }
+
+  if (strcmp(argv[1], "async") == 0) {
+#ifdef CONFIG_SPARK_BOARD
+    akida_init(DEFAULT_API_SELECTION_ASYNC);
+    shell_print(shell, "Switched to ASYNC mode");
+#else
+    shell_print(shell, "Warning: Async mode is not supported on nRF DK board. "
+                       "Falling back to Sync mode.\n");
+    return -EINVAL;
+#endif
+
+  } else if (strcmp(argv[1], "sync") == 0) {
+    akida_init(DEFAULT_API_SELECTION_SYNC);
+    shell_print(shell, "Switched to SYNC mode");
+
+  } else {
+    shell_print(shell, "Invalid mode. Use sync or async");
+    return -EINVAL;
+  }
+
+  return 0;
+}
+
+/**
+ * @brief Shell command to retrieve the current KWS API mode
+ *
+ * This command prints the currently active Keyword Spotting (KWS) mode
+ * based on the global `kws_api_selection` setting.
+ *
+ * Behavior:
+ * - Displays "ASYNC" if async mode is enabled.
+ * - Displays "SYNC" if sync mode is enabled.
+ *
+ * Usage:
+ *   kws_mode_get
+ *
+ * @param shell Shell instance used for output
+ * @param argc  Argument count (unused)
+ * @param argv  Argument vector (unused)
+ *
+ * @return Always returns 0
+ */
+static int cmd_kws_mode_get(const struct shell *shell, size_t argc,
+                            char **argv) {
+  ARG_UNUSED(argc);
+  ARG_UNUSED(argv);
+
+  if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
+    shell_print(shell, "Current mode: ASYNC");
+  } else {
+    shell_print(shell, "Current mode: SYNC");
+  }
+
+  return 0;
+}
+
+/* Command to set mode */
+SHELL_CMD_REGISTER(kws_mode, NULL, "Set KWS mode: kws_mode <sync|async>",
+                   cmd_kws_mode);
+
+/* Command to get current mode */
+SHELL_CMD_REGISTER(kws_mode_get, NULL, "Get current KWS mode",
+                   cmd_kws_mode_get);
 
 SHELL_CMD_REGISTER(app, NULL, "App Commands", cmd_app);
 

@@ -3,7 +3,8 @@
 #include <stdio.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/kernel.h>
+
+static bool irq_enabled = false;
 
 /* Semaphore signaled by ISR when Akida asserts its done interrupt */
 K_SEM_DEFINE(akd_async_sem, 0, 1);
@@ -35,6 +36,20 @@ static const struct gpio_dt_spec enable_akd_async =
     GPIO_DT_SPEC_GET(AKD_ASYNC_ENB_NODE, gpios);
 
 static struct gpio_callback akd_async_cb;
+
+/**
+ * @brief Wrapper function to take the Akida async semaphore
+ *
+ * This function encapsulates access to the internal semaphore used for
+ * async processing.
+ *
+ * @param timeout Timeout for semaphore wait
+ *
+ * @return 0 on success, negative error code on failure/timeout
+ */
+int akd_async_sem_take(k_timeout_t timeout) {
+  return k_sem_take(&akd_async_sem, timeout);
+}
 
 /**
  * @brief Interrupt handler for AKD asynchronous GPIO pin.
@@ -133,12 +148,6 @@ int gpio_init(void) {
     printk("Failed to configure AKD ASYNC enable pin (err %d)\n", err);
     return err;
   }
-  err = gpio_pin_interrupt_configure_dt(&enable_akd_async,
-                                        GPIO_INT_EDGE_TO_ACTIVE);
-  if (err) {
-    printk("Failed to configure AKD ASYNC interrupt (err %d)\n", err);
-    return err;
-  }
   gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
                      BIT(enable_akd_async.pin));
   err = gpio_add_callback(enable_akd_async.port, &akd_async_cb);
@@ -149,6 +158,38 @@ int gpio_init(void) {
 
   printk("GPIO initialized\n");
   return 0;
+}
+/**
+ * @brief Enable GPIO interrupt for Akida async processing
+ *
+ * Configures the GPIO interrupt to trigger on active edge if not already
+ * enabled. This interrupt is used to signal async events.
+ *
+ * Notes:
+ * - Safe to call multiple times (idempotent).
+ * - Internal state is tracked using `irq_enabled`.
+ */
+void akd_irq_enable(void) {
+  if (!irq_enabled) {
+    gpio_pin_interrupt_configure_dt(&enable_akd_async, GPIO_INT_EDGE_TO_ACTIVE);
+    irq_enabled = true;
+  }
+}
+/**
+ * @brief Disable GPIO interrupt for Akida async processing
+ *
+ * Disables the GPIO interrupt to prevent async event triggering.
+ * Typically used when switching to sync mode.
+ *
+ * Notes:
+ * - Safe to call multiple times (idempotent).
+ * - Internal state is tracked using `irq_enabled`.
+ */
+void akd_irq_disable(void) {
+  if (irq_enabled) {
+    gpio_pin_interrupt_configure_dt(&enable_akd_async, GPIO_INT_DISABLE);
+    irq_enabled = false;
+  }
 }
 /**
  * @brief Enable power for onboard sensors and peripherals on the Spark board.
