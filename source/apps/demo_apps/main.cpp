@@ -217,6 +217,9 @@ typedef struct {
   uint64_t last_callback_ts; /**< Last time learning_on_spectrogram fired */
   float captured_mfcc[LEARN_CAPTURE_MAX_FRAMES][SPECTROGRAM_RES]; /**< ~3.2KB */
   int capture_write_idx; /**< Write index into captured_mfcc */
+  int current_aug_idx;   /**< Which augmentation is currently in-flight */
+  int num_augs;          /**< Total augmentations for this utterance */
+  int keyword_len; /**< Trimmed keyword length (needed by fetch handler) */
 } structured_learn_state_t;
 
 static structured_learn_state_t learn_state;
@@ -646,6 +649,11 @@ static void init_learn_weights_mem(uint32_t layer_mem_size) {
 
 static struct k_work_delayable switch_delayed_work;
 
+/* Learning-specific async work items for interrupt-driven augmentation chaining
+ */
+static struct k_work akd_learn_fetch_work;
+static void akd_learn_fetch_handler(struct k_work *work);
+
 static void switch_learning_delayed(struct k_work *work) {
   ARG_UNUSED(work);
 
@@ -672,6 +680,7 @@ static void switch_learning_delayed(struct k_work *work) {
 
     k_work_init_delayable(&learn_speech_end_work, learn_speech_end_handler);
     k_work_init(&learn_process_work, learn_process_handler);
+    k_work_init(&akd_learn_fetch_work, akd_learn_fetch_handler);
 
     /* Start polling for silence timeout */
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
@@ -949,6 +958,15 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
 volatile uint32_t inference_start_dma_ts = 0;
 volatile uint64_t inference_start_ts = 0;
 #ifdef CONFIG_SPARK_BOARD
+/* Returns true when the system is actively learning (called from ISR context)
+ */
+
+bool akd_in_learning(void) { return cur_kws_edge_state == STATE_LEARNING; }
+
+/* Submits the learning fetch work item (called from ISR via gpio.c) */
+
+void schedule_akd_learning_wq(void) { k_work_submit(&akd_learn_fetch_work); }
+
 static void akd_async_thread(void *a, void *b, void *c) {
   ARG_UNUSED(a);
   ARG_UNUSED(b);
@@ -958,7 +976,6 @@ static void akd_async_thread(void *a, void *b, void *c) {
     int ret = akd_async_sem_take(K_SECONDS(5));
 
     if (ret == -EAGAIN) {
-      printk("No interrupt for 5 sec\n");
       continue;
     }
 
@@ -1404,7 +1421,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       kws_post_processing(dma_time, inf_time);
     }
   } else {
-    uint32_t start_time = time_ms();
+    uint64_t start_time = time_ms();
     do {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akd_device.read_clock_counter();
@@ -1683,6 +1700,66 @@ generate_augmented_input(float captured[][SPECTROGRAM_RES], int keyword_len,
 }
 
 /*---------------------------------------------------------------------------
+ * Structured Edge Learning - Shared Buffers & Async Handlers
+ *---------------------------------------------------------------------------*/
+
+/* Shared augmented input buffer (accessed by learn_process_handler and
+ * akd_learn_fetch_handler across work item invocations) */
+__aligned(32) static uint8_t learn_aug_buf[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
+
+/* Forward declarations */
+static void learn_utterance_complete(void);
+
+/**
+ * @brief Learning fetch + chain handler. Runs once per augmentation.
+ *        Fetches the Akida learning result, then either chains the next
+ *        augmentation or completes the utterance.
+ *
+ *        This handler is self-scheduling: it reschedules akd_learn_sim_work
+ *        (35ms) for each augmentation until all are complete.
+ */
+static void akd_learn_fetch_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+
+  int32_t label = cur_kws_edge_novel_class;
+
+  /* Retrieve learning result for the completed augmentation */
+  if (-EAGAIN == akida_fetch((uint8_t *)learn_aug_buf, akd_op_size, true)) {
+    printk("learn: fetch EAGAIN for aug %d — retrying\n",
+           learn_state.current_aug_idx);
+    return;
+  }
+
+  learn_state.total_fit_calls++;
+  int idx = ++learn_state.current_aug_idx;
+
+  if ((idx % 10 == 0) || (idx == learn_state.num_augs)) {
+    printk("learn: fit %d/%d done\n\r", idx, learn_state.num_augs);
+  }
+
+  if (idx < learn_state.num_augs) {
+    /* Generate next augmentation and enqueue it */
+    generate_augmented_input(learn_state.captured_mfcc, learn_state.keyword_len,
+                             idx, learn_state.num_augs, learn_aug_buf);
+
+    uint64_t t0 = time_ms();
+    int ret;
+    do {
+      ret = akida_enqueue((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
+      if ((time_ms() - t0) > ENQUEUE_TIMEOUT_MS) {
+        printk("ERROR: learn enqueue timeout at aug %d\n", idx);
+        learn_utterance_complete(); /* graceful abort */
+        return;
+      }
+    } while (ret);
+
+  } else {
+    /* All augmentations fetched — advance utterance state machine */
+    learn_utterance_complete();
+  }
+}
+
+/*---------------------------------------------------------------------------
  * Structured Edge Learning - Processing & Completion Handlers
  *---------------------------------------------------------------------------*/
 
@@ -1714,6 +1791,27 @@ static void complete_structured_learning(void) {
   akida_learn_mode(false);
 
   switch_mode(STATE_INFERENCE);
+}
+
+/**
+ * @brief Advance to next utterance or complete learning.
+ *        Called by both sync path (after for-loop) and async path
+ *        (from akd_learn_fetch_handler when all augs done).
+ */
+static void learn_utterance_complete(void) {
+  learn_state.current_utterance++;
+  if (learn_state.current_utterance >= LEARN_NUM_UTTERANCES) {
+    learn_state.sub_state = LEARN_SUB_COMPLETE;
+    complete_structured_learning();
+  } else {
+    learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
+    learn_state.waiting_since_ts = time_ms();
+    learn_state.capture_write_idx = 0;
+    learn_state.speech_detected = false;
+    printk("\nlearn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
+           LEARN_NUM_UTTERANCES);
+    k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
+  }
 }
 
 /**
@@ -1782,19 +1880,14 @@ static int trim_captured_keyword(float captured[][SPECTROGRAM_RES],
 static void learn_process_handler(struct k_work *work) {
   ARG_UNUSED(work);
 
-  __aligned(32) static uint8_t aug_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
-
   int raw_len = learn_state.capture_write_idx;
-  int32_t label_id = cur_kws_edge_novel_class;
-  int num_augs = learn_state.augmentations_per_utterance;
+  int32_t label = cur_kws_edge_novel_class;
 
-  /* Trim captured buffer to just the keyword using energy analysis */
   int keyword_len = trim_captured_keyword(learn_state.captured_mfcc, raw_len);
-
   printk("learn: trimmed to %d frames (was %d)\n\r", keyword_len, raw_len);
 
   if (keyword_len < LEARN_MIN_KEYWORD_FRAMES) {
-    printk("learn: utterance too short after trim (%d frames), try again\n\r",
+    printk("learn: utterance too short (%d frames), try again\n\r",
            keyword_len);
     learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
     learn_state.waiting_since_ts = time_ms();
@@ -1806,38 +1899,41 @@ static void learn_process_handler(struct k_work *work) {
     return;
   }
 
-  printk("learn: processing %d augmented inputs for utterance %d/%d "
-         "(%d frames)\n\r",
-         num_augs, learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES,
-         keyword_len);
+  /* Cache context for akd_learn_fetch_handler to use across callbacks */
+  learn_state.keyword_len = keyword_len;
+  learn_state.num_augs = learn_state.augmentations_per_utterance;
+  learn_state.current_aug_idx = 0;
 
-  for (int i = 0; i < num_augs; i++) {
-    generate_augmented_input(learn_state.captured_mfcc, keyword_len, i,
-                             num_augs, aug_input);
+  printk("learn: processing %d augmented inputs for utterance %d/%d\n\r",
+         learn_state.num_augs, learn_state.current_utterance + 1,
+         LEARN_NUM_UTTERANCES);
 
-    akida_fit((uint8_t *)aug_input, (uint32_t *)dims, &label_id);
-    learn_state.total_fit_calls++;
+  if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
+    /* Async path: generate aug[0], enqueue, arm first fake ISR */
+    generate_augmented_input(learn_state.captured_mfcc, keyword_len, 0,
+                             learn_state.num_augs, learn_aug_buf);
+    uint64_t t0 = time_ms();
+    int ret;
+    do {
+      ret = akida_enqueue((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
+      if ((time_ms() - t0) > ENQUEUE_TIMEOUT_MS) {
+        printk("ERROR: learn initial enqueue timeout\n");
+        return;
+      }
+    } while (ret);
 
-    /* Log progress periodically to avoid flooding serial */
-    if ((i + 1) % 10 == 0 || i == num_augs - 1) {
-      printk("learn: fit %d/%d done\n\r", i + 1, num_augs);
-    }
-  }
-
-  learn_state.current_utterance++;
-
-  if (learn_state.current_utterance >= LEARN_NUM_UTTERANCES) {
-    learn_state.sub_state = LEARN_SUB_COMPLETE;
-    complete_structured_learning();
   } else {
-    /* Ready for next utterance */
-    learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
-    learn_state.waiting_since_ts = time_ms();
-    learn_state.capture_write_idx = 0;
-    learn_state.speech_detected = false;
-    printk("\nlearn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
-           LEARN_NUM_UTTERANCES);
-    k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
+    /* Sync path: run all augmentations inline (unchanged) */
+    for (int i = 0; i < learn_state.num_augs; i++) {
+      generate_augmented_input(learn_state.captured_mfcc, keyword_len, i,
+                               learn_state.num_augs, learn_aug_buf);
+      akida_fit((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
+      learn_state.total_fit_calls++;
+      if ((i + 1) % 10 == 0 || i == learn_state.num_augs - 1) {
+        printk("learn: fit %d/%d done\n\r", i + 1, learn_state.num_augs);
+      }
+    }
+    learn_utterance_complete();
   }
 }
 
@@ -2088,6 +2184,11 @@ extern "C" int infer(int app_index_l) {
   int class_id = -1;
   uint32_t inp_shap[] = {infer_meta.input_shape[0], infer_meta.input_shape[1],
                          infer_meta.input_shape[2]};
+#ifdef CONFIG_SPARK_BOARD
+  if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
+    akd_irq_disable();
+  }
+#endif
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
   int ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
@@ -2121,7 +2222,11 @@ extern "C" int infer(int app_index_l) {
   }
 
   printk("APP Inference Completed\n");
-
+#ifdef CONFIG_SPARK_BOARD
+  if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
+    akd_irq_enable();
+  }
+#endif
   return 0;
 }
 

@@ -54,9 +54,14 @@ int akd_async_sem_take(k_timeout_t timeout) {
 /**
  * @brief Interrupt handler for AKD asynchronous GPIO pin.
  *
- * This function is called when the AKD async GPIO pin triggers an interrupt
- * on edge-to-active transition. It signals the presence of an asynchronous
- * event from the Akida processor by releasing the akd_async_sem semaphore.
+ * This ISR is triggered on an edge-to-active transition of the AKD async GPIO.
+ * It indicates that the Akida processor has generated an asynchronous event.
+ *
+ * Behavior:
+ * - If the system is currently in learning mode, the AKD learning workqueue
+ *   is scheduled to handle the event in a deferred context.
+ * - Otherwise, the akd_async_sem semaphore is released to notify the main
+ *   processing thread of the event.
  *
  * @param dev    GPIO device structure (unused)
  * @param cb     GPIO callback structure (unused)
@@ -65,7 +70,11 @@ int akd_async_sem_take(k_timeout_t timeout) {
 
 static void akd_async_isr_handler(const struct device *dev,
                                   struct gpio_callback *cb, uint32_t pins) {
-  k_sem_give(&akd_async_sem);
+  if (akd_in_learning()) {
+    schedule_akd_learning_wq();
+  } else {
+    k_sem_give(&akd_async_sem);
+  }
 }
 /**
  * @brief Initialize all GPIO pins and configure AKD async interrupt.
