@@ -253,7 +253,8 @@ static struct k_work learn_process_work;
 static void learn_speech_end_handler(struct k_work *work);
 static void learn_process_handler(struct k_work *work);
 static void complete_structured_learning(void);
-
+/* Forward declarations */
+static void learn_utterance_complete(void);
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 /** Handle for the watchdog device  */
 static const struct device *wdt;
@@ -980,7 +981,8 @@ static void akd_async_thread(void *a, void *b, void *c) {
     }
 
     uint64_t fetch_start_ts = time_ms();
-    if (-EAGAIN != akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
+    if (-EFAILURE !=
+        akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
 
       uint64_t fetch_end_ts = time_ms();
       uint32_t inference_dma_ts =
@@ -988,7 +990,7 @@ static void akd_async_thread(void *a, void *b, void *c) {
       uint32_t inference_time = fetch_end_ts - inference_start_ts;
       kws_post_processing(inference_dma_ts, inference_time);
     } else {
-      printk("Fetch returned EAGAIN or Error\n");
+      printk("Fetch returned EFAILURE or Error\n");
     }
   }
 }
@@ -1437,6 +1439,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
         printk("ERROR: akida_enqueue timeout after %d ms\n",
                ENQUEUE_TIMEOUT_MS);
         ret = EFAILURE;
+        learn_utterance_complete(); // graceful abort
         break;
       }
     } while (ret);
@@ -1707,16 +1710,10 @@ generate_augmented_input(float captured[][SPECTROGRAM_RES], int keyword_len,
  * akd_learn_fetch_handler across work item invocations) */
 __aligned(32) static uint8_t learn_aug_buf[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
 
-/* Forward declarations */
-static void learn_utterance_complete(void);
-
 /**
  * @brief Learning fetch + chain handler. Runs once per augmentation.
  *        Fetches the Akida learning result, then either chains the next
  *        augmentation or completes the utterance.
- *
- *        This handler is self-scheduling: it reschedules akd_learn_sim_work
- *        (35ms) for each augmentation until all are complete.
  */
 static void akd_learn_fetch_handler(struct k_work *work) {
   ARG_UNUSED(work);
