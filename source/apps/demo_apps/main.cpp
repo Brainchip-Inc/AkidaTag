@@ -1721,8 +1721,8 @@ static void akd_learn_fetch_handler(struct k_work *work) {
   int32_t label = cur_kws_edge_novel_class;
 
   /* Retrieve learning result for the completed augmentation */
-  if (-EAGAIN == akida_fetch((uint8_t *)learn_aug_buf, akd_op_size, true)) {
-    printk("learn: fetch EAGAIN for aug %d — retrying\n",
+  if (-EFAILURE == akida_fetch((uint8_t *)learn_aug_buf, akd_op_size, false)) {
+    printk("learn: fetch EFAILURE for aug %d — retrying\n",
            learn_state.current_aug_idx);
     return;
   }
