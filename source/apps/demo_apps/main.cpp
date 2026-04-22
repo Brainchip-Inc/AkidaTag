@@ -470,6 +470,18 @@ static bool kws_model_present = false;
  * @param mode  - mode to be switched to.
  */
 static void switch_mode(int mode);
+
+#ifdef CONFIG_SPARK_BOARD
+/**
+ * @brief Restore LED to its default runtime state based on BLE connectivity.
+ *        Used to clear transient states like LEARN_SPEAK_NOW.
+ */
+static inline void restore_default_led_state(void) {
+  led_set_state(is_ble_connected() ? LED_STATE_BLE_CONNECTED
+                                   : LED_STATE_NORMAL_APP);
+}
+#endif
+
 float mfcc_fs = 123.56967163085938f;
 
 // KWS class definitions
@@ -685,6 +697,9 @@ static void switch_learning_delayed(struct k_work *work) {
     learn_state.augmentations_per_utterance = 2 * g_num_neurons_per_class;
     learn_state.waiting_since_ts = time_ms();
     learn_rng_state = (uint32_t)k_uptime_get();
+#ifdef CONFIG_SPARK_BOARD
+    led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+#endif
 
     /* Use shorter VAD timeout during learning for tighter capture */
     saved_speech_active_time_ms = speech_active_time_ms;
@@ -1405,6 +1420,10 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
                  confidence * 100.0f);
     }
     last_trigger_time_ms = time_ms();
+#ifdef CONFIG_SPARK_BOARD
+    led_set_state(LED_STATE_KEYWORD_TRIGGERED);
+    k_sem_give(&led_sem);
+#endif
     reset_stale_inference_data();
   }
   return;
@@ -1775,7 +1794,8 @@ static void akd_learn_fetch_handler(struct k_work *work) {
 
 /**
  * @brief Complete the structured learning process: save weights and return
- *        to inference mode.
+ *        to learn-select mode. The user must explicitly issue `el 0`
+ *        (long-press button 0) to leave learn-select and resume inference.
  */
 static void complete_structured_learning(void) {
   printk("\nlearn: COMPLETE - %d utterances, %d total fit() calls\n\r",
@@ -1800,7 +1820,10 @@ static void complete_structured_learning(void) {
   }
   akida_learn_mode(false);
 
-  switch_mode(STATE_INFERENCE);
+  switch_mode(STATE_LEARN_SELECT);
+#ifdef CONFIG_SPARK_BOARD
+  restore_default_led_state();
+#endif
 }
 
 /**
@@ -1821,6 +1844,9 @@ static void learn_utterance_complete(void) {
     printk("\nlearn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
            LEARN_NUM_UTTERANCES);
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
+#ifdef CONFIG_SPARK_BOARD
+    led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+#endif
   }
 }
 
@@ -1906,6 +1932,9 @@ static void learn_process_handler(struct k_work *work) {
     printk("learn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
            LEARN_NUM_UTTERANCES);
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
+#ifdef CONFIG_SPARK_BOARD
+    led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+#endif
     return;
   }
 
@@ -2019,6 +2048,9 @@ static void learning_on_spectrogram(int spectrogram_index) {
     learn_state.last_callback_ts = time_ms();
     printk("learn: speech detected, capturing utterance %d/%d...\n\r",
            learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
+#ifdef CONFIG_SPARK_BOARD
+    restore_default_led_state();
+#endif
     /* Fall through to capture the first batch of frames */
     /* fallthrough */
 
@@ -2080,6 +2112,9 @@ static void learning_on_user_input(int input_type) {
     }
 
     akida_learn_mode(false);
+#ifdef CONFIG_SPARK_BOARD
+    restore_default_led_state();
+#endif
 
     break;
   case USER_INPUT_SP(0):
@@ -2107,6 +2142,9 @@ static void learning_on_user_input(int input_type) {
     mesh_mem = (k_cycle_get_32() - cur_ts);
     duration_us = k_cyc_to_us_floor64(mesh_mem);
     printk("mesh_mem = %" PRIu64 " us\n", duration_us);
+#ifdef CONFIG_SPARK_BOARD
+    restore_default_led_state();
+#endif
 
     break;
   default:

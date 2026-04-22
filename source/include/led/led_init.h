@@ -45,12 +45,14 @@ extern struct k_sem led_sem;
  * LED patterns.
  */
 typedef enum {
-  LED_STATE_NORMAL_APP,      /**< Normal application running */
-  LED_STATE_BLE_CONNECTED,   /**< BLE connected */
-  LED_STATE_MODEL_RECEIVING, /**< Model/firmware receiving over BLE */
-  LED_STATE_FLASH_WRITE,     /**< Flash write in progress */
-  LED_STATE_UPDATE_SUCCESS,  /**< Update completed successfully */
-  LED_STATE_UPDATE_FAILED,   /**< Update failed */
+  LED_STATE_NORMAL_APP,        /**< Normal application running */
+  LED_STATE_BLE_CONNECTED,     /**< BLE connected */
+  LED_STATE_MODEL_RECEIVING,   /**< Model/firmware receiving over BLE */
+  LED_STATE_FLASH_WRITE,       /**< Flash write in progress */
+  LED_STATE_UPDATE_SUCCESS,    /**< Update completed successfully */
+  LED_STATE_UPDATE_FAILED,     /**< Update failed */
+  LED_STATE_LEARN_SPEAK_NOW,   /**< Learning: prompting user to speak (Red ON) */
+  LED_STATE_KEYWORD_TRIGGERED, /**< Inference: keyword detected (Red short flash) */
 } led_state_t;
 
 /**

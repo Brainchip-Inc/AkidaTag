@@ -120,13 +120,16 @@ int32_t led_init(void) {
  * and updates LED patterns accordingly.
  *
  * State behavior:
- * - NORMAL_APP        : Green slow blink (2s), Red OFF
- * - BLE_CONNECTED     : Green ON, Red OFF
- * - MODEL_RECEIVING   : Green ON, Red fast blink (500ms)
- * - FLASH FULL_ERASE  : Green ON, Red ON
- * - UPDATE_SUCCESS    : Both LEDs blink 3 times, then
- *                       restore runtime state based on BLE status
- * - UPDATE_FAILED     : Green OFF, Red ON
+ * - NORMAL_APP         : Green slow blink (2s), Red OFF
+ * - BLE_CONNECTED      : Green ON, Red OFF
+ * - MODEL_RECEIVING    : Green ON, Red fast blink (500ms)
+ * - FLASH FULL_ERASE   : Green ON, Red ON
+ * - UPDATE_SUCCESS     : Both LEDs blink 3 times, then
+ *                        restore runtime state based on BLE status
+ * - UPDATE_FAILED      : Green OFF, Red ON
+ * - LEARN_SPEAK_NOW    : Red ON (prompt to speak); green follows BLE status
+ * - KEYWORD_TRIGGERED  : Red ~500ms flash, then restore runtime state
+ *                        based on BLE status
  *
  * Synchronization:
  * The thread waits for a signal from DMIC thread using a semaphore.
@@ -226,6 +229,32 @@ void led_ind_thread(void *a, void *b, void *c) {
       green_led_off();
       red_led_on();
       break;
+
+    case LED_STATE_LEARN_SPEAK_NOW:
+      /* Red ON for the full speak window; green follows BLE status */
+      if (is_ble_connected()) {
+        green_led_on();
+      } else if ((tick / 10) % 2 == 0) {
+        green_led_on();
+      } else {
+        green_led_off();
+      }
+      red_led_on();
+      break;
+
+    case LED_STATE_KEYWORD_TRIGGERED: {
+      /* Single ~500ms red flash; preserve green's behavior */
+      bool ble = is_ble_connected();
+      if (ble) {
+        green_led_on();
+      }
+      red_led_on();
+      k_msleep(500);
+      red_led_off();
+      atomic_set(&current_state,
+                 ble ? LED_STATE_BLE_CONNECTED : LED_STATE_NORMAL_APP);
+      break;
+    }
 
     default:
       break;
