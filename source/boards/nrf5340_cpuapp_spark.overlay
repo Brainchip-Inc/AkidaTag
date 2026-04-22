@@ -278,6 +278,9 @@ dmic_dev: &pdm0 {
 		cam_enb: cam_enb {
             gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
         };
+        fg_int: fg_int {
+            gpios = <&gpio0 30 GPIO_ACTIVE_HIGH>;
+        };
         chgr_sts1: chgr_sts1 {
             gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
         };
@@ -320,6 +323,7 @@ dmic_dev: &pdm0 {
         cam-enb = &cam_enb;
         user-button = &user_btn;
         akd-async  = &akd_async;
+        fg-int = &fg_int;
         chgr-sts1 = &chgr_sts1;
         chgr-sts2 = &chgr_sts2;
     };

@@ -76,6 +76,7 @@ if(CONFIG_SPARK_BOARD)
         core/interface/gpio/gpio.c
         core/interface/button/user_button.c
         core/interface/current_ic/current_ic.c
+        core/interface/fuel_gauge/fuel_gauge.c
     )
 endif()
 

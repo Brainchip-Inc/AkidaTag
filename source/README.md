@@ -460,6 +460,25 @@ High	Low	    BAT_CHARGING	            Battery actively charging
 Low	    High	BAT_FAULT_RECOVERABLE	    Recoverable fault (e.g., over-temperature, timeout)
 Low	    Low	    BAT_FAULT_NON_RECOVERABLE	Non-recoverable fault (e.g., battery over-voltage)
 
+## Fuel Gauge (Battery SOC Monitoring)
+This module provides battery State of Charge (SOC) monitoring using the BQ27427 Impedance Track™ fuel gauge via I2C communication.
+Reads the current battery State of Charge (SOC) percentage from the BQ27427 fuel gauge and Send to Mobile app
+
+ISR-Based SOC Notification
+The BQ27427 fuel gauge can generate hardware interrupts on the SOC_INT pin whenever the State of Charge (SOC) changes by a configured delta (default 1%). This enables event-driven battery level reporting to the phone app instead of continuous polling, reducing I2C traffic and power consumption
+
+## Configuration
+Battery Parameters (1100mAh 4.2V Li-ion)
+
+Parameter	            Value	    Description
+Design Capacity	        1100 mAh	Battery capacity
+Design Energy	        4070 mWh	Capacity × 3.7V
+Terminate Voltage	    3000 mV	    0% SOC cutoff
+Taper Rate	            100	        Full charge detection
+Taper Voltage           4150        Charge termination voltage
+
+**NOTE**: These values are for testing purposes only using a 1100mAh test battery.
+Always connect the battery before connecting USB power.
 
 ### Edge Learning BLE Service
 

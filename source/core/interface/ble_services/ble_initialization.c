@@ -2,6 +2,7 @@
 #include "ble_services/ble_initialization.h"
 #ifdef CONFIG_SPARK_BOARD
 #include "current_ic/current_ic.h"
+#include "fuel_gauge/fuel_gauge.h"
 #endif
 #include "led_init.h"
 #include <hal/nrf_ficr.h>
@@ -48,7 +49,7 @@ static bool app_button_state;
 
 #endif
 
-static uint8_t battery_level = 97; // dummy battery level for testing
+static int8_t battery_level = 97; // dummy battery level for testing
 static struct bt_conn *current_conn = NULL;
 static bool notifications_enabled = false;
 static bool send_in_progress = false;
@@ -237,11 +238,13 @@ void send_battery_response(command_type_t cmd) {
 #ifdef CONFIG_SPARK_BOARD
   bat_status current_status = BAT_NOT_CHARGING;
   current_status = check_bat_status();
-  if (current_status == BAT_READ_FAILED) {
-    LOG_ERR("Failed to read battery status (err=%d)\n", current_status);
+  battery_level = fuel_gauge_get_soc();
+  if (current_status == BAT_READ_FAILED || battery_level < 0) {
+    LOG_ERR("Failed to read battery status and soc (err sts= %d, soc= %d)\n",
+            current_status, battery_level);
     return;
   } else if (cmd != CMD_BATTERY) {
-    if (current_status == previous_bat_status) {
+    if (current_status == previous_bat_status && fg_int_flag == FLAG_DISABLE) {
       return;
     }
     previous_bat_status = current_status;
@@ -258,6 +261,9 @@ void send_battery_response(command_type_t cmd) {
            data_part);
 
   int err = send_frame(frame);
+#ifdef CONFIG_SPARK_BOARD
+  fg_int_flag = FLAG_DISABLE;
+#endif
   if (err) {
     LOG_ERR("Failed to send (err=%d)\n", err);
   } else {

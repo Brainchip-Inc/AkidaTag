@@ -65,6 +65,7 @@ extern "C" {
 #ifdef CONFIG_SPARK_BOARD
 #include "button/user_button.h"
 #include "current_ic/current_ic.h"
+#include "fuel_gauge/fuel_gauge.h"
 #include "gpio/gpio.h"
 #endif
 #include "led_init.h"
@@ -1126,6 +1127,17 @@ int main(void) {
   }
 
   init_boot_count();
+#ifdef CONFIG_SPARK_BOARD
+  err = fuel_gauge_init();
+  if (err) {
+    printk("Fuel gauge init failed (err %d)\n", err);
+  }
+  err = fuel_gauge_isr_init();
+  if (err) {
+    printk("Fuel gauge isr init failed (err %d)\n", err);
+  }
+#endif
+
   cli_worker_tid = k_thread_create(
       &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
       cli_worker_proc_thread, NULL, NULL, NULL, CLI_WORKER_PRIORITY, K_USER,
