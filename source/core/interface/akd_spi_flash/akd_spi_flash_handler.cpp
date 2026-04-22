@@ -158,6 +158,11 @@ void init_akd_1500_spi_flash() {
   akd1500.write(0xfcf20008, rw_data.ucdata, 4);
   akd1500.read(0xfce00018, rw_data.ucdata, 4);
   printk("Akida1500 SPI Flash initialized on %x %x\n", reg, rw_data.uint_data);
+  /* setup gpio mux for interrupts selecting pin 3*/
+  rw_data.uint_data = 0x08;
+  akd1500.write(0xfce00038, rw_data.ucdata, 4);
+  rw_data.uint_data = 0x00;
+  akd1500.write(0xfce0003c, rw_data.ucdata, 4);
 }
 
 /* helper function to read from SPI flash – used by file_transfer.c for CRC */
