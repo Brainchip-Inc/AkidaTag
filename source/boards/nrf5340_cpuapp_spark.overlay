@@ -41,7 +41,9 @@
 &pwm0 {
     status = "disabled";
 };
-
+&uicr {
+    nfct-pins-as-gpios;
+};
 /* Disable the entire gpio-keys and leds nodes if needed */
 / {
     buttons {
@@ -253,6 +255,10 @@ dmic_dev: &pdm0 {
         akdreset: akdreset {
 			gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
 		};
+
+        akd_async: akd_async {
+            gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+        };
 	
         imui: imui {
 			gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
@@ -307,5 +313,6 @@ dmic_dev: &pdm0 {
         akd-0v-enb = &akd_0v_enb;
         cam-enb = &cam_enb;
         user-button = &user_btn;
+        akd-async  = &akd_async;
     };
 };

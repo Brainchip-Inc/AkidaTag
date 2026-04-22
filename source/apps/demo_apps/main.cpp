@@ -89,6 +89,15 @@ int infer(int app_index_l);
 }
 
 void cli_worker_proc_thread(void *a, void *b, void *c);
+
+#ifdef CONFIG_SPARK_BOARD
+/* Thread for processing Akida async results */
+#define AKD_ASYNC_STACK_SIZE 2048
+#define AKD_ASYNC_PRIORITY 5
+K_THREAD_STACK_DEFINE(akd_async_stack, AKD_ASYNC_STACK_SIZE);
+static struct k_thread akd_async_thread_data;
+static k_tid_t akd_async_tid;
+#endif
 /*
 FLash offset indices
 KWS - 0
@@ -145,27 +154,16 @@ static void reset_kws_spectrogram(void);
 #define DEFAULT_BIN0_THRESHOLD -39
 /** Learning delay is set to an arbitrary value */
 #define DEFAULT_LEARNING_DELAY 1000
-/** Macro to set the API to async mode */
-#ifdef CONFIG_SYNC_MODE
-#define DEFAULT_API_SELECTION_ASYNC 0
-#else
-#define DEFAULT_API_SELECTION_ASYNC 1
-#endif
-#ifdef CONFIG_INFERENCE_SAMPLE_THRESHOLD
-#define DEFAULT_INFERENCE_SAMPLE_THRESHOLD CONFIG_INFERENCE_SAMPLE_THRESHOLD
-#else
-#define DEFAULT_INFERENCE_SAMPLE_THRESHOLD 3
-#endif
 
-static struct kws_demo_params {
-  int energy_threshold;
-  int bin0_threshold;
-  int learning_delay;
-  int sync_api;
-  int infer_threshold;
-} params = {DEFAULT_ENERGY_THRESHOLD, DEFAULT_BIN0_THRESHOLD,
-            DEFAULT_LEARNING_DELAY, DEFAULT_API_SELECTION_ASYNC,
-            DEFAULT_INFERENCE_SAMPLE_THRESHOLD};
+/*Akida Async */
+#define DEFAULT_API_SELECTION_ASYNC 1
+/*Akida Sync */
+#define DEFAULT_API_SELECTION_SYNC 0
+
+/** Timeout for enqueue operation in milliseconds */
+#define ENQUEUE_TIMEOUT_MS 5000
+/** Default KWS API mode (Async) */
+static uint8_t kws_api_selection = DEFAULT_API_SELECTION_ASYNC;
 
 static uint64_t last_trigger_time_ms = 0ULL;
 int verbose_on = 0;
@@ -183,7 +181,6 @@ static uint32_t mesh_learn_weights_size = 0;
 
 /** Timestamp of last sample enqueued for learning */
 static uint64_t last_learn_ts = 0;
-
 /*---------------------------------------------------------------------------
  * Structured Edge Learning - sub-state machine, capture buffer, augmentation
  *---------------------------------------------------------------------------*/
@@ -220,6 +217,9 @@ typedef struct {
   uint64_t last_callback_ts; /**< Last time learning_on_spectrogram fired */
   float captured_mfcc[LEARN_CAPTURE_MAX_FRAMES][SPECTROGRAM_RES]; /**< ~3.2KB */
   int capture_write_idx; /**< Write index into captured_mfcc */
+  int current_aug_idx;   /**< Which augmentation is currently in-flight */
+  int num_augs;          /**< Total augmentations for this utterance */
+  int keyword_len; /**< Trimmed keyword length (needed by fetch handler) */
 } structured_learn_state_t;
 
 static structured_learn_state_t learn_state;
@@ -253,7 +253,8 @@ static struct k_work learn_process_work;
 static void learn_speech_end_handler(struct k_work *work);
 static void learn_process_handler(struct k_work *work);
 static void complete_structured_learning(void);
-
+/* Forward declarations */
+static void learn_utterance_complete(void);
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 /** Handle for the watchdog device  */
 static const struct device *wdt;
@@ -648,6 +649,12 @@ static void init_learn_weights_mem(uint32_t layer_mem_size) {
 }
 
 static struct k_work_delayable switch_delayed_work;
+
+/* Learning-specific async work items for interrupt-driven augmentation chaining
+ */
+static struct k_work akd_learn_fetch_work;
+static void akd_learn_fetch_handler(struct k_work *work);
+
 static void switch_learning_delayed(struct k_work *work) {
   ARG_UNUSED(work);
 
@@ -674,6 +681,7 @@ static void switch_learning_delayed(struct k_work *work) {
 
     k_work_init_delayable(&learn_speech_end_work, learn_speech_end_handler);
     k_work_init(&learn_process_work, learn_process_handler);
+    k_work_init(&akd_learn_fetch_work, akd_learn_fetch_handler);
 
     /* Start polling for silence timeout */
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
@@ -946,6 +954,112 @@ static void update_model_params(model_meta_t kws_meta) {
   akd_op_size = sizeof(int32_t) * g_num_classes * g_num_neurons_per_class;
 }
 
+static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
+
+volatile uint32_t inference_start_dma_ts = 0;
+volatile uint64_t inference_start_ts = 0;
+#ifdef CONFIG_SPARK_BOARD
+/* Returns true when the system is actively learning (called from ISR context)
+ */
+
+bool akd_in_learning(void) { return cur_kws_edge_state == STATE_LEARNING; }
+
+/* Submits the learning fetch work item (called from ISR via gpio.c) */
+
+void schedule_akd_learning_wq(void) { k_work_submit(&akd_learn_fetch_work); }
+
+static void akd_async_thread(void *a, void *b, void *c) {
+  ARG_UNUSED(a);
+  ARG_UNUSED(b);
+  ARG_UNUSED(c);
+
+  while (1) {
+    int ret = akd_async_sem_take(K_SECONDS(5));
+
+    if (ret == -EAGAIN) {
+      continue;
+    }
+
+    uint64_t fetch_start_ts = time_ms();
+    if (-EFAILURE !=
+        akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
+
+      uint64_t fetch_end_ts = time_ms();
+      uint32_t inference_dma_ts =
+          akd_device.read_clock_counter() - inference_start_dma_ts;
+      uint32_t inference_time = fetch_end_ts - inference_start_ts;
+      kws_post_processing(inference_dma_ts, inference_time);
+    } else {
+      printk("Fetch returned EFAILURE or Error\n");
+    }
+  }
+}
+#endif
+
+/**
+ * @brief Initialize Akida API mode (Sync / Async)
+ *
+ * This function configures the Akida execution mode based on the selected mode
+ * and board configuration.
+ *
+ * Behavior:
+ * - On CONFIG_SPARK_BOARD:
+ *   - Supports both Sync and Async modes.
+ *   - If Async mode is selected:
+ *       - Enables GPIO interrupt (used for async triggering).
+ *       - Creates a dedicated thread for async result processing.
+ *   - If Sync mode is selected:
+ *       - Disables GPIO interrupt.
+ *       - Runs in blocking/synchronous mode.
+ *   - If an async thread is already running, it is safely stopped before
+ * switching modes.
+ *
+ * - On non-SPARK boards:
+ *   - Only Sync mode is supported.
+ *   - Async mode is not allowed and is ignored.
+ *
+ * @param mode
+ *   - DEFAULT_API_SELECTION_ASYNC : Enables async mode (interrupt +
+ * thread-based processing)
+ *   - DEFAULT_API_SELECTION_SYNC  : Enables sync mode (blocking execution)
+ */
+void akida_init(int mode) {
+#ifdef CONFIG_SPARK_BOARD
+
+  /* Stop existing async thread if running */
+  if (akd_async_tid != NULL) {
+    k_thread_abort(akd_async_tid);
+    akd_async_tid = NULL;
+    printk("Stopped existing async thread\n");
+  }
+
+  if (mode == DEFAULT_API_SELECTION_ASYNC) {
+    akd_irq_enable();
+    kws_api_selection = DEFAULT_API_SELECTION_ASYNC;
+
+    akd_async_tid = k_thread_create(
+        &akd_async_thread_data, akd_async_stack, AKD_ASYNC_STACK_SIZE,
+        akd_async_thread, NULL, NULL, NULL, AKD_ASYNC_PRIORITY, 0, K_NO_WAIT);
+
+    k_thread_name_set(akd_async_tid, "akd_async");
+
+    printk("Akida Async is initialized\n");
+  } else {
+    akd_irq_disable();
+    kws_api_selection = DEFAULT_API_SELECTION_SYNC;
+    printk("Akida Sync is initialized\n");
+  }
+
+#else
+  /* Non-SPARK boards: only sync supported */
+  kws_api_selection = DEFAULT_API_SELECTION_SYNC;
+
+  printk("Akida Sync is initialized\n");
+  printk("Note: Async mode is not supported on this board configuration\n");
+
+#endif
+}
+
 int main(void) {
 
   check_reset_reason();
@@ -979,6 +1093,7 @@ int main(void) {
   shared_buf_init();
   file_transfer_init();
   ble_init();
+
   init_akd_object();
   akida_spiflash_init();
 
@@ -1007,6 +1122,11 @@ int main(void) {
       K_FOREVER // START SUSPENDED
   );
   k_thread_start(cli_worker_tid);
+#ifdef CONFIG_SPARK_BOARD
+  akida_init(DEFAULT_API_SELECTION_ASYNC);
+#else
+  akida_init(DEFAULT_API_SELECTION_SYNC);
+#endif
   /* Load model metadata from LittleFS (written there by a previous BLE upload).
    * The metadata contains the flash address and program_info binary so we do
    * not need to rely on compile-time flash_offsets[] or hardcoded program_info
@@ -1161,12 +1281,121 @@ static void reset_kws_spectrogram(void) {
   // feature_buff_full = false;
   reset_spectrogram_index();
 }
+
+static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
+  // Step 1: Per-class max pooling from dequantized output
+  int num_cls_capped =
+      (g_num_classes < MAX_KWS_CLASSES) ? g_num_classes : MAX_KWS_CLASSES;
+  float class_maxes[MAX_KWS_CLASSES];
+  for (int c = 0; c < num_cls_capped; c++) {
+    float max_val = akida_output_dq[c * g_num_neurons_per_class];
+    for (int n = 1; n < g_num_neurons_per_class; n++) {
+      float val = akida_output_dq[c * g_num_neurons_per_class + n];
+      if (val > max_val) {
+        max_val = val;
+      }
+    }
+    class_maxes[c] = max_val;
+  }
+
+  // Step 2: Softmax over per-class max values (with max subtraction for
+  // stability)
+  float max_logit = class_maxes[0];
+  int found = 0;
+  for (int c = 1; c < num_cls_capped; c++) {
+    if (class_maxes[c] > max_logit) {
+      max_logit = class_maxes[c];
+      found = c;
+    }
+  }
+  float softmax_scores[MAX_KWS_CLASSES] = {0};
+  float exp_sum = 0.0f;
+  for (int c = 0; c < num_cls_capped; c++) {
+    softmax_scores[c] = expf(class_maxes[c] - max_logit);
+    exp_sum += softmax_scores[c];
+  }
+  if (exp_sum > 0.0f) {
+    for (int c = 0; c < num_cls_capped; c++) {
+      softmax_scores[c] /= exp_sum;
+    }
+  }
+
+  // Step 3: EMA smoothing of softmax scores
+  for (int c = 0; c < num_cls_capped; c++) {
+    smoothed_scores[c] = smoothing_alpha * softmax_scores[c] +
+                         (1.0f - smoothing_alpha) * smoothed_scores[c];
+  }
+
+  // Step 4: Update chiming counters for keyword classes
+  // (skip silence and unknown classes)
+  int triggered_class = -1;
+  float triggered_score = 0.0f;
+  for (int c = 0; c < num_cls_capped; c++) {
+    if (c == KWS_SILENCE_CLASS || c == KWS_UNKNOWN_CLASS) {
+      continue;
+    }
+    if (smoothed_scores[c] >= score_threshold) {
+      chiming_counters[c]++;
+    } else {
+      chiming_counters[c] = 0;
+    }
+    // Check if this class has reached the chiming threshold
+    if (chiming_counters[c] >= chiming_threshold) {
+      if (triggered_class == -1 || smoothed_scores[c] > triggered_score) {
+        triggered_class = c;
+        triggered_score = smoothed_scores[c];
+      }
+    }
+  }
+
+  if (verbose_on) {
+    printk("scores: argmax=%d (%s) softmax=%.2f smoothed=%.2f "
+           "chiming=%d/%d\n\r",
+           found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
+           softmax_scores[found], smoothed_scores[found],
+           (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
+           chiming_threshold);
+  }
+
+  // Step 5: Trigger if chiming threshold reached
+  if (triggered_class >= 0) {
+    if (verbose_on) {
+      printk("trigger: keyword=%s chiming=%d/%d\n\r",
+             (triggered_class < kws_new_tags_count)
+                 ? kws_new_tags[triggered_class]
+                 : "?",
+             chiming_counters[triggered_class], chiming_threshold);
+    }
+    current_class = triggered_class;
+    float confidence = smoothed_scores[triggered_class];
+
+    printk("\nKeyword Detected: %s\n\r", (triggered_class < kws_new_tags_count)
+                                             ? kws_new_tags[triggered_class]
+                                             : "?");
+    if (metrics_on) {
+      printk("  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
+             "dma=%uus\n\r",
+             confidence * 100.0f, triggered_score * 100.0f,
+             chiming_counters[triggered_class], inf_time, dma_time);
+    }
+    /* KWS data is sent only when BLE is connected and the KWS application
+     * is deployed */
+    if (is_ble_connected() && event_flag) {
+      send_event(CMD_DEPLOY_START, kws_new_tags[triggered_class],
+                 confidence * 100.0f);
+    }
+    last_trigger_time_ms = time_ms();
+    reset_stale_inference_data();
+  }
+  return;
+}
+
 static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   int ret = 0;
 
-  if (params.sync_api == 0) {
+  if (kws_api_selection == DEFAULT_API_SELECTION_SYNC) {
 
-    uint64_t start_time = time_ms();
+    inference_start_ts = time_ms();
     uint32_t s_dma_cycls = akd_device.read_clock_counter();
 
     int num_outputs = g_num_classes * g_num_neurons_per_class;
@@ -1185,121 +1414,35 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       }
     }
     if (pred.size()) {
-      uint32_t inf_time = time_ms() - start_time;
+      uint32_t inf_time = time_ms() - inference_start_ts;
       uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
       uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
       if (verbose_on) {
         printk("inference: done (cpu=%ums dma=%uus)\n\r", inf_time, dma_time);
       }
-
-      // Step 1: Per-class max pooling from dequantized output
-      int num_cls_capped =
-          (g_num_classes < MAX_KWS_CLASSES) ? g_num_classes : MAX_KWS_CLASSES;
-      float class_maxes[MAX_KWS_CLASSES];
-      for (int c = 0; c < num_cls_capped; c++) {
-        float max_val = akida_output_dq[c * g_num_neurons_per_class];
-        for (int n = 1; n < g_num_neurons_per_class; n++) {
-          float val = akida_output_dq[c * g_num_neurons_per_class + n];
-          if (val > max_val) {
-            max_val = val;
-          }
-        }
-        class_maxes[c] = max_val;
-      }
-
-      // Step 2: Softmax over per-class max values (with max subtraction for
-      // stability)
-      float max_logit = class_maxes[0];
-      int found = 0;
-      for (int c = 1; c < num_cls_capped; c++) {
-        if (class_maxes[c] > max_logit) {
-          max_logit = class_maxes[c];
-          found = c;
-        }
-      }
-      float softmax_scores[MAX_KWS_CLASSES] = {0};
-      float exp_sum = 0.0f;
-      for (int c = 0; c < num_cls_capped; c++) {
-        softmax_scores[c] = expf(class_maxes[c] - max_logit);
-        exp_sum += softmax_scores[c];
-      }
-      if (exp_sum > 0.0f) {
-        for (int c = 0; c < num_cls_capped; c++) {
-          softmax_scores[c] /= exp_sum;
-        }
-      }
-
-      // Step 3: EMA smoothing of softmax scores
-      for (int c = 0; c < num_cls_capped; c++) {
-        smoothed_scores[c] = smoothing_alpha * softmax_scores[c] +
-                             (1.0f - smoothing_alpha) * smoothed_scores[c];
-      }
-
-      // Step 4: Update chiming counters for keyword classes
-      // (skip silence and unknown classes)
-      int triggered_class = -1;
-      float triggered_score = 0.0f;
-      for (int c = 0; c < num_cls_capped; c++) {
-        if (c == KWS_SILENCE_CLASS || c == KWS_UNKNOWN_CLASS) {
-          continue;
-        }
-        if (smoothed_scores[c] >= score_threshold) {
-          chiming_counters[c]++;
-        } else {
-          chiming_counters[c] = 0;
-        }
-        // Check if this class has reached the chiming threshold
-        if (chiming_counters[c] >= chiming_threshold) {
-          if (triggered_class == -1 || smoothed_scores[c] > triggered_score) {
-            triggered_class = c;
-            triggered_score = smoothed_scores[c];
-          }
-        }
-      }
-
-      if (verbose_on) {
-        printk("scores: argmax=%d (%s) softmax=%.2f smoothed=%.2f "
-               "chiming=%d/%d\n\r",
-               found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
-               softmax_scores[found], smoothed_scores[found],
-               (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
-               chiming_threshold);
-      }
-
-      // Step 5: Trigger if chiming threshold reached
-      if (triggered_class >= 0) {
-        if (verbose_on) {
-          printk("trigger: keyword=%s chiming=%d/%d\n\r",
-                 (triggered_class < kws_new_tags_count)
-                     ? kws_new_tags[triggered_class]
-                     : "?",
-                 chiming_counters[triggered_class], chiming_threshold);
-        }
-        current_class = triggered_class;
-        float confidence = smoothed_scores[triggered_class];
-
-        printk("\nKeyword Detected: %s\n\r",
-               (triggered_class < kws_new_tags_count)
-                   ? kws_new_tags[triggered_class]
-                   : "?");
-        if (metrics_on) {
-          printk("  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
-                 "dma=%uus\n\r",
-                 confidence * 100.0f, triggered_score * 100.0f,
-                 chiming_counters[triggered_class], inf_time, dma_time);
-        }
-        /* KWS data is sent only when BLE is connected and the KWS application
-         * is deployed */
-        if (is_ble_connected() && event_flag) {
-          send_event(CMD_DEPLOY_START, kws_new_tags[triggered_class],
-                     confidence * 100.0f);
-        }
-        last_trigger_time_ms = time_ms();
-        reset_stale_inference_data();
-      }
-    } else {
-      printk("predict failure\n");
+      kws_post_processing(dma_time, inf_time);
     }
+  } else {
+    uint64_t start_time = time_ms();
+    do {
+      inference_start_ts = time_ms();
+      inference_start_dma_ts = akd_device.read_clock_counter();
+      ret = akida_enqueue(input, input_shape, NULL);
+      uint32_t enq_time = time_ms() - inference_start_ts;
+      {
+        // uint32_t power_tmp;
+        /* clear , accumulated power before enqueue */
+        // capture_power(true, &power_tmp, &power_tmp);
+      }
+      // Check timeout
+      if ((time_ms() - start_time) > ENQUEUE_TIMEOUT_MS) {
+        printk("ERROR: akida_enqueue timeout after %d ms\n",
+               ENQUEUE_TIMEOUT_MS);
+        ret = EFAILURE;
+        learn_utterance_complete(); // graceful abort
+        break;
+      }
+    } while (ret);
   }
   return ret;
 }
@@ -1560,6 +1703,60 @@ generate_augmented_input(float captured[][SPECTROGRAM_RES], int keyword_len,
 }
 
 /*---------------------------------------------------------------------------
+ * Structured Edge Learning - Shared Buffers & Async Handlers
+ *---------------------------------------------------------------------------*/
+
+/* Shared augmented input buffer (accessed by learn_process_handler and
+ * akd_learn_fetch_handler across work item invocations) */
+__aligned(32) static uint8_t learn_aug_buf[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
+
+/**
+ * @brief Learning fetch + chain handler. Runs once per augmentation.
+ *        Fetches the Akida learning result, then either chains the next
+ *        augmentation or completes the utterance.
+ */
+static void akd_learn_fetch_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+
+  int32_t label = cur_kws_edge_novel_class;
+
+  /* Retrieve learning result for the completed augmentation */
+  if (-EFAILURE == akida_fetch((uint8_t *)learn_aug_buf, akd_op_size, false)) {
+    printk("learn: fetch EFAILURE for aug %d — retrying\n",
+           learn_state.current_aug_idx);
+    return;
+  }
+
+  learn_state.total_fit_calls++;
+  int idx = ++learn_state.current_aug_idx;
+
+  if ((idx % 10 == 0) || (idx == learn_state.num_augs)) {
+    printk("learn: fit %d/%d done\n\r", idx, learn_state.num_augs);
+  }
+
+  if (idx < learn_state.num_augs) {
+    /* Generate next augmentation and enqueue it */
+    generate_augmented_input(learn_state.captured_mfcc, learn_state.keyword_len,
+                             idx, learn_state.num_augs, learn_aug_buf);
+
+    uint64_t t0 = time_ms();
+    int ret;
+    do {
+      ret = akida_enqueue((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
+      if ((time_ms() - t0) > ENQUEUE_TIMEOUT_MS) {
+        printk("ERROR: learn enqueue timeout at aug %d\n", idx);
+        learn_utterance_complete(); /* graceful abort */
+        return;
+      }
+    } while (ret);
+
+  } else {
+    /* All augmentations fetched — advance utterance state machine */
+    learn_utterance_complete();
+  }
+}
+
+/*---------------------------------------------------------------------------
  * Structured Edge Learning - Processing & Completion Handlers
  *---------------------------------------------------------------------------*/
 
@@ -1591,6 +1788,27 @@ static void complete_structured_learning(void) {
   akida_learn_mode(false);
 
   switch_mode(STATE_INFERENCE);
+}
+
+/**
+ * @brief Advance to next utterance or complete learning.
+ *        Called by both sync path (after for-loop) and async path
+ *        (from akd_learn_fetch_handler when all augs done).
+ */
+static void learn_utterance_complete(void) {
+  learn_state.current_utterance++;
+  if (learn_state.current_utterance >= LEARN_NUM_UTTERANCES) {
+    learn_state.sub_state = LEARN_SUB_COMPLETE;
+    complete_structured_learning();
+  } else {
+    learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
+    learn_state.waiting_since_ts = time_ms();
+    learn_state.capture_write_idx = 0;
+    learn_state.speech_detected = false;
+    printk("\nlearn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
+           LEARN_NUM_UTTERANCES);
+    k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
+  }
 }
 
 /**
@@ -1659,19 +1877,14 @@ static int trim_captured_keyword(float captured[][SPECTROGRAM_RES],
 static void learn_process_handler(struct k_work *work) {
   ARG_UNUSED(work);
 
-  __aligned(32) static uint8_t aug_input[SPECTROGRAM_COUNT][SPECTROGRAM_RES];
-
   int raw_len = learn_state.capture_write_idx;
-  int32_t label_id = cur_kws_edge_novel_class;
-  int num_augs = learn_state.augmentations_per_utterance;
+  int32_t label = cur_kws_edge_novel_class;
 
-  /* Trim captured buffer to just the keyword using energy analysis */
   int keyword_len = trim_captured_keyword(learn_state.captured_mfcc, raw_len);
-
   printk("learn: trimmed to %d frames (was %d)\n\r", keyword_len, raw_len);
 
   if (keyword_len < LEARN_MIN_KEYWORD_FRAMES) {
-    printk("learn: utterance too short after trim (%d frames), try again\n\r",
+    printk("learn: utterance too short (%d frames), try again\n\r",
            keyword_len);
     learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
     learn_state.waiting_since_ts = time_ms();
@@ -1683,38 +1896,41 @@ static void learn_process_handler(struct k_work *work) {
     return;
   }
 
-  printk("learn: processing %d augmented inputs for utterance %d/%d "
-         "(%d frames)\n\r",
-         num_augs, learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES,
-         keyword_len);
+  /* Cache context for akd_learn_fetch_handler to use across callbacks */
+  learn_state.keyword_len = keyword_len;
+  learn_state.num_augs = learn_state.augmentations_per_utterance;
+  learn_state.current_aug_idx = 0;
 
-  for (int i = 0; i < num_augs; i++) {
-    generate_augmented_input(learn_state.captured_mfcc, keyword_len, i,
-                             num_augs, aug_input);
+  printk("learn: processing %d augmented inputs for utterance %d/%d\n\r",
+         learn_state.num_augs, learn_state.current_utterance + 1,
+         LEARN_NUM_UTTERANCES);
 
-    akida_fit((uint8_t *)aug_input, (uint32_t *)dims, &label_id);
-    learn_state.total_fit_calls++;
+  if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
+    /* Async path: generate aug[0], enqueue, arm first fake ISR */
+    generate_augmented_input(learn_state.captured_mfcc, keyword_len, 0,
+                             learn_state.num_augs, learn_aug_buf);
+    uint64_t t0 = time_ms();
+    int ret;
+    do {
+      ret = akida_enqueue((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
+      if ((time_ms() - t0) > ENQUEUE_TIMEOUT_MS) {
+        printk("ERROR: learn initial enqueue timeout\n");
+        return;
+      }
+    } while (ret);
 
-    /* Log progress periodically to avoid flooding serial */
-    if ((i + 1) % 10 == 0 || i == num_augs - 1) {
-      printk("learn: fit %d/%d done\n\r", i + 1, num_augs);
-    }
-  }
-
-  learn_state.current_utterance++;
-
-  if (learn_state.current_utterance >= LEARN_NUM_UTTERANCES) {
-    learn_state.sub_state = LEARN_SUB_COMPLETE;
-    complete_structured_learning();
   } else {
-    /* Ready for next utterance */
-    learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
-    learn_state.waiting_since_ts = time_ms();
-    learn_state.capture_write_idx = 0;
-    learn_state.speech_detected = false;
-    printk("\nlearn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
-           LEARN_NUM_UTTERANCES);
-    k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
+    /* Sync path: run all augmentations inline (unchanged) */
+    for (int i = 0; i < learn_state.num_augs; i++) {
+      generate_augmented_input(learn_state.captured_mfcc, keyword_len, i,
+                               learn_state.num_augs, learn_aug_buf);
+      akida_fit((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
+      learn_state.total_fit_calls++;
+      if ((i + 1) % 10 == 0 || i == learn_state.num_augs - 1) {
+        printk("learn: fit %d/%d done\n\r", i + 1, learn_state.num_augs);
+      }
+    }
+    learn_utterance_complete();
   }
 }
 
@@ -1965,6 +2181,11 @@ extern "C" int infer(int app_index_l) {
   int class_id = -1;
   uint32_t inp_shap[] = {infer_meta.input_shape[0], infer_meta.input_shape[1],
                          infer_meta.input_shape[2]};
+#ifdef CONFIG_SPARK_BOARD
+  if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
+    akd_irq_disable();
+  }
+#endif
   s_dma_cycls = akd_device.read_clock_counter();
   s_tick = time_ms();
   int ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
@@ -1998,7 +2219,11 @@ extern "C" int infer(int app_index_l) {
   }
 
   printk("APP Inference Completed\n");
-
+#ifdef CONFIG_SPARK_BOARD
+  if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
+    akd_irq_enable();
+  }
+#endif
   return 0;
 }
 
@@ -2218,6 +2443,89 @@ static int cmd_threads_stop(const struct shell *shell, size_t argc,
 SHELL_CMD_REGISTER(threads_stop, NULL, "Stop all worker threads",
                    cmd_threads_stop);
 #endif
+
+/**
+ * @brief Shell command to set KWS (Keyword Spotting) API mode
+ *
+ * This command allows switching between Sync and Async modes at runtime.
+ *
+ * Usage:
+ *   kws_mode <sync|async>
+ *
+ * @param shell Shell instance used for printing output
+ * @param argc  Argument count
+ * @param argv  Argument vector (expects mode as argv[1])
+ *
+ * @return 0 on success, negative error code on failure
+ */
+static int cmd_kws_mode(const struct shell *shell, size_t argc, char **argv) {
+  if (argc < 2) {
+    shell_print(shell, "Usage: kws_mode <sync|async>");
+    return -EINVAL;
+  }
+
+  if (strcmp(argv[1], "async") == 0) {
+#ifdef CONFIG_SPARK_BOARD
+    akida_init(DEFAULT_API_SELECTION_ASYNC);
+    shell_print(shell, "Switched to ASYNC mode");
+#else
+    shell_print(shell, "Warning: Async mode is not supported on nRF DK board. "
+                       "Falling back to Sync mode.\n");
+    return -EINVAL;
+#endif
+
+  } else if (strcmp(argv[1], "sync") == 0) {
+    akida_init(DEFAULT_API_SELECTION_SYNC);
+    shell_print(shell, "Switched to SYNC mode");
+
+  } else {
+    shell_print(shell, "Invalid mode. Use sync or async");
+    return -EINVAL;
+  }
+
+  return 0;
+}
+
+/**
+ * @brief Shell command to retrieve the current KWS API mode
+ *
+ * This command prints the currently active Keyword Spotting (KWS) mode
+ * based on the global `kws_api_selection` setting.
+ *
+ * Behavior:
+ * - Displays "ASYNC" if async mode is enabled.
+ * - Displays "SYNC" if sync mode is enabled.
+ *
+ * Usage:
+ *   kws_mode_get
+ *
+ * @param shell Shell instance used for output
+ * @param argc  Argument count (unused)
+ * @param argv  Argument vector (unused)
+ *
+ * @return Always returns 0
+ */
+static int cmd_kws_mode_get(const struct shell *shell, size_t argc,
+                            char **argv) {
+  ARG_UNUSED(argc);
+  ARG_UNUSED(argv);
+
+  if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
+    shell_print(shell, "Current mode: ASYNC");
+  } else {
+    shell_print(shell, "Current mode: SYNC");
+  }
+
+  return 0;
+}
+
+/* Command to set mode */
+SHELL_CMD_REGISTER(kws_mode, NULL, "Set KWS mode: kws_mode <sync|async>",
+                   cmd_kws_mode);
+
+/* Command to get current mode */
+SHELL_CMD_REGISTER(kws_mode_get, NULL, "Get current KWS mode",
+                   cmd_kws_mode_get);
 
 SHELL_CMD_REGISTER(app, NULL, "App Commands", cmd_app);
 
