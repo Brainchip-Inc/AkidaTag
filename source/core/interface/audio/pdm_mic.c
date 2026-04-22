@@ -40,12 +40,38 @@ void dc_block_init(dc_block_t *s) {
   s->prev_y = 0;
 }
 /*
+Compute a 32-window min/max envelope over a block of DC-blocked int16 samples.
+Each output pair (out[2*i], out[2*i+1]) is (min, max) of the samples in window
+i. N must be a multiple of n_windows.
+*/
+static void compute_envelope(const int16_t *x, int N, int16_t *out_pairs,
+                             int n_windows) {
+  int win_len = N / n_windows;
+  for (int w = 0; w < n_windows; w++) {
+    int16_t lo = INT16_MAX;
+    int16_t hi = INT16_MIN;
+    const int16_t *p = &x[w * win_len];
+    for (int i = 0; i < win_len; i++) {
+      int16_t s = p[i];
+      if (s < lo) lo = s;
+      if (s > hi) hi = s;
+    }
+    out_pairs[2 * w] = lo;
+    out_pairs[2 * w + 1] = hi;
+  }
+}
+
+/*
 Applies a DC blocking (high-pass) filter to a block of 16-bit PCM samples and
 computes the RMS value of the filtered signal. This function removes DC offset
 using a first-order IIR filter implemented in fixed-point (Q15) arithmetic,
 making it suitable for embedded DSP / audio pipelines. The filtering is
 performed in-place, meaning the input buffer is overwritten with filtered
 samples.
+
+When BLE streaming is enabled, also emits a binary PCM waveform frame to the
+phone: 32 min/max pairs by default, or 32 decimated samples when the BLE link
+has downshifted to fallback mode.
 */
 static int dc_block_process(dc_block_t *s, int16_t *x, int N, float *rms) {
   const int32_t alpha = 32700; // ~0.998 in Q15
@@ -73,12 +99,29 @@ static int dc_block_process(dc_block_t *s, int16_t *x, int N, float *rms) {
     sum_sq += (int32_t)x[i] * x[i];
   }
 
-  // Compute RMS
+  // Compute RMS (used by VAD threshold in audio_processor.c)
   float mean = (float)sum_sq / N;
   *rms = sqrtf(mean);
+
   if (pdm_stream_flag && is_ble_connected()) {
-    uint32_t send_rms = (uint32_t)*rms;
-    send_pdm_data(send_rms);
+    /* Expected N=960 @ 16 kHz / 60 ms. Emit 32 windows either as min/max
+     * envelope (64 int16 = 128 B payload) or decimated samples (32 int16 =
+     * 64 B payload) depending on the BLE link's current fallback state. */
+    const int n_windows = 32;
+    if (N >= n_windows) {
+      if (wave_fallback_active()) {
+        int16_t dec[32];
+        int stride = N / n_windows;
+        for (int i = 0; i < n_windows; i++) {
+          dec[i] = x[i * stride];
+        }
+        send_pcm_wave(dec, n_windows);
+      } else {
+        int16_t env[64];
+        compute_envelope(x, N, env, n_windows);
+        send_pcm_wave(env, n_windows * 2);
+      }
+    }
   }
   return SUCCESS;
 }

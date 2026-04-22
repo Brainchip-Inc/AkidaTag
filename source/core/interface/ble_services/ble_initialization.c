@@ -52,6 +52,26 @@ static struct bt_conn *current_conn = NULL;
 static bool notifications_enabled = false;
 static bool send_in_progress = false;
 
+/* ==================== WAVEFORM STREAM STATE ====================
+ * Tracks link quality for the binary PCM-envelope stream. If the peer
+ * negotiates a small MTU or the NUS retry rate climbs, the firmware
+ * auto-downshifts from 134-byte envelope frames to 70-byte decimation
+ * frames. See send_pcm_wave() and wave_fallback_active(). */
+#define WAVE_MAGIC 0x42
+#define WAVE_HEADER_LEN 6
+#define WAVE_ENV_N_SAMPLES 64  /* 32 min/max pairs */
+#define WAVE_DEC_N_SAMPLES 32
+#define WAVE_ENV_FRAME_LEN (WAVE_HEADER_LEN + WAVE_ENV_N_SAMPLES * 2)
+#define WAVE_DEC_FRAME_LEN (WAVE_HEADER_LEN + WAVE_DEC_N_SAMPLES * 2)
+#define WAVE_FALLBACK_RETRY_THRESHOLD 5
+#define WAVE_FALLBACK_WINDOW 50
+#define WAVE_RECOVER_CLEAN_FRAMES 100
+#define WAVE_MTU_MIN_FOR_ENVELOPE 140
+
+static bool wave_fallback = false;
+static uint16_t wave_negotiated_mtu = 23; /* default ATT MTU until exchange */
+static uint32_t nus_retry_counter = 0;
+
 /* ==================== DEVICE INFORMATION ====================
  * FOR TESTING PURPOSES ONLY - Static data for initial development
  *
@@ -72,6 +92,11 @@ char processor[] = "AKIDA_1500";
 char model_version[] = "v1.1.0";
 static uint16_t akd_nodes = 8;
 float pwr_con = 2.3f;
+/* Defined in kws_inputs.cpp. First 10 entries (0..9) are the trained keywords
+ * advertised to the phone app; entries 10..11 are "silence"/"unknown" and
+ * 12..14 are edge-learning slots. */
+extern const char *const kws_new_tags[];
+
 /* Flag indicating whether deployment mode is active.
  * Set when CMD_DEPLOY_START is received and cleared on CMD_DEPLOY_STOP.
  */
@@ -144,16 +169,16 @@ static const struct bt_data sd[] = {
 };
 
 /**
- * @brief Send a frame to the connected phone
+ * @brief Send a raw byte buffer over NUS with flow control.
  *
- * Handles flow control with retries and timeout.
- * Waits for previous transmission to complete.
+ * Owns the send_in_progress mutex and a bounded retry loop. Shared by the
+ * ASCII send_frame() path and the binary send_pcm_wave() path.
  *
- * @param frame Null-terminated string to send
+ * @param buf Pointer to bytes to send
+ * @param len Number of bytes
  * @return int 0 on success, negative error code on failure
  */
-int ble_send_frame(const char *frame) {
-  int len;
+static int nus_send_raw(const uint8_t *buf, size_t len) {
   const int max_retries = 10;
 
   if (!current_conn || !notifications_enabled) {
@@ -173,16 +198,15 @@ int ble_send_frame(const char *frame) {
     return -EBUSY;
   }
 
-  len = strlen(frame);
   send_in_progress = true;
 
-  /* Try sending with retries */
   for (int i = 0; i < max_retries; i++) {
-    int err = bt_nus_send(current_conn, (const uint8_t *)frame, len);
+    int err = bt_nus_send(current_conn, buf, len);
 
     if (err == 0) {
       return 0;
     } else if (err == -EAGAIN || err == -ENOMEM) {
+      nus_retry_counter++;
       LOG_INF("Retry %d/%d (err=%d)\n", i + 1, max_retries, err);
       k_sleep(K_MSEC(50));
     } else {
@@ -195,6 +219,18 @@ int ble_send_frame(const char *frame) {
   send_in_progress = false;
   LOG_ERR("Failed after %d retries\n", max_retries);
   return -ETIMEDOUT;
+}
+
+/**
+ * @brief Send an ASCII frame to the connected phone.
+ *
+ * Thin wrapper around nus_send_raw() that computes strlen and casts.
+ *
+ * @param frame Null-terminated string to send
+ * @return int 0 on success, negative error code on failure
+ */
+int send_frame(const char *frame) {
+  return nus_send_raw((const uint8_t *)frame, strlen(frame));
 }
 
 /**
@@ -252,7 +288,7 @@ static void send_device_info_response(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -266,7 +302,7 @@ static void send_device_info_response(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -280,7 +316,7 @@ static void send_device_info_response(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -294,32 +330,81 @@ static void send_device_info_response(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
   }
 }
+bool wave_fallback_active(void) { return wave_fallback; }
+
 /**
- * @brief Send PDM audio data to phone for real-time graphing
+ * @brief Send a binary PCM waveform frame over NUS.
  *
- * Format: "0,0,<size>,0:<level>\r"
- * @param data Pointer to PDM audio data
- * @param size size of the data
+ * Builds the 6-byte header + int16 LE payload described in the header doc for
+ * send_pcm_wave(), then hands it to nus_send_raw(). Tracks retry rate and MTU
+ * across calls to flip wave_fallback between envelope and decimation modes.
+ *
+ * Caller passes envelope data when n_samples=64 (32 interleaved min/max pairs)
+ * or decimated samples when n_samples=32. The caller is responsible for
+ * consulting wave_fallback_active() to decide which to send this block.
  */
-void send_pdm_data(uint32_t data) {
-  char frame[FRAME_BUFFER_SIZE];
-  char data_part[DATA_PART_SIZE];
+void send_pcm_wave(const int16_t *samples, uint16_t n_samples) {
+  if (!current_conn || !notifications_enabled) {
+    return;
+  }
+  if (n_samples != WAVE_ENV_N_SAMPLES && n_samples != WAVE_DEC_N_SAMPLES) {
+    LOG_WRN("send_pcm_wave: unsupported n_samples=%u", n_samples);
+    return;
+  }
 
-  snprintf(data_part, sizeof(data_part), "%d:%d\r", CMD_STREAM_START, data);
-  int data_len = strlen(data_part);
+  static uint8_t buf[WAVE_ENV_FRAME_LEN];
+  static uint16_t seq = 0;
+  static uint32_t last_retry_snapshot = 0;
+  static uint16_t frames_in_window = 0;
+  static uint16_t retries_in_window = 0;
+  static uint16_t clean_frames = 0;
 
-  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
-           data_part);
+  size_t frame_len = WAVE_HEADER_LEN + (size_t)n_samples * sizeof(int16_t);
 
-  int err = ble_send_frame(frame);
-  if (err) {
-    LOG_ERR(" Failed to send (err=%d)\n", err);
+  buf[0] = WAVE_MAGIC;
+  buf[1] = (uint8_t)CMD_STREAM_WAVE;
+  buf[2] = (uint8_t)(seq & 0xFF);
+  buf[3] = (uint8_t)((seq >> 8) & 0xFF);
+  buf[4] = (uint8_t)(n_samples & 0xFF);
+  buf[5] = (uint8_t)((n_samples >> 8) & 0xFF);
+  seq++;
+
+  memcpy(&buf[WAVE_HEADER_LEN], samples, (size_t)n_samples * sizeof(int16_t));
+
+  int err = nus_send_raw(buf, frame_len);
+
+  uint32_t retry_delta = nus_retry_counter - last_retry_snapshot;
+  last_retry_snapshot = nus_retry_counter;
+  frames_in_window++;
+  retries_in_window += (uint16_t)retry_delta;
+  if (err == 0 && retry_delta == 0) {
+    clean_frames++;
+  } else {
+    clean_frames = 0;
+  }
+
+  if (frames_in_window >= WAVE_FALLBACK_WINDOW) {
+    if (!wave_fallback &&
+        retries_in_window > WAVE_FALLBACK_RETRY_THRESHOLD) {
+      LOG_WRN("wave: %u retries in last %u frames, downshift to decimation",
+              retries_in_window, WAVE_FALLBACK_WINDOW);
+      wave_fallback = true;
+    }
+    frames_in_window = 0;
+    retries_in_window = 0;
+  }
+
+  if (wave_fallback && clean_frames >= WAVE_RECOVER_CLEAN_FRAMES &&
+      wave_negotiated_mtu >= WAVE_MTU_MIN_FOR_ENVELOPE) {
+    LOG_INF("wave: link recovered, restoring envelope mode");
+    wave_fallback = false;
+    clean_frames = 0;
   }
 }
 #ifdef CONFIG_SPARK_BOARD
@@ -339,7 +424,7 @@ void send_current_value(char *data) {
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
            data_part);
 
-  int err = ble_send_frame(frame);
+  int err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send (err=%d)\n", err);
   }
@@ -349,7 +434,7 @@ void send_current_value(char *data) {
  * @brief Send a command event frame over the communication channel.
  *
  * Constructs a framed message with the given command ID, label, and numeric
- * value, then transmits it via ble_send_frame().
+ * value, then transmits it via send_frame().
  *
  * Format: "<FRAME_SINGLE>,<seq>,<data_len>,<cmd>:<label>,<value>\r"
  * Example: "1,0,12,11:cat,0.91\r"
@@ -371,7 +456,7 @@ void send_event(int cmd, const char *label, float value) {
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
            data_part);
 
-  int err = ble_send_frame(frame);
+  int err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send event (cmd=%d label=%s err=%d)", cmd, label, err);
   } else {
@@ -400,7 +485,7 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
            data_part);
 
-  int err = ble_send_frame(frame);
+  int err = send_frame(frame);
   if (err) {
     LOG_ERR(" Failed to send ACK (err=%d)\n", err);
   } else {
@@ -420,7 +505,7 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
  *
  *     FRAME_TYPE,FRAME_INDEX,DATA_LENGTH,DATA
  *
- * Frames are transmitted sequentially using the ble_send_frame() function.
+ * Frames are transmitted sequentially using the send_frame() function.
  *
  * Frame Structure:
  * - Frame 1: MF-START - Application name
@@ -447,7 +532,7 @@ static void app_display(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -461,7 +546,7 @@ static void app_display(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -475,7 +560,7 @@ static void app_display(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -484,26 +569,16 @@ static void app_display(void) {
 /**
  * @brief Sends application information over the communication interface.
  *
- * This function prepares and sends formatted frames containing device and
- * application metadata such as processor type, model name, model version,
- * model size, input shape, number of classes, Akida nodes, and power
- * consumption.
- *
- * The information is formatted into data payloads (`data_part`), then wrapped
- * into transmission frames (`frame`) following the defined protocol format:
+ * Emits a multi-frame CMD_APP_INFO burst containing model metadata and the
+ * trained keyword list. Frames follow the protocol format:
  *
  *     FRAME_TYPE,FRAME_INDEX,DATA_LENGTH,DATA
  *
- * Frames are transmitted sequentially using the ble_send_frame() function.
- *
  * Frame Structure:
- * - Frame 1: MF-START - Processor information
- * - Frames 2-7: MF-MID - Model metadata (name, version, size, input shape,
- *                         classes, Akida nodes)
- * - Frame 8: MF-LAST - Power consumption
- *
- * @note All application information values are retrieved from the info.yaml
- *       configuration at runtime.
+ * - Frame 1: MF-START - Model name ("DS_CNN")
+ * - Frame 2: MF-MID   - Input shape ("X x Y x Z")
+ * - Frame 3: MF-MID   - Number of user-visible classes
+ * - Frame 4: MF-LAST  - Keyword list, ';'-delimited (kws_new_tags[0..9])
  *
  * @retval None
  */
@@ -516,113 +591,63 @@ static void app_info(void) {
 
   LOG_INF("SENDING DEVICE INFO (MULTI)      \n");
 
-  /* Frame 1: MF-START - processor */
+  /* Frame 1: MF-START - model name */
   int data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r",
-                          CMD_APP_INFO, processor);
+                          CMD_APP_INFO, "DS_CNN");
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_START, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
   }
   frame_index++;
 
-  /* Frame 2: MF-MID - model_name */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APP_INFO,
-                      kws_meta.model_name);
-  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
-           data_len, data_part);
-  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
-          data_len);
-  err = ble_send_frame(frame);
-  if (err) {
-    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return;
-  }
-  frame_index++;
-
-  /* Frame 3: MF-MID - model_version */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APP_INFO,
-                      model_version);
-  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
-           data_len, data_part);
-  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
-          data_len);
-  err = ble_send_frame(frame);
-  if (err) {
-    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return;
-  }
-  frame_index++;
-
-  /* Frame 4: MF-MID - model_size */
-  uint32_t model_size = kws_meta.info_data_len + kws_data_meta.data_length;
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
-                      model_size);
-  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
-           data_len, data_part);
-  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
-          data_len);
-  err = ble_send_frame(frame);
-  if (err) {
-    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return;
-  }
-  frame_index++;
-
-  /* Frame 5: MF-MID - input_shape */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%d.%d.%d,\r",
+  /* Frame 2: MF-MID - input shape */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%d x %d x %d,\r",
                       CMD_APP_INFO, kws_meta.input_shape[0],
                       kws_meta.input_shape[1], kws_meta.input_shape[2]);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
-  if (err) {
-    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
-    return;
-  }
-  frame_index++;
-  /* Frame 6: MF-MID - no_of_class */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
-                      g_num_classes);
-  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
-           data_len, data_part);
-  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
-          data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
   }
   frame_index++;
 
-  /* Frame 7: MF-MID - akd_nodes */
+  /* Frame 3: MF-MID - number of user-visible classes (10 keywords + silence +
+   * unknown, excluding the 3 edge-learning slots in kws_new_tags[]). */
   data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
-                      akd_nodes);
+                      12);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
   }
   frame_index++;
 
-  /* Frame 8: MF-LAST - pwr_con */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%.2f,\r", CMD_APP_INFO,
-                      (double)pwr_con);
+  /* Frame 4: MF-LAST - keyword list "kw0;kw1;...;kw9" from kws_new_tags[0..9]
+   */
+  int off = snprintf(data_part, sizeof(data_part), "%d:", CMD_APP_INFO);
+  for (int i = 0; i < 10 && off < (int)sizeof(data_part); i++) {
+    off += snprintf(data_part + off, sizeof(data_part) - off, "%s%s",
+                    kws_new_tags[i], (i == 9) ? ",\r" : ";");
+  }
+  data_len = off;
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_LAST, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = ble_send_frame(frame);
+  err = send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -777,6 +802,60 @@ static struct bt_nus_cb nus_callbacks = {
     .sent = nus_sent_cb,
     .send_enabled = nus_send_enabled_cb,
 };
+
+/**
+ * @brief MTU exchange completion callback.
+ *
+ * Records the negotiated MTU and proactively forces wave_fallback=true if the
+ * resulting payload is too small for the 134-byte envelope frame. Peer can
+ * reject the request, in which case we stay at the default 23-byte ATT MTU.
+ */
+static void mtu_exchange_cb(struct bt_conn *conn, uint8_t err,
+                            struct bt_gatt_exchange_params *params) {
+  ARG_UNUSED(params);
+  if (err) {
+    LOG_WRN("MTU exchange failed (err %u)", err);
+    wave_fallback = true;
+    return;
+  }
+  wave_negotiated_mtu = bt_gatt_get_mtu(conn);
+  LOG_INF("MTU exchanged: %u bytes", wave_negotiated_mtu);
+  if (wave_negotiated_mtu < WAVE_MTU_MIN_FOR_ENVELOPE) {
+    LOG_WRN("MTU %u < %u, starting wave stream in decimation fallback",
+            wave_negotiated_mtu, WAVE_MTU_MIN_FOR_ENVELOPE);
+    wave_fallback = true;
+  } else {
+    wave_fallback = false;
+  }
+}
+
+static struct bt_gatt_exchange_params mtu_exchange_params;
+
+/* Link-param update callbacks: diagnostic only. Auto-updates are enabled in
+ * prj.conf (CONFIG_BT_AUTO_PHY_UPDATE, CONFIG_BT_AUTO_DATA_LEN_UPDATE) so the
+ * requests are issued by the stack; we just log the outcome here. */
+static void le_param_updated_cb(struct bt_conn *conn, uint16_t interval,
+                                uint16_t latency, uint16_t timeout) {
+  ARG_UNUSED(conn);
+  LOG_INF("Conn params updated: interval=%u (%u.%02u ms), latency=%u, "
+          "timeout=%u",
+          interval, (interval * 125) / 100, (interval * 125) % 100, latency,
+          timeout);
+}
+
+static void le_phy_updated_cb(struct bt_conn *conn,
+                              struct bt_conn_le_phy_info *param) {
+  ARG_UNUSED(conn);
+  LOG_INF("PHY updated: tx=%u, rx=%u", param->tx_phy, param->rx_phy);
+}
+
+static void le_data_len_updated_cb(struct bt_conn *conn,
+                                   struct bt_conn_le_data_len_info *info) {
+  ARG_UNUSED(conn);
+  LOG_INF("Data length updated: tx_max_len=%u, rx_max_len=%u",
+          info->tx_max_len, info->rx_max_len);
+}
+
 static void connected_ble(struct bt_conn *conn, uint8_t err) {
 
   if (err) {
@@ -787,6 +866,21 @@ static void connected_ble(struct bt_conn *conn, uint8_t err) {
   ble_connection_callback(BLE_CONNECTED);
   LOG_INF("connected_ble\n");
   current_conn = bt_conn_ref(conn);
+
+  /* Reset waveform stream link-quality state for this fresh connection.
+   * The real values land once MTU exchange / link-param updates complete. */
+  wave_fallback = false;
+  wave_negotiated_mtu = 23;
+
+  /* Peripheral-initiated MTU exchange. Centrals usually initiate this on their
+   * own on Android/iOS, but asking here guarantees it happens before we start
+   * streaming waveform data, and lets mtu_exchange_cb set wave_fallback
+   * proactively if the negotiated MTU is too small. */
+  mtu_exchange_params.func = mtu_exchange_cb;
+  int mtu_err = bt_gatt_exchange_mtu(conn, &mtu_exchange_params);
+  if (mtu_err) {
+    LOG_WRN("bt_gatt_exchange_mtu() request failed (err %d)", mtu_err);
+  }
 
 #ifdef CONFIG_BT_ENCRYPTION_EN
   char addr[BT_ADDR_LE_STR_LEN];
@@ -852,6 +946,9 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
     .connected = connected_ble,
     .disconnected = disconnected_ble,
     .recycled = recycled_cb,
+    .le_param_updated = le_param_updated_cb,
+    .le_phy_updated = le_phy_updated_cb,
+    .le_data_len_updated = le_data_len_updated_cb,
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED
     .security_changed = security_changed,
 #endif

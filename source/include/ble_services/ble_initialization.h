@@ -46,8 +46,9 @@ typedef enum {
   CMD_STREAM_START = 9,
   CMD_DEPLOY_STOP = 10,
   CMD_STREAM_STOP = 11,
-  CMD_CURRENT_START = 12,
-  CMD_CURRENT_STOP = 13
+  CMD_STREAM_WAVE = 12,
+  CMD_CURRENT_START = 13,
+  CMD_CURRENT_STOP = 14
 } command_type_t;
 
 /* Structure representing a parsed command frame received from the host */
@@ -91,10 +92,28 @@ extern uint8_t adv_manufacturer_data[];
 
 int ble_init(void);
 /*
- * Send PDM audio data to the phone.
- * Used for real-time audio level visualization over BLE.
+ * Send a binary PCM waveform frame to the phone over NUS.
+ *
+ * Wire format (little-endian throughout):
+ *   byte 0    : magic 'B' (0x42)
+ *   byte 1    : cmd CMD_STREAM_WAVE (0x0C)
+ *   bytes 2-3 : uint16 seq (monotonic, wraps)
+ *   bytes 4-5 : uint16 n_samples (64 = envelope, 32 = decimation fallback)
+ *   bytes 6.. : n_samples * int16 LE
+ *
+ * Envelope mode (n_samples=64): 32 interleaved (min, max) pairs covering the
+ *   60 ms block - 134 bytes total.
+ * Decimation fallback (n_samples=32): every-30th-sample decimation of the same
+ *   block - 70 bytes total. Firmware picks the mode via wave_fallback_active().
  */
-void send_pdm_data(uint32_t data);
+void send_pcm_wave(const int16_t *samples, uint16_t n_samples);
+
+/*
+ * Returns true when the BLE link cannot sustain the full envelope payload
+ * (small MTU or high retry rate) and the firmware should emit the smaller
+ * decimation-fallback frame instead.
+ */
+bool wave_fallback_active(void);
 #ifdef CONFIG_SPARK_BOARD
 /**
  * @brief Send current value to phone for real-time monitoring
@@ -102,6 +121,9 @@ void send_pdm_data(uint32_t data);
  */
 void send_current_value(char *);
 #endif
+
+
+
 typedef enum { FLAG_DISABLE = 0, FLAG_ENABLE = 1 } flag_state_t;
 /*
  * Send a keyword spotting (KWS) detection event to the phone.
