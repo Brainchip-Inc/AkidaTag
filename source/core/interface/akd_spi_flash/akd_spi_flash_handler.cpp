@@ -9,8 +9,10 @@ extern "C" {
 #include "io_objects.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <hardware_device_impl.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/types.h>
+LOG_MODULE_REGISTER(akd_spi_flash, LOG_LEVEL_DBG);
 #if FLASH_READ_BACK_CHECK
 uint8_t read_back_flash[HALF_OF_SRAM_BUFFER_SIZE];
 #endif
@@ -31,14 +33,23 @@ int app_index = -1;
  * AKD1500 (AKIDA) chip over SPI and prints the device ID words
  * to the console for verification.
  */
-void get_akida_device_id(void) {
+void get_akida_device_id(const struct shell *sh) {
   static uint8_t read_data[READ_LEN];
   /* read Akida Device ID */
   akd1500.read(0xFCC00000, read_data, READ_LEN);
-  printk("Akida Device ID: \n");
-  for (int i = 0; i < READ_LEN; i += WORD_SIZE) {
-    printk("Word %d: 0x%02X%02X%02X%02X\n", i / WORD_SIZE, read_data[i],
-           read_data[i + 1], read_data[i + 2], read_data[i + 3]);
+  if (sh) {
+    shell_print(sh, "Akida Device ID:");
+    for (int i = 0; i < READ_LEN; i += WORD_SIZE) {
+      shell_print(sh, "Word %d: 0x%02X%02X%02X%02X", i / WORD_SIZE,
+                  read_data[i], read_data[i + 1], read_data[i + 2],
+                  read_data[i + 3]);
+    }
+  } else {
+    LOG_INF("Akida Device ID:");
+    for (int i = 0; i < READ_LEN; i += WORD_SIZE) {
+      LOG_INF("Word %d: 0x%02X%02X%02X%02X", i / WORD_SIZE, read_data[i],
+              read_data[i + 1], read_data[i + 2], read_data[i + 3]);
+    }
   }
 }
 
@@ -73,19 +84,19 @@ void akida_sram_test(void) {
     // Compare
     if (memcmp(msg, sram_read_data, SRAM_128_BYTES_LEN) != 0) {
       fail_cnt++;
-      printk("Data mismatch at address 0x%08X (offset: %u bytes)\n", addr,
-             offset);
+      LOG_ERR("Data mismatch at address 0x%08X (offset: %u bytes)", addr,
+              offset);
       for (int i = 0; i < SRAM_128_BYTES_LEN; ++i) {
-        printk("%c", sram_read_data[i]);
+        LOG_INF("%c", sram_read_data[i]);
       }
     }
     // Clear the read data
     memset(sram_read_data, 0, SRAM_128_BYTES_LEN);
   }
   if (fail_cnt == 0) {
-    printk("Sanity test of 1 MB SRAM is passed\n");
+    LOG_PRINTK("Sanity test of 1 MB SRAM is passed\n");
   } else {
-    printk("Sanity test of 1 MB SRAM is failed\n");
+    LOG_PRINTK("Sanity test of 1 MB SRAM is failed\n");
   }
 }
 
@@ -93,7 +104,7 @@ void akida_spiflash_init(void) {
   /* Set MCU as SPI-Master */
   akida_config_spi(1);
 
-  get_akida_device_id();
+  get_akida_device_id(nullptr);
   akida_sram_test();
 
   /* Initialize the AKD1500 SPI-Flash functionality */
@@ -101,8 +112,7 @@ void akida_spiflash_init(void) {
 
   /* get akida device version */
   auto hw_version = akida::read_hw_version(akd1500);
-  printk("Device Version: v%u.%u\n", hw_version.major_rev,
-         hw_version.minor_rev);
+  LOG_INF("Device Version: v%u.%u", hw_version.major_rev, hw_version.minor_rev);
 
   spi_flash_read_id(spi_driver); // read SPI-Flash id
 }
@@ -114,12 +124,12 @@ void akida_config_spi(bool is_mcu_master) {
     // configure external host (MCU) as SPI master for 16 MB flash
     rw_data.uint_data = rw_data.uint_data | EN_SPI_S2M;
     akd1500.write(CONFIG_AKD1500_CTRL, rw_data.ucdata, 4);
-    printk("Enabling external host as SPI master\r\n");
+    LOG_INF("Enabling external host as SPI master");
   } else {
     // configure AKD1500 as SPI master for 16 MB flash
     rw_data.uint_data = rw_data.uint_data & (~EN_SPI_S2M);
     akd1500.write(CONFIG_AKD1500_CTRL, rw_data.ucdata, 4);
-    printk("Enabling AKD1500 as SPI master\r\n");
+    LOG_INF("Enabling AKD1500 as SPI master");
   }
 }
 
@@ -157,7 +167,7 @@ void init_akd_1500_spi_flash() {
   rw_data.uint_data = 0x1;
   akd1500.write(0xfcf20008, rw_data.ucdata, 4);
   akd1500.read(0xfce00018, rw_data.ucdata, 4);
-  printk("Akida1500 SPI Flash initialized on %x %x\n", reg, rw_data.uint_data);
+  LOG_INF("Akida1500 SPI Flash initialized on %x %x", reg, rw_data.uint_data);
   /* setup gpio mux for interrupts selecting pin 3*/
   rw_data.uint_data = 0x08;
   akd1500.write(0xfce00038, rw_data.ucdata, 4);
@@ -175,16 +185,16 @@ extern "C" void spi_flash_read_helper_func(uint8_t *buf, uint32_t offset,
   int ret = spi_flash_read(spi_driver, offset, buf, size);
   akida_config_spi(0);
   if (ret != 0) {
-    printk("spi_flash_read_helper: read failed at 0x%x size=%u (err %d)\n",
-           offset, size, ret);
+    LOG_ERR("spi_flash_read_helper: read failed at 0x%x size=%u (err %d)",
+            offset, size, ret);
   }
 }
 
 /* helper function to invoke flash erase API calls */
 extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
   if (size == 0 || size > (FLASH_MAX_16_MB_SIZE - offset)) {
-    printk("Invalid size. Must be > 0 and <= %d\n",
-           (FLASH_MAX_16_MB_SIZE - offset));
+    LOG_ERR("Invalid size. Must be > 0 and <= %d",
+            (FLASH_MAX_16_MB_SIZE - offset));
     return 1;
   }
   akida_config_spi(1);
@@ -194,17 +204,17 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
   uint64_t e_tick = 0;
   uint32_t erase_time = 0;
 
-  printk("Flash erase offset %x and size = %d bytes\n", offset, size);
+  LOG_INF("Flash erase offset %x and size = %d bytes", offset, size);
 
   s_tick = time_ms();
   int ret = spi_flash_erase(spi_driver, offset, size);
   e_tick = time_ms();
   erase_time = e_tick - s_tick;
-  printk("\n\rerase time= %u ms\n\r", erase_time);
+  LOG_INF("erase time= %u ms", erase_time);
   if (ret) {
-    printk("Erase failed\n");
+    LOG_PRINTK("Erase failed\n");
   } else {
-    printk("Erase Successful\n");
+    LOG_PRINTK("Erase Successful\n");
   }
 
   akida_config_spi(0);
@@ -228,13 +238,13 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
   s_write = time_ms();
   int ret = spi_flash_write(spi_driver, flash_addr, data, size);
   if (ret != 0) {
-    printk("Flash write failed with error %d\n", ret);
-    printk("Flash Address = 0x%x, size = %d", flash_addr, size);
+    LOG_ERR("Flash write failed with error %d", ret);
+    LOG_INF("Flash Address = 0x%x, size = %d", flash_addr, size);
     return;
   }
   e_write = time_ms();
   write_time = e_write - s_write;
-  printk("\n\rwrite time = %u ms\n\r", write_time);
+  LOG_INF("write time = %u ms", write_time);
 #if FLASH_READ_BACK_CHECK
   uint64_t s_read = 0;
   uint64_t e_read = 0;
@@ -243,22 +253,22 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
   // Read back from flash into second half of data[]
   ret = spi_flash_read(spi_driver, flash_addr, read_back_flash, size);
   if (ret != 0) {
-    printk("Flash read failed with error %d\n", ret);
+    LOG_ERR("Flash read failed with error %d", ret);
     return;
   }
 
   // Compare the written and read data
   if (memcmp(data, read_back_flash, size) == 0) {
-    printk("Flash write-read verification successful.\n");
+    LOG_INF("Flash write-read verification successful.");
   } else {
-    printk("Flash data mismatch!\n");
+    LOG_ERR("Flash data mismatch!");
   }
   e_read = time_ms();
   read_time = e_read - s_read;
-  printk("\n\rread_time= %u ms\n\r", read_time);
+  LOG_INF("read_time= %u ms", read_time);
 #endif
   if (!ret)
-    printk("Flash Write Successful\n");
+    LOG_INF("Flash Write Successful");
   akida_config_spi(0);
 }
 
@@ -278,7 +288,7 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
 static int cmd_akida_device_id(const struct shell *shell, size_t argc,
                                char **argv) {
   akida_config_spi(1);
-  get_akida_device_id();
+  get_akida_device_id(shell);
   akida_config_spi(0);
   return 0;
 }

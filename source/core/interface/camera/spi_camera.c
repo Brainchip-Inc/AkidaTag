@@ -20,9 +20,9 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/spi.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
-#include <zephyr/sys/printk.h>
-
+LOG_MODULE_REGISTER(spi_camera, LOG_LEVEL_INF);
 /* ==================== RESOLUTION TABLE ====================
  * Only 2 resolutions supported — RAM does not allow more.
  *   96x96   RGB888 =  27,648 B
@@ -180,14 +180,14 @@ static void fifo_read(uint8_t *buf, uint32_t len) {
 
 int camera_init(void) {
   if (!device_is_ready(spi3_dev)) {
-    printk("ERROR: SPI not ready\n");
+    LOG_ERR("ERROR: SPI not ready");
     return -ENODEV;
   }
   k_msleep(100);
 
   camera_write_reg(ARDUCHIP_TEST1, 0x55);
   if (camera_read_reg(ARDUCHIP_TEST1) != 0x55) {
-    printk("ERROR: SPI test failed\n");
+    LOG_ERR("ERROR: SPI test failed");
     return -1;
   }
 
@@ -197,7 +197,7 @@ int camera_init(void) {
   k_msleep(100);
 
   uint8_t id = camera_read_reg(CAM_REG_SENSOR_ID);
-  printk("Camera ID: 0x%02X\n", id);
+  LOG_INF("Camera ID: 0x%02X", id);
 
   /* ISP tuning */
   camera_write_reg(CAM_REG_BRIGHTNESS, ISP_BRIGHTNESS);
@@ -252,15 +252,15 @@ static int capture_rgb(uint8_t *buf, uint32_t max_len) {
   }
 
   if (!done) {
-    printk("ERROR: Capture timeout\n");
+    LOG_ERR("ERROR: Capture timeout");
     return -1;
   }
 
   uint32_t len = fifo_length();
-  printk("FIFO: %u bytes (expected: %u)\n", len, CUR_RGB565_BYTES);
+  LOG_INF("FIFO: %u bytes (expected: %u)", len, CUR_RGB565_BYTES);
 
   if (len == 0 || len > max_len) {
-    printk("ERROR: Invalid FIFO length\n");
+    LOG_ERR("ERROR: Invalid FIFO length");
     /* Clear and start once to recover from a corrupted FIFO state */
     camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
     k_msleep(1);
@@ -361,7 +361,7 @@ static const char b64[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 static void send_base64_rgb888(const uint8_t *buf, uint32_t len) {
-  printk("\n--- RGB888_START_ ---\n");
+  LOG_DBG("--- RGB888_START_ ---");
   /* Base64 encode RGB888 data */
   for (uint32_t i = 0; i < len; i += 3) {
     uint32_t n = buf[i] << 16;
@@ -370,12 +370,12 @@ static void send_base64_rgb888(const uint8_t *buf, uint32_t len) {
     if (i + 2 < len)
       n |= buf[i + 2];
 
-    printk("%c%c%c%c", b64[(n >> 18) & 63], b64[(n >> 12) & 63],
-           (i + 1 < len) ? b64[(n >> 6) & 63] : '=',
-           (i + 2 < len) ? b64[n & 63] : '=');
+    LOG_DBG("%c%c%c%c", b64[(n >> 18) & 63], b64[(n >> 12) & 63],
+            (i + 1 < len) ? b64[(n >> 6) & 63] : '=',
+            (i + 2 < len) ? b64[n & 63] : '=');
   }
 
-  printk("\n--- RGB888_END_ ---\n");
+  LOG_DBG("--- RGB888_END_ ---");
 }
 
 /* ==================== Camera Control API ==================== */
@@ -399,8 +399,8 @@ int camera_start(void) {
 
   /* Verify */
   uint8_t res_check = camera_read_reg(CAM_REG_CAPTURE_RESOLUTION);
-  printk("Resolution register: 0x%02X (should be 0x%02X)\n", res_check,
-         CUR_REG_VAL);
+  LOG_INF("Resolution register: 0x%02X (should be 0x%02X)", res_check,
+          CUR_REG_VAL);
 
   /* Clear and start */
   camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
@@ -425,17 +425,17 @@ int camera_start(void) {
   k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
   k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
   /* Warm-up */
-  printk("Warming up (3 frames)...\n");
+  LOG_INF("Warming up (3 frames)...");
   for (int i = 0; i < 3; i++) {
     int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
     if (len > 0) {
-      printk(" Warm-up %d: %d bytes\n", i + 1, len);
+      LOG_INF(" Warm-up %d: %d bytes", i + 1, len);
     } else {
-      printk(" Warm-up %d: FAILED\n", i + 1);
+      LOG_ERR(" Warm-up %d: FAILED", i + 1);
     }
     k_msleep(200);
   }
-  printk("Warm-up complete!\n\n");
+  LOG_INF("Warm-up complete!");
   /* --- Release SRAM upload buffer ---
    *
    * Camera processing has finished using sram_upload_buffer.
@@ -462,7 +462,7 @@ void camera_stop(void) {
   /* CLEAR FIFO AND FULL RESET*/
   camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
   camera_write_reg(CAM_REG_SENSOR_RESET, CAM_SENSOR_RESET_ALL);
-  printk("camera stopped\n");
+  LOG_INF("camera stopped");
 }
 
 /**
@@ -475,7 +475,7 @@ void camera_stop(void) {
 void camera_capture_thread(void *a, void *b, void *c) {
 
   if (camera_init() != 0) {
-    printk("camera init failed\n");
+    LOG_ERR("camera init failed");
     return;
   }
 
@@ -483,7 +483,7 @@ void camera_capture_thread(void *a, void *b, void *c) {
   while (1) {
     if (camera_satrt_flg) {
 
-      printk("--- Sequence start ---\n");
+      LOG_INF("--- Sequence start ---");
 
       /* --- Wait for buffer to be FREE ---
        *
@@ -507,7 +507,7 @@ void camera_capture_thread(void *a, void *b, void *c) {
       if (len > 0) {
         if (convert_rgb565_to_rgb888(sram_upload_buffer, sram_upload_buffer,
                                      CUR_PIXELS) < 0) {
-          printk("RGB565 to RGB888 conversion failed");
+          LOG_ERR("RGB565 to RGB888 conversion failed");
           continue;
         }
         /*
@@ -516,7 +516,7 @@ void camera_capture_thread(void *a, void *b, void *c) {
          */
         send_base64_rgb888(sram_upload_buffer, CUR_RGB888_BYTES);
       } else {
-        printk("Image FAILED\n");
+        LOG_ERR("Image FAILED");
       }
 
       /* --- Release SRAM upload buffer ---
@@ -532,7 +532,7 @@ void camera_capture_thread(void *a, void *b, void *c) {
       k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
       k_event_post(&sram_buf_event, BUF_EVENT_FREE);
 
-      printk("--- Sequence complete ---\n\n");
+      LOG_INF("--- Sequence complete ---");
 
     } else {
       k_msleep(10);
@@ -549,7 +549,7 @@ void camera_capture_thread(void *a, void *b, void *c) {
 static int cmd_camera_start(const struct shell *shell, size_t argc,
                             char **argv) {
   if (argc > 1) {
-    printk("invalid command\n");
+    LOG_ERR("invalid command");
     return -EINVAL;
   }
 
@@ -562,7 +562,7 @@ static int cmd_camera_start(const struct shell *shell, size_t argc,
     return -1;
   }
   camera_satrt_flg = true;
-  printk("camera started\n");
+  LOG_INF("camera started");
   return 0;
 }
 
@@ -573,7 +573,7 @@ static int cmd_camera_start(const struct shell *shell, size_t argc,
 static int cmd_camera_stop(const struct shell *shell, size_t argc,
                            char **argv) {
   if (argc > 1) {
-    printk("invalid command\n");
+    LOG_ERR("invalid command");
     return -EINVAL;
   }
   camera_stop();

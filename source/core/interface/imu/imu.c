@@ -140,7 +140,7 @@ static int ism330_verify_id(void) {
     return -ENODEV;
   }
 
-  printk("ISM330 ID verified: 0x%02X\n", id);
+  LOG_INF("ISM330 ID verified: 0x%02X", id);
   return 0;
 }
 
@@ -172,7 +172,7 @@ static int ism330_configure(void) {
   buf[1] = accel_val;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("Accel config failed: %d\n", ret);
+    LOG_ERR("Accel config failed: %d", ret);
     return -EIO;
   }
 
@@ -180,7 +180,7 @@ static int ism330_configure(void) {
   buf[1] = gyro_val;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("Gyro config failed: %d\n", ret);
+    LOG_ERR("Gyro config failed: %d", ret);
     return -EIO;
   }
 
@@ -189,7 +189,7 @@ static int ism330_configure(void) {
   buf[1] = ISM_CTRL3_BDU | ISM_CTRL3_IF_INC; // (1<<6) | (1<<2) BDU=1, IF_INC=1
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("CTRL3_C config failed: %d\n", ret);
+    LOG_ERR("CTRL3_C config failed: %d", ret);
     return -EIO;
   }
 
@@ -197,17 +197,17 @@ static int ism330_configure(void) {
   uint8_t ctrl3_verify;
   ret = i2c_reg_read_byte_dt(&dev_i2c, ISM_CTRL3_C, &ctrl3_verify);
   if (ret == 0) {
-    printk("CTRL3_C: 0x%02X (IF_INC=%s, BDU=%s)\n", ctrl3_verify,
-           (ctrl3_verify & ISM_CTRL3_IF_INC) ? "ON" : "OFF",
-           (ctrl3_verify & ISM_CTRL3_BDU) ? "ON" : "OFF");
+    LOG_INF("CTRL3_C: 0x%02X (IF_INC=%s, BDU=%s)", ctrl3_verify,
+            (ctrl3_verify & ISM_CTRL3_IF_INC) ? "ON" : "OFF",
+            (ctrl3_verify & ISM_CTRL3_BDU) ? "ON" : "OFF");
 
     if (!(ctrl3_verify & ISM_CTRL3_IF_INC)) {
-      printk("ERROR: Auto-increment NOT enabled!\n");
+      LOG_ERR("Auto-increment NOT enabled!");
       return -EIO;
     }
   }
 
-  printk("ISM330 configured successfully\n");
+  LOG_INF("ISM330 configured successfully");
   return 0;
 }
 
@@ -229,7 +229,7 @@ static int ism330_fifo_reset(void) {
   buf[1] = REG_RESET;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("ERROR: FIFO bypass/reset failed (FIFO_CTRL4, ret=%d)\n", ret);
+    LOG_ERR("FIFO bypass/reset failed (FIFO_CTRL4, ret=%d)", ret);
     return -EIO;
   }
 
@@ -240,12 +240,11 @@ static int ism330_fifo_reset(void) {
   buf[1] = ISM_FIFO_MODE_CONTINUOUS;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("ERROR: FIFO continuous re-enable failed (FIFO_CTRL4, ret=%d)\n",
-           ret);
+    LOG_ERR("FIFO continuous re-enable failed (FIFO_CTRL4, ret=%d)", ret);
     return -EIO;
   }
 
-  printk("FIFO reset successful\n");
+  LOG_INF("FIFO reset successful");
   return 0;
 }
 
@@ -269,7 +268,7 @@ static int ism330_fifo_enable(void) {
   buf[1] = REG_RESET;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("ERROR: FIFO reset failed (FIFO_CTRL4, ret=%d)\n", ret);
+    LOG_ERR("FIFO reset failed (FIFO_CTRL4, ret=%d)", ret);
     return -EIO;
   }
 
@@ -280,7 +279,7 @@ static int ism330_fifo_enable(void) {
   buf[1] = imu_fifo_watermark;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("ERROR: FIFO watermark set failed (FIFO_CTRL1, ret=%d)\n", ret);
+    LOG_ERR("FIFO watermark set failed (FIFO_CTRL1, ret=%d)", ret);
     return -EIO;
   }
 
@@ -289,7 +288,7 @@ static int ism330_fifo_enable(void) {
   buf[1] = REG_RESET;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("ERROR: FIFO_CTRL2 write failed (ret=%d)\n", ret);
+    LOG_ERR("FIFO_CTRL2 write failed (ret=%d)", ret);
     return -EIO;
   }
 
@@ -298,8 +297,8 @@ static int ism330_fifo_enable(void) {
   buf[1] = (imu_fifo_gyro_odr << 4) | imu_fifo_acc_odr;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("ERROR: FIFO_CTRL3 write failed (gyro_bdr=%d acc_bdr=%d ret=%d)\n",
-           imu_fifo_gyro_odr, imu_fifo_acc_odr, ret);
+    LOG_ERR("FIFO_CTRL3 write failed (gyro_bdr=%d acc_bdr=%d ret=%d)",
+            imu_fifo_gyro_odr, imu_fifo_acc_odr, ret);
     return -EIO;
   }
 
@@ -308,8 +307,7 @@ static int ism330_fifo_enable(void) {
   buf[1] = ISM_FIFO_MODE_CONTINUOUS;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("ERROR: FIFO continuous mode set failed (FIFO_CTRL4, ret=%d)\n",
-           ret);
+    LOG_ERR("FIFO continuous mode set failed (FIFO_CTRL4, ret=%d)", ret);
     return -EIO;
   }
 
@@ -320,12 +318,11 @@ static int ism330_fifo_enable(void) {
   buf[1] = ISM_INT1_FIFO_TH;
   ret = i2c_write_dt(&dev_i2c, buf, sizeof(buf));
   if (ret) {
-    printk("ERROR: INT1 FIFO threshold enable failed (INT1_CTRL, ret=%d)\n",
-           ret);
+    LOG_ERR("INT1 FIFO threshold enable failed (INT1_CTRL, ret=%d)", ret);
     return -EIO;
   }
 
-  printk("FIFO enabled successfully (watermark=%d)\n", FIFO_WATERMARK);
+  LOG_INF("FIFO enabled successfully (watermark=%d)", FIFO_WATERMARK);
   return 0;
 }
 
@@ -349,14 +346,14 @@ static void imu_fifo_read(void) {
   ret = i2c_reg_read_byte_dt(&dev_i2c, ISM_FIFO_STATUS1, &s1);
   if (ret) {
     error_count++;
-    printk("ERROR: FIFO_STATUS1 read failed (ret=%d)\n", ret);
+    LOG_ERR("FIFO_STATUS1 read failed (ret=%d)", ret);
     return;
   }
 
   ret = i2c_reg_read_byte_dt(&dev_i2c, ISM_FIFO_STATUS2, &s2);
   if (ret) {
     error_count++;
-    printk("ERROR: FIFO_STATUS2 read failed (ret=%d)\n", ret);
+    LOG_ERR("FIFO_STATUS2 read failed (ret=%d)", ret);
     return;
   }
 
@@ -365,8 +362,7 @@ static void imu_fifo_read(void) {
   /* Handle overflow */
   if (s2 & BIT(6)) {
     overflow_count++;
-    printk("WARNING: FIFO OVERFLOW #%u (level=%u)\n", overflow_count,
-           current_level);
+    LOG_WRN("FIFO OVERFLOW #%u (level=%u)", overflow_count, current_level);
     ism330_fifo_reset();
     return;
   }
@@ -385,7 +381,7 @@ static void imu_fifo_read(void) {
                             RAW_DATA_INTR_SIZE);
     if (ret) {
       error_count++;
-      printk("ERROR: FIFO burst read failed (ret=%d, i=%d)\n", ret, i);
+      LOG_ERR("FIFO burst read failed (ret=%d, i=%d)", ret, i);
       break;
     }
     uint8_t tag = raw[0];
@@ -408,18 +404,18 @@ static void imu_fifo_read(void) {
       gyro_filt[1] = (gy * gyr_sens) / MDPS_PER_DPS;
       gyro_filt[2] = (gz * gyr_sens) / MDPS_PER_DPS;
 
-      // printk("%f,%f,%f,%f,%f,%f\n", acc_filt[0], acc_filt[1], acc_filt[2],
-      //        gyro_filt[0], gyro_filt[1], gyro_filt[2]);
+      // LOG_INF("%f,%f,%f,%f,%f,%f", acc_filt[0], acc_filt[1], acc_filt[2], //
+      // gyro_filt[0], gyro_filt[1], gyro_filt[2]);
 
     } else {
-      printk("WARN: Unknown FIFO tag 0x%02X (sensor=%u)\n", tag, tag_sensor);
+      LOG_WRN("Unknown FIFO tag 0x%02X (sensor=%u)", tag, tag_sensor);
     }
 
     samples_read++;
 
     /* Safety limit */
     if (samples_read >= SAFETY_LIMIT) {
-      printk("WARN: SAFETY_LIMIT reached (%d samples)\n", samples_read);
+      LOG_WRN("SAFETY_LIMIT reached (%d samples)", samples_read);
       break;
     }
   }
@@ -436,19 +432,19 @@ static void imu_fifo_read(void) {
  */
 int32_t imu_init(void) {
   if (!device_is_ready(dev_i2c.bus)) {
-    printk("I2C not ready\n");
+    LOG_ERR("I2C not ready");
     return -ENODEV;
   }
 
   if (ism330_verify_id()) {
-    printk("ISM330 verify failed\n");
+    LOG_ERR("ISM330 verify failed");
     return -EIO;
   }
 #if CONFIG_IMU_USE_INTERRUPT
   int ret;
   /* Setup GPIO interrupt */
   if (!device_is_ready(imu_int.port)) {
-    printk("GPIO not ready\n");
+    LOG_ERR("GPIO not ready");
     return -ENODEV;
   }
 
@@ -468,8 +464,8 @@ int32_t imu_init(void) {
     return ret;
   }
 #endif
-  printk("IMU init done (%s mode)\n",
-         IS_ENABLED(CONFIG_IMU_USE_INTERRUPT) ? "INTERRUPT" : "POLLING");
+  LOG_INF("IMU init done (%s mode)",
+          IS_ENABLED(CONFIG_IMU_USE_INTERRUPT) ? "INTERRUPT" : "POLLING");
   return 0;
 }
 
@@ -508,7 +504,7 @@ static void imu_calibrate(void) {
   int32_t acc_sum[SEN_DATA_COUNT] = {0};
   int32_t gyr_sum[SEN_DATA_COUNT] = {0};
 
-  printk("Calibrating... keep device still\n");
+  LOG_INF("Calibrating... keep device still");
 
   for (int i = 0; i < CAL_SAMPLES; i++) {
     imu_read_raw(&d);
@@ -528,7 +524,7 @@ static void imu_calibrate(void) {
   gyro_offset[1] = gyr_sum[1] / CAL_SAMPLES;
   gyro_offset[2] = gyr_sum[2] / CAL_SAMPLES;
 
-  printk("Calibration complete\n");
+  LOG_INF("Calibration complete");
 }
 
 static bool imu_validate_config(void) {
@@ -621,7 +617,7 @@ static int32_t cmd_imu_start(const struct shell *shell, size_t argc,
 
   ret = ism330_configure();
   if (ret) {
-    printk("IMU config failed: %d\n", ret);
+    LOG_ERR("IMU config failed: %d", ret);
     return -EIO;
   }
   imu_update_sensitivity();
@@ -636,14 +632,14 @@ static int32_t cmd_imu_start(const struct shell *shell, size_t argc,
 #if CONFIG_IMU_USE_INTERRUPT
   ret = ism330_fifo_enable();
   if (ret) {
-    printk("FIFO enable failed: %d\n", ret);
+    LOG_ERR("FIFO enable failed: %d", ret);
     return -EIO;
   }
-  printk("  Watermark: %d samples\n", FIFO_WATERMARK);
-  printk("  Time out: %dms\n", INTERRUPT_TIMEOUT_MS);
+  LOG_INF("  Watermark: %d samples", FIFO_WATERMARK);
+  LOG_INF("  Time out: %dms", INTERRUPT_TIMEOUT_MS);
 #endif
   atomic_set(&is_imu_start, IMU_ACQ_START);
-  printk("IMU started\n");
+  shell_print(shell, "IMU started");
 
   return 0;
 }
@@ -680,12 +676,12 @@ static int32_t cmd_imu_stop(const struct shell *shell, size_t argc,
   i2c_write_dt(&dev_i2c, buf, sizeof(buf));
 
 #if CONFIG_IMU_USE_INTERRUPT
-  printk("\n=== STATISTICS ===\n");
-  printk("Interrupts:    %u\n", interrupt_count);
-  printk("Overflows:     %u\n", overflow_count);
-  printk("Errors:        %u\n", error_count);
+  LOG_INF("=== STATISTICS ===");
+  LOG_INF("Interrupts:    %u", interrupt_count);
+  LOG_INF("Overflows:     %u", overflow_count);
+  LOG_INF("Errors:        %u", error_count);
 #endif
-  printk("IMU_STOPPED\n\r");
+  LOG_INF("IMU_STOPPED");
   return 0;
 }
 
@@ -710,10 +706,10 @@ void imu_data_thread(void *a, void *b, void *c) {
   int ret;
   ret = imu_init();
   if (ret < 0) {
-    printk("IMU init failed: %d\n", ret);
+    LOG_ERR("IMU init failed: %d", ret);
     return;
   }
-  printk("IMU thread started \n");
+  LOG_INF("IMU thread started ");
 
   while (1) {
 #if CONFIG_IMU_USE_INTERRUPT
@@ -723,7 +719,7 @@ void imu_data_thread(void *a, void *b, void *c) {
       if (ret == 0) {
         imu_fifo_read();
       } else {
-        printk("\n Timeout\n");
+        LOG_WRN(" Timeout");
         ism330_fifo_reset();
       }
     } else {
@@ -743,7 +739,7 @@ void imu_data_thread(void *a, void *b, void *c) {
       float gy = (data.gyro[1] * gyr_sens) / MDPS_PER_DPS;
       float gz = (data.gyro[2] * gyr_sens) / MDPS_PER_DPS;
 
-      // printk("%f,%f,%f,%f,%f,%f\n", ax, ay, az, gx, gy, gz);
+      // LOG_INF("%f,%f,%f,%f,%f,%f", ax, ay, az, gx, gy, gz);
     }
 
     k_msleep(SAMPLE_DELAY_MS);

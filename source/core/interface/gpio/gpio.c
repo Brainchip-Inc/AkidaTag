@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(gpio, LOG_LEVEL_DBG);
 
 static bool irq_enabled = false;
 
@@ -99,73 +101,73 @@ int gpio_init(void) {
 
   /* --- Check GPIO readiness --- */
   if (!gpio_is_ready_dt(&enable_akd)) {
-    printk("AKD enable GPIO not ready\n");
+    LOG_ERR("AKD enable GPIO not ready");
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&enable_acc)) {
-    printk("ACC enable GPIO not ready\n");
+    LOG_ERR("ACC enable GPIO not ready");
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&enable_pdm)) {
-    printk("PDM enable GPIO not ready\n");
+    LOG_ERR("PDM enable GPIO not ready");
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&enable_akd_0V)) {
-    printk("AKD 0V enable GPIO not ready\n");
+    LOG_ERR("AKD 0V enable GPIO not ready");
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&enable_camera)) {
-    printk("Camera enable GPIO not ready\n");
+    LOG_ERR("Camera enable GPIO not ready");
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&enable_akd_async)) {
-    printk("AKD ASYNC enable GPIO not ready\n");
+    LOG_ERR("AKD ASYNC enable GPIO not ready");
     return -ENODEV;
   }
 
   /* --- Configure control pins as output inactive --- */
   err = gpio_pin_configure_dt(&enable_akd, GPIO_OUTPUT_INACTIVE);
   if (err) {
-    printk("Failed to configure AKD enable pin (err %d)\n", err);
+    LOG_ERR("Failed to configure AKD enable pin (err %d)", err);
     return err;
   }
 
   err = gpio_pin_configure_dt(&enable_acc, GPIO_OUTPUT_INACTIVE);
   if (err) {
-    printk("Failed to configure ACC enable pin (err %d)\n", err);
+    LOG_ERR("Failed to configure ACC enable pin (err %d)", err);
     return err;
   }
 
   err = gpio_pin_configure_dt(&enable_pdm, GPIO_OUTPUT_INACTIVE);
   if (err) {
-    printk("Failed to configure PDM enable pin (err %d)\n", err);
+    LOG_ERR("Failed to configure PDM enable pin (err %d)", err);
     return err;
   }
 
   err = gpio_pin_configure_dt(&enable_akd_0V, GPIO_OUTPUT_INACTIVE);
   if (err) {
-    printk("Failed to configure AKD 0V enable pin (err %d)\n", err);
+    LOG_ERR("Failed to configure AKD 0V enable pin (err %d)", err);
     return err;
   }
   err = gpio_pin_configure_dt(&enable_camera, GPIO_OUTPUT_INACTIVE);
   if (err) {
-    printk("Failed to configure camera enable pin (err %d)\n", err);
+    LOG_ERR("Failed to configure camera enable pin (err %d)", err);
     return err;
   }
   err = gpio_pin_configure_dt(&enable_akd_async, GPIO_INPUT);
   if (err) {
-    printk("Failed to configure AKD ASYNC enable pin (err %d)\n", err);
+    LOG_ERR("Failed to configure AKD ASYNC enable pin (err %d)", err);
     return err;
   }
   gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
                      BIT(enable_akd_async.pin));
   err = gpio_add_callback(enable_akd_async.port, &akd_async_cb);
   if (err) {
-    printk("Failed to add AKD ASYNC callback (err %d)\n", err);
+    LOG_ERR("Failed to add AKD ASYNC callback (err %d)", err);
     return err;
   }
 
-  printk("GPIO initialized\n");
+  LOG_INF("GPIO initialized");
   return 0;
 }
 /**

@@ -16,6 +16,8 @@
 #include <zephyr/sys/util.h>
 
 #include "ble_services/file_transfer.h"
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(audio_processor, LOG_LEVEL_DBG);
 
 #define RMS_THRESHOLD 550
 int rms_threshold = RMS_THRESHOLD;
@@ -175,20 +177,20 @@ int audio_processor(void) {
 
   /* Indicate if signal is too large */
   if (min < -32000 || max > 32000) {
-    printk("CLIP!!!! min %d max %d\r\n", min, max);
+    LOG_WRN("CLIP!!!! min %d max %d", min, max);
   }
 
   mfcc_process_input(input, g_mfcc_input);
 
   if (verbose_on) {
-    printk("mfcc: 3 frames computed, buffer %d/%d\n\r",
-           state->spectrogram_index, state->spectrogram_len);
+    LOG_INF("mfcc: 3 frames computed, buffer %d/%d", state->spectrogram_index,
+            state->spectrogram_len);
   }
 
   ap_counter++;
   if ((ap_counter % g_inference_period) == 0) {
     if (verbose_on) {
-      printk("inference: starting (spec_idx=%d)\n\r", state->spectrogram_index);
+      LOG_ERR("inference: starting (spec_idx=%d)", state->spectrogram_index);
     }
     state->inference_cb(state->spectrogram_index);
   }
@@ -208,7 +210,7 @@ int audio_processor_start(bool single, float *spectrogram_buff,
                           inference_cb_t cb) {
 
   if (mfcc_hop_len > MAX_MFCC_LEN) {
-    printk(" invalid parameter \n\r ");
+    LOG_ERR(" invalid parameter  ");
     return EFAILURE;
   }
   /* for TAG MFCC HOP length is 320 samples and total block size is 960 samples
@@ -223,7 +225,7 @@ int audio_processor_start(bool single, float *spectrogram_buff,
 
   int ret = mfcc_init(_state.nmfcc, mfcc_hop_len * 2, (float)_state.samplerate);
   if (ret == EFAILURE) {
-    printk("mfcc_init failure\n\r ");
+    LOG_ERR("mfcc_init failure ");
     return EFAILURE;
   }
 
@@ -243,7 +245,7 @@ int audio_processor_stop() {
 static inline void uart_send_pcm(const int16_t *pcm, size_t samples) {
 
   for (size_t i = 0; i < samples; i++) {
-    printk("%d,", pcm[i]);
+    LOG_INF("%d,", pcm[i]);
     if (i % 20 == 0)
       k_sleep(K_MSEC(10));
   }
@@ -261,7 +263,7 @@ static void capture_raw_samples(size_t samples) {
     if (block_index >= TOTAL_BLOCKS) {
       block_index = 0; /* wrap or stop capture */
       is_capture_start = 0;
-      printk("\n\rcap stopped\n\r");
+      LOG_INF("cap stopped");
     }
   }
 }
@@ -274,7 +276,7 @@ void audio_process_thread(void *a, void *b, void *c) {
   wdt_enable_thread(AUDIO_PROCESS);
 #endif
   struct audio_block blk;
-  printk("audio_process_thread:\n\r");
+  LOG_INF("audio_process_thread:");
   uint32_t audio_process_thread_cntr = 0;
   size_t samples;
   float rms_val = 0.0f;
@@ -301,7 +303,7 @@ void audio_process_thread(void *a, void *b, void *c) {
         /* Debounce cooldown active: skip all processing */
         speech_state = SPEECH_IDLE;
         if (verbose_on && !was_in_debounce) {
-          printk("debounce: %ums cooldown active\n\r", kws_debounce_time);
+          LOG_ERR("debounce: %ums cooldown active", kws_debounce_time);
         }
         was_in_debounce = true;
       }
@@ -309,7 +311,7 @@ void audio_process_thread(void *a, void *b, void *c) {
       /* remove DC offset and compute RMS based on compute_rms, flag */
       else {
         if (was_in_debounce && verbose_on) {
-          printk("debounce: cooldown complete\n\r");
+          LOG_ERR("debounce: cooldown complete");
         }
         was_in_debounce = false;
         if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
@@ -317,15 +319,15 @@ void audio_process_thread(void *a, void *b, void *c) {
            */
           if (((int)rms_val >= rms_threshold)) {
             if (verbose_on && speech_state == SPEECH_IDLE) {
-              printk("speech: ACTIVE (rms=%.0f >= %d)\n\r", (double)rms_val,
-                     rms_threshold);
+              LOG_INF("speech: ACTIVE (rms=%.0f >= %d)", (double)rms_val,
+                      rms_threshold);
             }
             speech_state = SPEECH_ACTIVE;
             speech_start_time = time_ms();
 
           } else if (speech_state == SPEECH_IDLE) {
             if (verbose_on >= 2) {
-              printk("speech: idle (rms=%.0f)\n\r", (double)rms_val);
+              LOG_INF("speech: idle (rms=%.0f)", (double)rms_val);
             }
             /* do not process as state is idle */
             continue;
@@ -336,8 +338,8 @@ void audio_process_thread(void *a, void *b, void *c) {
              * command was detected. Therefore, the system transitions back to
              * the IDLE state and clears any stale inference data */
             if (verbose_on) {
-              printk("speech: IDLE (rms=%.0f, timeout %dms)\n\r",
-                     (double)rms_val, speech_active_time_ms);
+              LOG_ERR("speech: IDLE (rms=%.0f, timeout %dms)", (double)rms_val,
+                      speech_active_time_ms);
             }
             speech_state = SPEECH_IDLE;
             reset_stale_inference_data();
@@ -365,9 +367,9 @@ int cmd_inf_period(const struct shell *shell, size_t argc, char **argv) {
       return -EINVAL;
     }
     g_inference_period = val1;
-    printk("g_inference_period %d \n\r", val1);
+    LOG_INF("g_inference_period %d ", val1);
   } else {
-    printk("incorrect command \n\r");
+    LOG_ERR("incorrect command ");
   }
   return 0;
 }
@@ -375,31 +377,31 @@ int cmd_inf_period(const struct shell *shell, size_t argc, char **argv) {
 #ifdef CONFIG_AUDIO_CAPTURE_TEST
 int cmd_cap_start(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
-    printk("invalid command ");
+    LOG_ERR("invalid command ");
     return -EINVAL;
   }
-  printk("cap started ");
+  LOG_INF("cap started ");
   is_capture_start = 1;
   return 0;
 }
 
 int cmd_cap_stop(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
-    printk("invalid command ");
+    LOG_ERR("invalid command ");
     return -EINVAL;
   }
-  printk("cap stopped ");
+  LOG_INF("cap stopped ");
   is_capture_start = 0;
   return 0;
 }
 
 int cmd_dump_uart(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
-    printk("invalid command ");
+    LOG_ERR("invalid command ");
     return -EINVAL;
   }
   uart_send_pcm((int16_t *)sram_upload_buffer, TOTAL_BUFFER_BYTES / 2);
-  printk("\n\rdump completed\n\r ");
+  LOG_INF("dump completed ");
   return 0;
 }
 

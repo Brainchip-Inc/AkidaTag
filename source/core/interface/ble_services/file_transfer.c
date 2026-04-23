@@ -73,8 +73,8 @@ static ssize_t get_fs_name(struct bt_conn *conn,
                            const struct bt_gatt_attr *attr, const void *buf,
                            uint16_t len, uint16_t offset, uint8_t flags);
 static ssize_t get_mfcc_fs(struct bt_conn *conn,
-                            const struct bt_gatt_attr *attr, const void *buf,
-                            uint16_t len, uint16_t offset, uint8_t flags);
+                           const struct bt_gatt_attr *attr, const void *buf,
+                           uint16_t len, uint16_t offset, uint8_t flags);
 static ssize_t get_silence_class(struct bt_conn *conn,
                                  const struct bt_gatt_attr *attr,
                                  const void *buf, uint16_t len, uint16_t offset,
@@ -527,8 +527,8 @@ static ssize_t get_num_edge_classes(struct bt_conn *conn,
 }
 
 static ssize_t get_mfcc_fs(struct bt_conn *conn,
-                            const struct bt_gatt_attr *attr, const void *buf,
-                            uint16_t len, uint16_t offset, uint8_t flags) {
+                           const struct bt_gatt_attr *attr, const void *buf,
+                           uint16_t len, uint16_t offset, uint8_t flags) {
   if (len != 4) {
     return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
   }
@@ -892,7 +892,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
  * ---------------------------------------------------------------------- */
 int file_transfer_load_meta(int app_idx, model_meta_t *meta_out) {
   if (app_idx < 0 || app_idx > 0 || meta_out == NULL) {
-    printk("E: incorrect app_idx %d \n\r", app_idx);
+    LOG_ERR("incorrect app_idx %d", app_idx);
     return -1;
   }
 
@@ -997,7 +997,7 @@ void shared_buf_init(void) {
   /* Initial state: buffer is FREE — camera is allowed to proceed */
   k_event_post(&sram_buf_event, BUF_EVENT_FREE);
 
-  printk("sram_buf: initialized, buffer is FREE\n");
+  LOG_INF("sram_buf: initialized, buffer is FREE");
 }
 
 /* -------------------------------------------------------------------------
@@ -1009,7 +1009,7 @@ void shared_buf_init(void) {
  * ---------------------------------------------------------------------- */
 int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out) {
   if (app_idx < 0 || app_idx > 0 || meta_out == NULL) {
-    printk("E: incorrect app_idx %d \n\r", app_idx);
+    LOG_ERR("incorrect app_idx %d", app_idx);
     return -1;
   }
 
