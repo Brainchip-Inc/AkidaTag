@@ -116,7 +116,7 @@ static void spi_read_burst(AbstractSpiDriver *driver, uint32_t address,
              header.data());
   header[4] = 0; // read requires to wait 8 spi clocks before response, so we
                  // insert a dummy byte that will delay the read accordingly
-  std::array<uint32_t, burst_word_size> burst_data;
+  std::array<uint32_t, (burst_word_size < 2 ? 2 : burst_word_size)> burst_data;
 
   burst_data[0] =
       (header[3] << 24) | (header[2] << 16) | (header[1] << 8) | (header[0]);
@@ -125,7 +125,7 @@ static void spi_read_burst(AbstractSpiDriver *driver, uint32_t address,
   akida::ZephyrSpiDriver *ptr = dynamic_cast<akida::ZephyrSpiDriver *>(driver);
 
   ptr->read_api(header.size(), reinterpret_cast<uint8_t *>(burst_data.data()),
-                burst_data.size() * sizeof(uint32_t) + 5);
+                burst_word_size * sizeof(uint32_t) + 5);
 
   // now we perform the bytes swap
   for (size_t i = 0; i < burst_word_size; ++i) {
