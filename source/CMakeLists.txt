@@ -133,6 +133,8 @@ target_compile_options(app PRIVATE
     -fno-common
 )
 
+zephyr_compile_options(-Wno-double-promotion)
+
 #
 # -------------------------------------------------------------
 #  CUSTOM LINKER FILE (OPTIONAL)

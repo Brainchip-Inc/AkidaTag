@@ -17,6 +17,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/types.h>
 
@@ -89,6 +90,8 @@ extern "C" {
 int file_transfer_load_meta(int app_idx, model_meta_t *meta_out);
 int infer(int app_index_l);
 }
+
+LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 
 void cli_worker_proc_thread(void *a, void *b, void *c);
 
@@ -1366,12 +1369,12 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
   }
 
   if (verbose_on) {
-    printk("scores: argmax=%d (%s) softmax=%.2f smoothed=%.2f "
-           "chiming=%d/%d\n\r",
-           found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
-           (double)softmax_scores[found], (double)smoothed_scores[found],
-           (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
-           chiming_threshold);
+    LOG_INF("scores: argmax=%d (%s) softmax=%.2f smoothed=%.2f "
+            "chiming=%d/%d",
+            found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
+            softmax_scores[found], smoothed_scores[found],
+            (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
+            chiming_threshold);
   }
 
   // Step 5: Trigger if chiming threshold reached
@@ -1390,10 +1393,10 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
                                              ? kws_new_tags[triggered_class]
                                              : "?");
     if (metrics_on) {
-      printk("  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
-             "dma=%uus\n\r",
-             (double)(confidence * 100.0f), (double)(triggered_score * 100.0f),
-             chiming_counters[triggered_class], inf_time, dma_time);
+      LOG_INF("  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
+              "dma=%uus",
+              confidence * 100.0f, triggered_score * 100.0f,
+              chiming_counters[triggered_class], inf_time, dma_time);
     }
     /* KWS data is sent only when BLE is connected and the KWS application
      * is deployed */
@@ -1435,7 +1438,10 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akida_get_clock_counter();
       ret = akida_enqueue(input, input_shape, NULL);
-      (void)(time_ms() - inference_start_ts); /* enq_time unused */
+      uint32_t enq_time = (uint32_t)(time_ms() - inference_start_ts);
+      if (verbose_on) {
+        printk("enqueue: done (cpu=%ums)\n\r", enq_time);
+      }
       {
         // uint32_t power_tmp;
         /* clear , accumulated power before enqueue */
@@ -2329,7 +2335,7 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
         smoothing_alpha = 0.0f;
       if (smoothing_alpha > 1.0f)
         smoothing_alpha = 1.0f;
-      printk("smoothing_alpha = %.2f\n\r", (double)smoothing_alpha);
+      LOG_INF("smoothing_alpha = %.2f", smoothing_alpha);
     } else if (argc > 2 && !strcmp(argv[1], "chiming")) {
       chiming_threshold = atoi(argv[2]);
       if (chiming_threshold < 1)
@@ -2341,7 +2347,7 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
         score_threshold = 0.0f;
       if (score_threshold > 1.0f)
         score_threshold = 1.0f;
-      printk("score_threshold = %.2f\n\r", (double)score_threshold);
+      LOG_INF("score_threshold = %.2f", score_threshold);
     } else if (argc > 2 && !strcmp(argv[1], "speech")) {
       speech_active_time_ms = atoi(argv[2]);
       printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
@@ -2356,10 +2362,10 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
              rms_threshold);
       printk("  debounce_time    = %u ms       [app debounce <ms>]\n\r",
              kws_debounce_time);
-      printk("  smoothing_alpha  = %.2f        [app alpha <0.0-1.0>]\n\r",
-             (double)smoothing_alpha);
-      printk("  score_threshold  = %.2f        [app score <0.0-1.0>]\n\r",
-             (double)score_threshold);
+      LOG_INF("  smoothing_alpha  = %.2f        [app alpha <0.0-1.0>]",
+              smoothing_alpha);
+      LOG_INF("  score_threshold  = %.2f        [app score <0.0-1.0>]",
+              score_threshold);
       printk("  chiming_threshold= %d          [app chiming <n>]\n\r",
              chiming_threshold);
       printk("  speech_timeout   = %d ms       [app speech <ms>]\n\r",

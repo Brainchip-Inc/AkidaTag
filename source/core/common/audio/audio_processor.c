@@ -317,7 +317,7 @@ void audio_process_thread(void *a, void *b, void *c) {
            */
           if (((int)rms_val >= rms_threshold)) {
             if (verbose_on && speech_state == SPEECH_IDLE) {
-              printk("speech: ACTIVE (rms=%.0f >= %d)\n\r", rms_val,
+              printk("speech: ACTIVE (rms=%.0f >= %d)\n\r", (double)rms_val,
                      rms_threshold);
             }
             speech_state = SPEECH_ACTIVE;
@@ -325,7 +325,7 @@ void audio_process_thread(void *a, void *b, void *c) {
 
           } else if (speech_state == SPEECH_IDLE) {
             if (verbose_on >= 2) {
-              printk("speech: idle (rms=%.0f)\n\r", rms_val);
+              printk("speech: idle (rms=%.0f)\n\r", (double)rms_val);
             }
             /* do not process as state is idle */
             continue;
@@ -336,8 +336,8 @@ void audio_process_thread(void *a, void *b, void *c) {
              * command was detected. Therefore, the system transitions back to
              * the IDLE state and clears any stale inference data */
             if (verbose_on) {
-              printk("speech: IDLE (rms=%.0f, timeout %dms)\n\r", rms_val,
-                     speech_active_time_ms);
+              printk("speech: IDLE (rms=%.0f, timeout %dms)\n\r",
+                     (double)rms_val, speech_active_time_ms);
             }
             speech_state = SPEECH_IDLE;
             reset_stale_inference_data();

@@ -101,7 +101,8 @@ int mfcc_init(int features, int len, float _samplerate) {
   }
 
   for (int i = 0; i < frame_len; i++)
-    window_func[i] = 0.5f - 0.5f * cos(M_2PI * ((float)i) / (float)frame_len);
+    window_func[i] =
+        0.5f - 0.5f * cosf((float)M_2PI * (float)i / (float)frame_len);
 
   bytes = sizeof(int32_t) * NUM_FBANK_BINS;
   // create mel filterbank
@@ -154,7 +155,9 @@ float *create_dct_matrix(int32_t input_length, int32_t coefficient_count) {
   for (k = 0; k < coefficient_count; k++) {
     for (n = 0; n < input_length; n++) {
       M[k * input_length + n] =
-          normalizer * cos(((double)M_PI) / input_length * (n + 0.5f) * k);
+          (float)((double)normalizer *
+                  cos(((double)M_PI) / (double)input_length *
+                      ((double)n + 0.5) * (double)k));
     }
   }
   return M;
