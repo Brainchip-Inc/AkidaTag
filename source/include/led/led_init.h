@@ -92,4 +92,12 @@ void process_led(void);
 
 /* Get current BLE connection status. */
 bool is_ble_connected(void);
+
+/**
+ * @brief Notify the LED subsystem of a BLE connection state change.
+ *
+ * @param connected BLE_CONNECTED or BLE_NOT_CONNECTED
+ */
+void ble_connection_callback(bool connected);
+
 #endif /* _LED_INIT_H */

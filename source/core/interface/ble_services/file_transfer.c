@@ -77,36 +77,36 @@ static ssize_t get_fs_name(struct bt_conn *conn,
  * UUID definitions – must match Python send_model_via_ble.py
  * ---------------------------------------------------------------------- */
 #define BT_UUID_FILE_TRANSFER_SERVICE_VAL                                      \
-  BT_UUID_128_ENCODE(0xf000aa00, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa00, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_FILE_TRANSFER_CHAR_VAL                                         \
-  BT_UUID_128_ENCODE(0xf000aa01, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa01, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_FILE_TRANSFER_ACK_CHAR_VAL                                     \
-  BT_UUID_128_ENCODE(0xf000aa02, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa02, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_FILE_TRANSFER_CTRL_CHAR_VAL                                    \
-  BT_UUID_128_ENCODE(0xf000aa03, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa03, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_FILE_TRANSFER_SIZE_CHAR_VAL                                    \
-  BT_UUID_128_ENCODE(0xf000aa04, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa04, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define APP_CHAR_UUID_VAL                                                      \
-  BT_UUID_128_ENCODE(0xf000aa05, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa05, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_FILE_CRC_CHAR_VAL                                              \
-  BT_UUID_128_ENCODE(0xf000aa06, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa06, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_TRANSFER_TYPE_CHAR_VAL                                         \
-  BT_UUID_128_ENCODE(0xf000aa07, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa07, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 /* New metadata characteristics (aa08–aa0e) */
 #define BT_UUID_INPUT_SHAPE_CHAR_VAL                                           \
-  BT_UUID_128_ENCODE(0xf000aa08, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa08, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_OUTPUT_SHAPE_CHAR_VAL                                          \
-  BT_UUID_128_ENCODE(0xf000aa09, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa09, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_FLASH_ADDRESS_CHAR_VAL                                         \
-  BT_UUID_128_ENCODE(0xf000aa0a, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa0a, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_TOTAL_LENGTH_CHAR_VAL                                          \
-  BT_UUID_128_ENCODE(0xf000aa0b, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa0b, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_IS_EDGE_LEARNED_CHAR_VAL                                       \
-  BT_UUID_128_ENCODE(0xf000aa0c, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa0c, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_NUM_EDGE_CLASSES_CHAR_VAL                                      \
-  BT_UUID_128_ENCODE(0xf000aa0d, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa0d, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_FS_NAME_CHAR_VAL                                               \
-  BT_UUID_128_ENCODE(0xf000aa0e, 0x0451, 0x4000, 0xb000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000aa0e, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 
 /* UUID struct instances */
 static struct bt_uuid_128 file_transfer_service_uuid =
@@ -225,7 +225,7 @@ static const char *model_data_meta_paths[] = {
  * ---------------------------------------------------------------------- */
 static char dyn_hdr_path[80];  /* e.g. "/ext/kws_model_hdr"      */
 static char dyn_info_path[80]; /* e.g. "/ext/kws_model_info"     */
-static char dyn_data_path[80]; /* e.g. "/ext/kws_model_data_hdr" */
+static char dyn_data_path[84]; /* e.g. "/ext/kws_model_data_hdr" */
 static int dyn_app_slot = -1;  /* index into meta_hdr_paths[]    */
 
 static bool build_fs_paths_from_name(const char *fs_name) {
@@ -260,8 +260,8 @@ static bool build_fs_paths_from_name(const char *fs_name) {
 /* -------------------------------------------------------------------------
  * SRAM upload buffer – used by DATA transfers (chunk staging)
  * ---------------------------------------------------------------------- */
-__attribute__((section(".sram_upload_buf"),
-               used)) uint8_t sram_upload_buffer[BUFFER_SIZE];
+__attribute__((section(".sram_upload_buf"), used))
+uint8_t sram_upload_buffer[BUFFER_SIZE];
 
 /* Flash write cursor – updated as chunks are flushed to SPI flash */
 static uint32_t app_flash_offset = AKD_FLASH_OFFSET;
