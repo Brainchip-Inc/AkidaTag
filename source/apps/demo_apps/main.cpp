@@ -39,16 +39,15 @@
 #include <infra/system.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/watchdog.h>
-#include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/storage/flash_map.h>
 #include <zephyr/sys/crc.h>
+
+#include "infer_utils.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -1003,8 +1002,12 @@ static void akd_async_thread(void *a, void *b, void *c) {
         akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
 
       uint64_t fetch_end_ts = time_ms();
+      uint32_t fetch_time = (uint32_t)(fetch_end_ts - fetch_start_ts);
+      if (verbose_on) {
+        printk("fetch: done (cpu=%ums)\n\r", fetch_time);
+      }
       uint32_t inference_dma_ts =
-          akd_device.read_clock_counter() - inference_start_dma_ts;
+          akida_get_clock_counter() - inference_start_dma_ts;
       uint32_t inference_time = fetch_end_ts - inference_start_ts;
       kws_post_processing(inference_dma_ts, inference_time);
     } else {
@@ -1185,7 +1188,6 @@ int main(void) {
     return -1;
   }
   printk("Model name: stored='%s', \n", kws_meta.model_name);
-  /* Step 3: Copy to model_name */
   /* Step 2&4: load data meta and validate flash contents */
   int dm_ret = file_transfer_load_data_meta(0, &kws_data_meta);
   if (dm_ret == 0) {
@@ -1215,22 +1217,22 @@ int main(void) {
 
   /* Step 6: program Akida */
   printk("Model data found at 0x%08X\n", kws_flash_addr);
-  akd_device.toggle_clock_counter(true);
+  akida_toggle_clock_counter(true);
   printk("Programming model info into AKD1500\n");
 
-  uint32_t s_dma_cycls = akd_device.read_clock_counter();
+  uint32_t s_dma_cycls = akida_get_clock_counter();
   uint64_t start_time = time_ms();
 
   akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len,
                       kws_meta.flash_address, &is_el_model);
 
   uint32_t prog_time = (uint32_t)(time_ms() - start_time);
-  uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+  uint32_t delta_cycle = akida_get_clock_counter() - s_dma_cycls;
   uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
   printk("\nModel program: %u dma cycles, %u us dma, %u ms cpu\n", delta_cycle,
          dma_time, prog_time);
 
-  akd_device.set_batch_size(1, true);
+  akida_batch_size(1, true);
   kws_model_present = true;
   update_model_params(kws_meta);
 
@@ -1300,7 +1302,7 @@ extern "C" void reset_stale_inference_data(void) {
 extern "C" uint8_t is_kws_debounce_complete(void) {
   uint8_t is_debounce = 0;
   /* DEBOUNCING (Preventing multiple rapid triggers)*/
-  if ((time_ms()) > last_trigger_time_ms + kws_debounce_time)
+  if ((uint64_t)(time_ms()) > last_trigger_time_ms + kws_debounce_time)
     is_debounce = 1;
 
   return is_debounce;
@@ -1320,39 +1322,20 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
   // Step 1: Per-class max pooling from dequantized output
   int num_cls_capped =
       (g_num_classes < MAX_KWS_CLASSES) ? g_num_classes : MAX_KWS_CLASSES;
-  float class_maxes[MAX_KWS_CLASSES];
-  for (int c = 0; c < num_cls_capped; c++) {
-    float max_val = akida_output_dq[c * g_num_neurons_per_class];
-    for (int n = 1; n < g_num_neurons_per_class; n++) {
-      float val = akida_output_dq[c * g_num_neurons_per_class + n];
-      if (val > max_val) {
-        max_val = val;
-      }
-    }
-    class_maxes[c] = max_val;
-  }
+  float softmax_scores[MAX_KWS_CLASSES];
+  compute_per_class_max(akida_output_dq, num_cls_capped,
+                        (int)g_num_neurons_per_class, softmax_scores);
 
-  // Step 2: Softmax over per-class max values (with max subtraction for
-  // stability)
-  float max_logit = class_maxes[0];
+  // Find argmax before softmax (monotonic — result is the same after)
   int found = 0;
   for (int c = 1; c < num_cls_capped; c++) {
-    if (class_maxes[c] > max_logit) {
-      max_logit = class_maxes[c];
+    if (softmax_scores[c] > softmax_scores[found]) {
       found = c;
     }
   }
-  float softmax_scores[MAX_KWS_CLASSES] = {0};
-  float exp_sum = 0.0f;
-  for (int c = 0; c < num_cls_capped; c++) {
-    softmax_scores[c] = expf(class_maxes[c] - max_logit);
-    exp_sum += softmax_scores[c];
-  }
-  if (exp_sum > 0.0f) {
-    for (int c = 0; c < num_cls_capped; c++) {
-      softmax_scores[c] /= exp_sum;
-    }
-  }
+
+  // Step 2: Softmax over per-class max values
+  softmax(softmax_scores, (uint32_t)num_cls_capped);
 
   // Step 3: EMA smoothing of softmax scores
   for (int c = 0; c < num_cls_capped; c++) {
@@ -1386,7 +1369,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
     printk("scores: argmax=%d (%s) softmax=%.2f smoothed=%.2f "
            "chiming=%d/%d\n\r",
            found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
-           softmax_scores[found], smoothed_scores[found],
+           (double)softmax_scores[found], (double)smoothed_scores[found],
            (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
            chiming_threshold);
   }
@@ -1409,7 +1392,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
     if (metrics_on) {
       printk("  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
              "dma=%uus\n\r",
-             confidence * 100.0f, triggered_score * 100.0f,
+             (double)(confidence * 100.0f), (double)(triggered_score * 100.0f),
              chiming_counters[triggered_class], inf_time, dma_time);
     }
     /* KWS data is sent only when BLE is connected and the KWS application
@@ -1430,39 +1413,29 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   if (kws_api_selection == DEFAULT_API_SELECTION_SYNC) {
 
     inference_start_ts = time_ms();
-    uint32_t s_dma_cycls = akd_device.read_clock_counter();
+    uint32_t s_dma_cycls = akida_get_clock_counter();
 
     int num_outputs = g_num_classes * g_num_neurons_per_class;
-    akida::TensorConstPtr in = akida::Dense::create_view(
-        reinterpret_cast<const char *>(input), akida::TensorType::uint8,
-        {input_shape[0], input_shape[1], input_shape[2]},
-        akida::Dense::Layout::RowMajor);
-    auto pred = akd_device.predict({in});
-    if (pred.size()) {
-      auto out = akida::Tensor::ensure_dense(std::move(pred[0]));
-      if (out && (int)out->size() == num_outputs) {
-        memcpy(akida_output_dq, out->data<float>(),
-               num_outputs * sizeof(float));
-      } else {
-        pred.clear();
-      }
-    }
-    if (pred.size()) {
+    int pred_ret = akida_predict(input, input_shape, akida_output_dq,
+                                 num_outputs * (int)sizeof(float));
+    if (pred_ret == SUCCESS) {
       uint32_t inf_time = time_ms() - inference_start_ts;
-      uint32_t delta_cycle = akd_device.read_clock_counter() - s_dma_cycls;
+      uint32_t delta_cycle = akida_get_clock_counter() - s_dma_cycls;
       uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
       if (verbose_on) {
         printk("inference: done (cpu=%ums dma=%uus)\n\r", inf_time, dma_time);
       }
       kws_post_processing(dma_time, inf_time);
+    } else {
+      printk("akida_predict failed\n");
     }
   } else {
     uint64_t start_time = time_ms();
     do {
       inference_start_ts = time_ms();
-      inference_start_dma_ts = akd_device.read_clock_counter();
+      inference_start_dma_ts = akida_get_clock_counter();
       ret = akida_enqueue(input, input_shape, NULL);
-      uint32_t enq_time = time_ms() - inference_start_ts;
+      (void)(time_ms() - inference_start_ts); /* enq_time unused */
       {
         // uint32_t power_tmp;
         /* clear , accumulated power before enqueue */
@@ -2191,14 +2164,14 @@ extern "C" int infer(int app_index_l) {
   akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
                       infer_meta.flash_address, &is_el_model);
 
-  akd_device.set_batch_size(1, true);
+  akida_batch_size(1, true);
   app_index = app_index_l;
 
   if (check_model_compatibility(is_el_model, infer_meta) != SUCCESS) {
     return -1;
   }
 
-  akd_device.toggle_clock_counter(true);
+  akida_toggle_clock_counter(true);
 
   uint32_t s_dma_cycls = 0;
   uint64_t s_tick = 0;
@@ -2220,12 +2193,12 @@ extern "C" int infer(int app_index_l) {
     akd_irq_disable();
   }
 #endif
-  s_dma_cycls = akd_device.read_clock_counter();
+  s_dma_cycls = akida_get_clock_counter();
   s_tick = time_ms();
   int ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
                           (uint8_t *)akida_output, akd_op_size);
   e_tick = time_ms();
-  e_dma_cycls = akd_device.read_clock_counter();
+  e_dma_cycls = akida_get_clock_counter();
   delta_cycle = e_dma_cycls - s_dma_cycls;
   inf_time = e_tick - s_tick;
   printk("\n\rinference time= %u dma cycles, time = %u ms\n\r", delta_cycle,
@@ -2356,7 +2329,7 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
         smoothing_alpha = 0.0f;
       if (smoothing_alpha > 1.0f)
         smoothing_alpha = 1.0f;
-      printk("smoothing_alpha = %.2f\n\r", smoothing_alpha);
+      printk("smoothing_alpha = %.2f\n\r", (double)smoothing_alpha);
     } else if (argc > 2 && !strcmp(argv[1], "chiming")) {
       chiming_threshold = atoi(argv[2]);
       if (chiming_threshold < 1)
@@ -2368,7 +2341,7 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
         score_threshold = 0.0f;
       if (score_threshold > 1.0f)
         score_threshold = 1.0f;
-      printk("score_threshold = %.2f\n\r", score_threshold);
+      printk("score_threshold = %.2f\n\r", (double)score_threshold);
     } else if (argc > 2 && !strcmp(argv[1], "speech")) {
       speech_active_time_ms = atoi(argv[2]);
       printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
@@ -2384,9 +2357,9 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
       printk("  debounce_time    = %u ms       [app debounce <ms>]\n\r",
              kws_debounce_time);
       printk("  smoothing_alpha  = %.2f        [app alpha <0.0-1.0>]\n\r",
-             smoothing_alpha);
+             (double)smoothing_alpha);
       printk("  score_threshold  = %.2f        [app score <0.0-1.0>]\n\r",
-             score_threshold);
+             (double)score_threshold);
       printk("  chiming_threshold= %d          [app chiming <n>]\n\r",
              chiming_threshold);
       printk("  speech_timeout   = %d ms       [app speech <ms>]\n\r",

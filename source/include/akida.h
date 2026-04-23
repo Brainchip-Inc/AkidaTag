@@ -80,6 +80,20 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
                   int output_size);
 
 /**
+ * Execute an inference on input data using the predict (dequantizing) path.
+ * Returns a float output buffer instead of raw integer activations.
+ *
+ * @param input        Input data buffer
+ * @param input_dims   Input dimensions [H, W, C]
+ * @param output       Float buffer where dequantized output is stored
+ * @param output_size_bytes  Size of the output buffer in bytes
+ *
+ * @return SUCCESS if output size matches, else error code
+ */
+int akida_predict(uint8_t *input, uint32_t *input_dims, float *output,
+                  int output_size_bytes);
+
+/**
  * Learn input
  *
  * @param input the input data to send to inference learn

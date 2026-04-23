@@ -12,6 +12,14 @@ static bool current_learn_en = false;
 static akida::ProgramInfo program_info = akida::ProgramInfo();
 #define FLASH_BASE_ADDRESS 0x80000000
 
+void akida_toggle_clock_counter(bool enable) {
+  akd_device.toggle_clock_counter(enable);
+}
+
+uint32_t akida_get_clock_counter(void) {
+  return akd_device.read_clock_counter();
+}
+
 int akida_program(uint8_t *buffer, int size, bool learn_en) {
   if (current_program)
     akd_device.unprogram();
@@ -89,6 +97,28 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
     if (out && out->size() * sizeof(int) == (size_t)output_size) {
       const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
       memcpy(output, bytes_out, output_size);
+      return SUCCESS;
+    }
+  }
+  return -EFAILURE;
+}
+
+int akida_predict(uint8_t *input, uint32_t *input_dims, float *output,
+                  int output_size_bytes) {
+
+  akida::TensorConstPtr in = akida::Dense::create_view(
+      reinterpret_cast<const char *>(input), akida::TensorType::uint8,
+      {input_dims[0], input_dims[1], input_dims[2]},
+      akida::Dense::Layout::RowMajor);
+
+  auto ret = akd_device.predict({in});
+
+  if (ret.size()) {
+    /** Get output buffer */
+    auto out = akida::Tensor::ensure_dense(std::move(ret[0]));
+    if (out && out->size() * sizeof(float) == (size_t)output_size_bytes) {
+      const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
+      memcpy(output, bytes_out, output_size_bytes);
       return SUCCESS;
     }
   }
