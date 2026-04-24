@@ -72,6 +72,10 @@ static ssize_t get_num_edge_classes(struct bt_conn *conn,
 static ssize_t get_fs_name(struct bt_conn *conn,
                            const struct bt_gatt_attr *attr, const void *buf,
                            uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t get_column_usage(struct bt_conn *conn,
+                                const struct bt_gatt_attr *attr,
+                                const void *buf, uint16_t len, uint16_t offset,
+                                uint8_t flags);
 
 /* -------------------------------------------------------------------------
  * UUID definitions – must match Python send_model_via_ble.py
@@ -107,6 +111,8 @@ static ssize_t get_fs_name(struct bt_conn *conn,
   BT_UUID_128_ENCODE(0xf000aa0d, 0x0451, 0x4000, 0xb000, 0x000000000000)
 #define BT_UUID_FS_NAME_CHAR_VAL                                               \
   BT_UUID_128_ENCODE(0xf000aa0e, 0x0451, 0x4000, 0xb000, 0x000000000000)
+#define BT_UUID_COLUMN_USAGE_CHAR_VAL                                          \
+  BT_UUID_128_ENCODE(0xf000aa0f, 0x0451, 0x4000, 0xb000, 0x000000000000)
 
 /* UUID struct instances */
 static struct bt_uuid_128 file_transfer_service_uuid =
@@ -137,6 +143,8 @@ static struct bt_uuid_128 num_edge_classes_uuid =
     BT_UUID_INIT_128(BT_UUID_NUM_EDGE_CLASSES_CHAR_VAL);
 static struct bt_uuid_128 fs_name_uuid =
     BT_UUID_INIT_128(BT_UUID_FS_NAME_CHAR_VAL);
+static struct bt_uuid_128 column_usage_uuid =
+    BT_UUID_INIT_128(BT_UUID_COLUMN_USAGE_CHAR_VAL);
 
 /* UUID pointer macros */
 #define FILE_SVC_UUID (&file_transfer_service_uuid.uuid)
@@ -153,6 +161,7 @@ static struct bt_uuid_128 fs_name_uuid =
 #define IS_EDGE_LEARNED_UUID (&is_edge_learned_uuid.uuid)
 #define NUM_EDGE_CLASSES_UUID (&num_edge_classes_uuid.uuid)
 #define FS_NAME_UUID (&fs_name_uuid.uuid)
+#define COLUMN_USAGE_UUID (&column_usage_uuid.uuid)
 
 /* Permission shorthand */
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED
@@ -190,6 +199,8 @@ static uint32_t meta_flash_address = 0;
 static uint32_t meta_is_edge_learned = 0;
 static uint32_t meta_num_edge_classes = 0;
 static char meta_fs_name[MAX_FS_NAME_LEN] = {0};
+uint32_t g_column_usage_mask =
+    0x0E; /* Bitmask of columns in use (bit i = col i is on) */
 
 extern int infer(int app_index_l);
 
@@ -340,7 +351,11 @@ BT_GATT_SERVICE_DEFINE(
 
     /* aa0e – LittleFS metadata path (UTF-8, optional) */
     BT_GATT_CHARACTERISTIC(FS_NAME_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
-                           get_fs_name, NULL));
+                           get_fs_name, NULL),
+
+    /* aa0f – column usage bitmask (32-bit, bit i = col i is in use) */
+    BT_GATT_CHARACTERISTIC(COLUMN_USAGE_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, get_column_usage, NULL));
 
 static void send_ack_to_host(uint8_t ack_code) {
   if (!notify_enabled) {
@@ -496,6 +511,22 @@ static ssize_t get_fs_name(struct bt_conn *conn,
   return len;
 }
 
+static ssize_t get_column_usage(struct bt_conn *conn,
+                                const struct bt_gatt_attr *attr,
+                                const void *buf, uint16_t len, uint16_t offset,
+                                uint8_t flags) {
+  if (len != 4) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memcpy(&g_column_usage_mask, buf, 4);
+  LOG_INF("Column usage mask: 0x%02X (col0=%s col1=%s col2=%s col3=%s)\n",
+          g_column_usage_mask, (g_column_usage_mask & (1 << 0)) ? "ON" : "OFF",
+          (g_column_usage_mask & (1 << 1)) ? "ON" : "OFF",
+          (g_column_usage_mask & (1 << 2)) ? "ON" : "OFF",
+          (g_column_usage_mask & (1 << 3)) ? "ON" : "OFF");
+  return len;
+}
+
 /* -------------------------------------------------------------------------
  * Helpers
  * ---------------------------------------------------------------------- */
@@ -618,6 +649,7 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     m->is_edge_learned = meta_is_edge_learned;
     m->num_edge_classes = meta_num_edge_classes;
     m->info_data_len = (uint32_t)sram_info_offset;
+    m->column_usage_mask = g_column_usage_mask;
     /* Extract and store model name from meta_fs_name (e.g. "kws" from
      * "/model_meta/kws") */
     memset(m->model_name, 0, MAX_FS_NAME_LEN);

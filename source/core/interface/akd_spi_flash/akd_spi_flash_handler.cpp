@@ -160,6 +160,33 @@ void init_akd_1500_spi_flash() {
   printk("Akida1500 SPI Flash initialized on %x %x\n", reg, rw_data.uint_data);
 }
 
+void turn_off_nodes_npu(uint8_t row, uint8_t collumn, uint8_t np_id) {
+  union _data rw_data;
+  rw_data.uint_data = collumn;
+  akd1500.write(0xFCC00080, rw_data.ucdata, 4);
+  rw_data.uint_data = row;
+  akd1500.write(0xFCC00084, rw_data.ucdata, 4);
+  return;
+}
+
+void change_akida_core_clock(uint32_t conf_value) {
+
+  union _data rw_data;
+  // Enable PLL Bypass
+  /* rw_data.uint_data = 0x10;
+   akd1500.write(0xFCE01000, rw_data.ucdata, 4);
+   rw_data.uint_data = conf_value; //0x3200004F;
+   akd1500.write(0xFCE01010, rw_data.ucdata, 4);
+   // Remove PLL Bypass
+   rw_data.uint_data = 0;
+   akd1500.write(0xFCE01000, rw_data.ucdata, 4);*/
+
+  rw_data.uint_data = conf_value;
+  akd1500.write(0xfce01030, rw_data.ucdata, 4);
+
+  return;
+}
+
 /* helper function to read from SPI flash – used by file_transfer.c for CRC */
 extern "C" void spi_flash_read_helper_func(uint8_t *buf, uint32_t offset,
                                            uint32_t size) {

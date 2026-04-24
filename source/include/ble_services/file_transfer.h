@@ -40,27 +40,31 @@ extern struct k_event sram_buf_event;
  *
  * model_info_hdr_crc32 = CRC32( struct_bytes[total_length..model_name]
  *                             || program_info_bytes )
- * i.e. covers all fields except model_info_hdr_crc32 itself (total_length
- * through model_name inclusive), followed by the raw info binary.
- * Verified at transfer time and at boot by file_transfer_load_meta().
+ * i.e. covers all fields except model_info_hdr_crc32 itself and
+ * column_usage_mask (total_length through model_name inclusive), followed by
+ * the raw info binary. Verified at transfer time and at boot by
+ * file_transfer_load_meta().
  *
  * num_edge_classes packing (edge-learning models only):
  *   bits[31:16] = neurons_per_class
  *   bits[15:0]  = num_classes_to_learn
  *
  * All uint32_t fields are little-endian (native on Cortex-M).
- * Total size: 48 bytes (uint32 fields) + 64 bytes (model_name) = 112 bytes.
+ * Total size: 52 bytes (uint32 fields) + 64 bytes (model_name) = 116 bytes.
  */
 typedef struct {
   uint32_t model_info_hdr_crc32; /**< CRC32(hdr[total_length..model_name] ||
                                     info_bytes) */
-  uint32_t total_length;     /**< (sizeof(model_meta_t)-8) + info_data_len */
-  uint32_t input_shape[3];   /**< e.g. {49, 10, 1}, zero-padded             */
-  uint32_t output_shape[3];  /**< e.g. {10, 1}, zero-padded               */
-  uint32_t flash_address;    /**< SPI flash addr for data                 */
-  uint32_t is_edge_learned;  /**< 1 = edge-learning model                 */
-  uint32_t num_edge_classes; /**< upper16=neurons, lower16=classes        */
-  uint32_t info_data_len;    /**< bytes of program_info                   */
+  uint32_t column_usage_mask; /**< Bitmask of columns in use (bit i = col i is
+                                 ON). Persisted with model; excluded from CRC.
+                                 Default 0x0F (all 4 columns active). */
+  uint32_t total_length;      /**< (sizeof(model_meta_t)-8) + info_data_len */
+  uint32_t input_shape[3];    /**< e.g. {49, 10, 1}, zero-padded             */
+  uint32_t output_shape[3];   /**< e.g. {10, 1}, zero-padded               */
+  uint32_t flash_address;     /**< SPI flash addr for data                 */
+  uint32_t is_edge_learned;   /**< 1 = edge-learning model                 */
+  uint32_t num_edge_classes;  /**< upper16=neurons, lower16=classes        */
+  uint32_t info_data_len;     /**< bytes of program_info                   */
   char model_name[MAX_FS_NAME_LEN]; /**< Model name, e.g. "kws"        */
 } model_meta_t;
 
@@ -88,6 +92,12 @@ typedef struct {
  * @brief External reference to the SRAM upload buffer used for DATA transfers.
  */
 extern uint8_t sram_upload_buffer[];
+
+/**
+ * @brief Column usage bitmask (bit i = column i is in use).
+ * Default 0x0F (all columns on). Updated via BLE characteristic f000aa0f.
+ */
+extern uint32_t g_column_usage_mask;
 
 /**
  * @brief Initialise the file transfer BLE service.

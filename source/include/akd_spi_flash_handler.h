@@ -39,6 +39,8 @@ extern const int64_t program_info_len[];
 void akida_config_spi(bool is_mcu_master);
 void init_akd_1500_spi_flash();
 void akida_spiflash_init();
+void turn_off_nodes_npu(uint8_t row, uint8_t collumn, uint8_t np_id);
+void change_akida_core_clock(uint32_t conf_value);
 
 #ifdef __cplusplus
 extern "C" {

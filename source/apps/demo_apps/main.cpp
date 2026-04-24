@@ -1107,6 +1107,24 @@ int main(void) {
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
   printk("NRF_CLOCK_S->HFCLKCTRL: %d\n", NRF_CLOCK_S->HFCLKCTRL);
 
+  //change_akida_core_clock(4);
+  // Enforce data-path chain: cols 1→2→3. If a column is in use, all columns
+  // to its left are required data paths and must not be turned off.
+  // Col 0 does not exist on this 3x3 hardware — loop starts at col 1.
+  uint32_t effective_mask = kws_meta.column_usage_mask;
+  if (effective_mask & (1 << 3)) {
+    effective_mask |= (1 << 1) | (1 << 2); // col 3 needs col 1 and col 2
+  } else if (effective_mask & (1 << 2)) {
+    effective_mask |= (1 << 1); // col 2 needs col 1
+  }
+  for (uint8_t col = 1; col < 4; col++) {
+    if (!(effective_mask & (1 << col))) {
+      turn_off_nodes_npu(0, col, 0x0E);
+      printf("col getting off is = %d\n\r", col);
+    }
+  }
+  printf("column_usage_mask stored=0x%02X effective=0x%02X\n\r",
+         kws_meta.column_usage_mask, effective_mask);
   return 0;
 }
 
