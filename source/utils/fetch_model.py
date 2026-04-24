@@ -16,7 +16,7 @@ def _shapes_json_path(output_dir, prefix):
     return os.path.join(output_dir, f"{prefix}_shapes.json")
 
 
-def _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el=False):
+def _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el=False, column_usage=None):
     """Persist shapes alongside the bin files for reuse on subsequent runs."""
     path = _shapes_json_path(output_dir, prefix)
     with open(path, "w") as f:
@@ -24,30 +24,32 @@ def _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el=False
             "input_shape": list(input_shape),
             "output_shape": list(output_shape),
             "is_el": bool(is_el),
+            "column_usage": column_usage or {f"col_{c}": "yes" for c in range(1, 4)},
         }, f)
     print(f"Shapes saved to {path}")
 
 
 def _load_shapes_json(output_dir, prefix):
-    """Return (input_shape, output_shape, is_el) from the sidecar JSON, or (None, None, False)."""
+    """Return (input_shape, output_shape, is_el, column_usage) from the sidecar JSON, or (None, None, False, None)."""
     path = _shapes_json_path(output_dir, prefix)
     if not os.path.exists(path):
-        return None, None, False
+        return None, None, False, None
     try:
         with open(path) as f:
             d = json.load(f)
         input_shape  = tuple(d["input_shape"])
         output_shape = tuple(d["output_shape"])
         is_el = bool(d.get("is_el", False))
+        column_usage = d.get("column_usage", {f"col_{c}": "yes" for c in range(1, 4)})
         print(f"Loaded shapes from {path}: input={input_shape} output={output_shape} is_el={is_el}")
-        return input_shape, output_shape, is_el
+        return input_shape, output_shape, is_el, column_usage
     except Exception as e:
         print(f"Warning: could not load shapes from {path}: {e}")
-        return None, None, False
+        return None, None, False, None
 
 
 def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                     flash_address, is_el, neurons_per_class, num_el_classes):
+                     flash_address, is_el, neurons_per_class, num_el_classes, column_usage=None):
     """Write info.yaml metadata alongside the bin files."""
     npc = int(neurons_per_class) if neurons_per_class else 1
     num_classes = 0
@@ -56,6 +58,9 @@ def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
             num_classes = int(output_shape[-1] / npc)
         else:
             num_classes = int(output_shape[-1])
+
+    if column_usage is None:
+        column_usage = {f"col_{c}": "yes" for c in range(1, 4)}
 
     data = {
         "app":   prefix,
@@ -68,6 +73,7 @@ def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
             "num_el_classes": int(num_el_classes) if is_el else 0,
             "num_neurons":  npc,
         },
+        "column_usage": column_usage,
     }
 
     yaml_path = os.path.join(output_dir, "info.yaml")
@@ -89,10 +95,10 @@ def fetch_and_convert(args):
     data_file = os.path.join(output_dir, f"{prefix}_program_data.cpp")
     if os.path.exists(info_file) and os.path.exists(data_file):
         print(f"Files exist for prefix '{prefix}'. Skipping generation.")
-        input_shape, output_shape, is_el_cached = _load_shapes_json(output_dir, prefix)
+        input_shape, output_shape, is_el_cached, column_usage = _load_shapes_json(output_dir, prefix)
         _write_info_yaml(output_dir, prefix, input_shape, output_shape,
                          flash_address, is_el_cached,
-                         args.neurons_per_class, args.num_el_classes)
+                         args.neurons_per_class, args.num_el_classes, column_usage)
         _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
         return input_shape, output_shape
 
@@ -144,7 +150,29 @@ def fetch_and_convert(args):
         model_akida = akida.Model(fbz_path)
         device = akida.AKD1500()
         model_akida.map(device=device, mode=akida.MapMode(map_mode))
+        
+        #print ("dir(device)" , dir(device))
+        #print ("dir(model_akida)" , dir(model_akida))
+        
+        layers = model_akida.layers
+        import pdb
 
+        # Collect which columns are in use from NP mapping
+        used_cols = set()
+        for l in layers:
+            #print ("layer: ", l)
+            nps = l.mapping.nps
+            length = len(nps)
+            for item in nps:
+                print(item.ident)
+                if item.ident.col != 0:  # col 0 does not exist on this 3x3 hardware
+                    used_cols.add(item.ident.col)
+        # Build column_usage dict (yes/no for each column 1-3)
+        # col_X is yes only if item.ident.col == X for at least one NP
+        column_usage = {f"col_{c}": ("yes" if c in used_cols else "no") for c in range(1, 4)}
+        print(f"Column usage: {column_usage}")
+        #breakpoint()
+        
         input_shape = model_akida.input_shape
         print("Input shape:", input_shape)
 
@@ -210,10 +238,10 @@ def fetch_and_convert(args):
         print(f"Generated program_info and program_data files for prefix '{prefix}'")
 
     # Persist shapes so re-runs can skip regeneration but still supply shapes
-    _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el)
+    _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el, column_usage)
     _write_info_yaml(output_dir, prefix, input_shape, output_shape,
                      flash_address, is_el,
-                     args.neurons_per_class, args.num_el_classes)
+                     args.neurons_per_class, args.num_el_classes, column_usage)
     _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
     return input_shape, output_shape
 
