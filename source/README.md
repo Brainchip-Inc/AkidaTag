@@ -817,7 +817,6 @@ Use the following commands on the console:
 | `threads_stop` | Terminate all running threads for testing the WDT. |
 | `wdt_disable` | System crash for watchdog validation. |
 | `device_id` | Print device ID |
-| `read_current_ic` | Print both ADC channels (1V8 and 0V8 rails) current |
 | `kws_mode async` | Switches the system to Async mode. |
 | `kws_mode sync` | Switches the system to Sync mode. |
 | `kws_mode_get` | Displays the currently active KWS mode (Sync or Async). |

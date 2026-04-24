@@ -422,6 +422,12 @@ struct k_thread imu_thread;
 k_tid_t imu_tid;
 #endif
 
+#ifdef CONFIG_SPARK_BOARD
+/* CURRENT thread variables*/
+K_THREAD_STACK_DEFINE(current_stack, CURRENT_STACK_SIZE);
+struct k_thread current_thread;
+k_tid_t current_tid;
+#endif
 const struct device *wdt_dev; // Global watchdog device
 void kick_watchdog(void) {
   if (wdt_dev) {
@@ -917,7 +923,18 @@ static int start_led_ind(void) {
   k_thread_start(led_tid);
   return 0;
 }
+#ifdef CONFIG_SPARK_BOARD
+static int start_current_proc(void) {
+  current_tid = k_thread_create(&current_thread, current_stack,
+                                CURRENT_STACK_SIZE, current_data_thread, NULL,
+                                NULL, NULL, CURRENT_PRIORITY, K_USER,
+                                K_FOREVER 
+  );
 
+  k_thread_start(current_tid);
+  return 0;
+}
+#endif
 static void update_model_params(model_meta_t kws_meta) {
   g_input_size = kws_meta.input_shape[0] * kws_meta.input_shape[1] *
                  kws_meta.input_shape[2];
@@ -1232,6 +1249,11 @@ int main(void) {
 #if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
   initialize_spi_camera_interface();
 #endif
+
+#ifdef CONFIG_SPARK_BOARD
+  start_current_proc();
+#endif
+
   // ... inside a function like main() or a separate initialization function
   printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value

@@ -1,7 +1,7 @@
 
 #include "ble_services/ble_initialization.h"
 #ifdef CONFIG_SPARK_BOARD
-#include "current_ic/current_ic.h"
+#include "gpio/gpio.h"
 #endif
 #include "led_init.h"
 #include <hal/nrf_ficr.h>
@@ -88,6 +88,10 @@ uint8_t pdm_stream_flag = FLAG_DISABLE;
  */
 uint8_t app_start_flag = FLAG_DISABLE;
 
+/* Flag indicating whether battery current streaming is active or not.
+ * When set, current values are sent to the phone in real-time.
+ */
+uint8_t current_stream_flag = FLAG_DISABLE;
 #ifdef CONFIG_SPARK_BOARD
 static bat_status previous_bat_status = BAT_NOT_CHARGING;
 #endif
@@ -361,7 +365,29 @@ void send_pdm_data(uint32_t data) {
     LOG_ERR(" Failed to send (err=%d)\n", err);
   }
 }
+#ifdef CONFIG_SPARK_BOARD
+/**
+ * @brief Send current value data to phone for real-time monitoring
+ *
+ * Format: "<CMD_CURRENT_START>:<data_1_8>,<data_0_8>\r"
+ * @param data Pointer to string containing current values to send
+ */
+void send_current_value(char *data) {
+  char frame[FRAME_BUFFER_SIZE];
+  char data_part[DATA_PART_SIZE];
 
+  snprintf(data_part, sizeof(data_part), "%d:%s\r", CMD_CURRENT_START, data);
+  int data_len = strlen(data_part);
+
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
+           data_part);
+
+  int err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send (err=%d)\n", err);
+  }
+}
+#endif
 /**
  * @brief Send a command event frame over the communication channel.
  *
@@ -725,6 +751,7 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
     break;
   case CMD_STREAM_START:
     LOG_INF("STREAM START command received\n");
+    current_stream_flag = FLAG_DISABLE;
     pdm_stream_flag = FLAG_ENABLE;
     break;
   case CMD_DEPLOY_STOP:
@@ -736,6 +763,16 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
     LOG_INF("STREAM STOP command received\n");
     pdm_stream_flag = FLAG_DISABLE;
     send_ack(ACK_DONE, CMD_STREAM_STOP);
+    break;
+  case CMD_CURRENT_START:
+    LOG_INF("STREAM CURRENT START command received\n");
+    pdm_stream_flag = FLAG_DISABLE;
+    current_stream_flag = FLAG_ENABLE;
+    break;
+  case CMD_CURRENT_STOP:
+    LOG_INF("STREAM CURRENT STOP command received\n");
+    current_stream_flag = FLAG_DISABLE;
+    send_ack(ACK_DONE, CMD_CURRENT_START);
     break;
   case CMD_RESET:
     LOG_INF("RESET command received\n");
@@ -816,6 +853,9 @@ static void disconnected_ble(struct bt_conn *conn, uint8_t reason) {
   led_set_state(LED_STATE_NORMAL_APP);
   ble_connection_callback(BLE_NOT_CONNECTED);
   app_start_flag = FLAG_DISABLE;
+  current_stream_flag = FLAG_DISABLE;
+  pdm_stream_flag = FLAG_DISABLE;
+  event_flag = FLAG_DISABLE;
   send_in_progress = false;
 }
 
