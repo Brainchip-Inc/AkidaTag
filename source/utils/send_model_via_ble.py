@@ -100,6 +100,7 @@ TOTAL_LENGTH_CHAR_UUID       = "f000aa0b-0451-4000-b000-000000000000"  # info+da
 IS_EDGE_LEARNED_CHAR_UUID    = "f000aa0c-0451-4000-b000-000000000000"  # 1 = edge-learned model (32-bit LE)
 NUM_EDGE_CLASSES_CHAR_UUID   = "f000aa0d-0451-4000-b000-000000000000"  # number of EL classes (32-bit LE)
 FS_NAME_CHAR_UUID            = "f000aa0e-0451-4000-b000-000000000000"  # LittleFS metadata path (UTF-8)
+COLUMN_USAGE_CHAR_UUID       = "f000aa0f-0451-4000-b000-000000000000"  # column usage bitmask (32-bit LE)
 
 TRANSFER_TYPE_INFO = 0x00
 TRANSFER_TYPE_DATA = 0x01
@@ -151,7 +152,7 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
                              input_shape=None, output_shape=None,
                              flash_address=0x1000,
                              is_edge_learned=False, num_edge_classes=None,
-                             fs_name=None):
+                             fs_name=None, col_usage_mask=0x0E):
     """Transfer one binary file over BLE.
 
     Metadata fields (CRC, total_length, shapes, address, EL fields) are sent
@@ -269,6 +270,14 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent neurons in higher order 16 bites and num_edge_classes in lower 16bits: {classes}")
 
+        # 10. Column usage bitmask (32-bit LE) – which columns are in use
+        await client.write_gatt_char(
+            COLUMN_USAGE_CHAR_UUID,
+            col_usage_mask.to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent column usage mask: 0x{col_usage_mask:02X} (cols in use as bitmask)")
+
         # (fs_name already sent before file_size – see step 1b above)
 
     # Stream file data in chunks
@@ -315,7 +324,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
                     input_shape=None, output_shape=None,
                     flash_address=0x1000,
                     is_edge_learned=False, num_edge_classes=None,
-                    fs_name=None, model_name=""):
+                    fs_name=None, model_name="", col_usage_mask=0x0E):
     source_file = filepath or info_path
     try:
         APP = detect_app_index(source_file)
@@ -376,6 +385,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
                 is_edge_learned=is_edge_learned,
                 num_edge_classes=num_edge_classes,
                 fs_name=fs_name,
+                col_usage_mask=col_usage_mask,
             )
             if not ok:
                 print("Info transfer failed, aborting.")
@@ -410,6 +420,14 @@ def _load_info_yaml(yaml_path):
     flash_address = int(str(raw_addr), 0) if isinstance(raw_addr, str) else int(raw_addr)
 
     el = data.get("edge_learning", {})
+
+    # Parse column_usage and convert to 4-bit bitmask (bit i=1 means col i is ON)
+    cu = data.get("column_usage", {})
+    col_usage_mask = 0
+    for i in range(1, 4):
+        if cu.get(f"col_{i}", "yes") == "yes":
+            col_usage_mask |= (1 << i)
+
     return {
         "model_name":       str(data.get("app", data.get("model_name", ""))),
         "flash_address":    flash_address,
@@ -419,6 +437,7 @@ def _load_info_yaml(yaml_path):
         "num_classes":      int(el.get("num_classes",  0)),
         "neurons_per_class": int(el.get("num_neurons", 1)),
         "num_el_classes":   int(el.get("num_el_classes", 0)),
+        "col_usage_mask":   col_usage_mask,
     }
 
 
@@ -471,6 +490,9 @@ async def main(args):
     # model_name: from YAML field (e.g. "kws"), falls back to empty string
     model_name = yaml_meta["model_name"] if yaml_meta else ""
 
+    # col_usage_mask: column usage bitmask from YAML (default 0x0E = columns 1-3 on)
+    col_usage_mask = yaml_meta["col_usage_mask"] if yaml_meta else 0x0E
+
     # Default fs_name derived from prefix when not supplied
     fs_name = args.fs_name
     if not fs_name:
@@ -485,6 +507,7 @@ async def main(args):
     print(f"Flash address: {flash_address_str}")
     print(f"Edge-learned:  {is_edge_learned}")
     print(f"FS name:       {fs_name}")
+    print(f"Column usage:  0x{col_usage_mask:02X}")
 
     print("\nScanning for BLE devices...")
     devices = await BleakScanner.discover(timeout=5.0)
@@ -529,6 +552,7 @@ async def main(args):
         num_edge_classes=packed_classes,
         fs_name=fs_name,
         model_name=model_name,
+        col_usage_mask=col_usage_mask,
     )
 
 
