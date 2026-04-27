@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 
 #define BQ27427_I2C_ADDR 0x55
 
@@ -33,10 +34,8 @@
 #define BQ27427_FLAG_BAT_DET BIT(3)   /* battery detected        */
 #define BQ27427_FLAG_CFGUPMODE BIT(4) /* config update mode      */
 #define BQ27427_FLAG_ITPOR BIT(5)     /* POR occurred — in FLAGS */
-
-#define BQ27427_CSTS_INITCOMP BIT(7) /* init complete — in CSTS */
-#define BQ27427_CSTS_SS BIT(13)      /* sealed — in CSTS        */
-/*As per */
+#define BQ27427_CSTS_SS BIT(13)       /* sealed — in CSTS        */
+/*As per 1100 mah battery*/
 #define BATTERY_DESIGN_CAPACITY 1100
 #define BATTERY_DESIGN_ENERGY 4070
 #define BATTERY_TERMINATE_VOLTAGE 3000
@@ -58,17 +57,11 @@
 #define BQ27427_CCGAIN_OFFSET 5
 #define BQ27427_CCGAIN_SIGN_BIT 0x80
 
-#define SAMPLE_INTERVAL_MS 1000
-#define FLAG_ENABLE 1
-#define FLAG_DISABLE 0
 #define BQ27427_DEVICE_TYPE 0x0427
 #define BQ27427_CHEM_ID_1202 0x1202
 #define SAMPLES_COUNT 10
 #define FG_DATA_MEMORY_BLOCK_SIZE 32
 #define FG_DATA_MEMORY_WRITE_BUFFER_SIZE (FG_DATA_MEMORY_BLOCK_SIZE + 1)
-
-/* Flag set by ISR when fuel gauge SOC changes */
-extern volatile uint8_t fg_int_flag;
 
 int fuel_gauge_init(void);
 int fuel_gauge_get_soc(void);

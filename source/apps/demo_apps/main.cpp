@@ -63,9 +63,9 @@ extern "C" {
 #include "imu_h/imu.h"
 #endif
 #ifdef CONFIG_SPARK_BOARD
+#include "battery/battery.h"
+#include "ble_services/battery_service.h"
 #include "button/user_button.h"
-#include "current_ic/current_ic.h"
-#include "fuel_gauge/fuel_gauge.h"
 #include "gpio/gpio.h"
 #endif
 #include "led_init.h"
@@ -1085,15 +1085,10 @@ int main(void) {
     printk("User button init failed\n");
   }
   spark_peripherals_power_enable();
-  err_gpio = bat_sts_gpio_init();
-  if (err_gpio) {
-    printf("Battery status GPIO init failed (err %d)\n", err_gpio);
-  }
-  int ret = current_ic_init();
+  int ret = battery_init();
   if (ret) {
-    printf("Current ic init failed (err %d)\n", ret);
+    printf("Battery init failed (err %d)\n", ret);
   }
-
 #endif
   uart_init();
   start_led_ind();
@@ -1128,14 +1123,8 @@ int main(void) {
 
   init_boot_count();
 #ifdef CONFIG_SPARK_BOARD
-  err = fuel_gauge_init();
-  if (err) {
-    printk("Fuel gauge init failed (err %d)\n", err);
-  }
-  err = fuel_gauge_isr_init();
-  if (err) {
-    printk("Fuel gauge isr init failed (err %d)\n", err);
-  }
+  /* Battery thread runs fuel_gauge_init in the background — boot continues. */
+  battery_start();
 #endif
 
   cli_worker_tid = k_thread_create(
@@ -1263,10 +1252,11 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
 #endif
 #ifdef CONFIG_SPARK_BOARD
     if (is_ble_connected() && app_start_flag) {
-      send_battery_response(CMD_STREAM_STS);
+      battery_service_send(CMD_STREAM_STS);
     }
 #endif
     process_led();
+    k_msleep(1000);
   }
 }
 

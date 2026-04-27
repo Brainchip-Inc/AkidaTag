@@ -1,9 +1,8 @@
 
 #include "ble_services/ble_initialization.h"
-#ifdef CONFIG_SPARK_BOARD
-#include "current_ic/current_ic.h"
-#include "fuel_gauge/fuel_gauge.h"
-#endif
+#include "ble_services/battery_service.h"
+#include "ble_services/ble_frame.h"
+
 #include "led_init.h"
 #include <hal/nrf_ficr.h>
 #include <zephyr/logging/log.h>
@@ -49,7 +48,6 @@ static bool app_button_state;
 
 #endif
 
-static int8_t battery_level = 97; // dummy battery level for testing
 static struct bt_conn *current_conn = NULL;
 static bool notifications_enabled = false;
 static bool send_in_progress = false;
@@ -89,9 +87,6 @@ uint8_t pdm_stream_flag = FLAG_DISABLE;
  */
 uint8_t app_start_flag = FLAG_DISABLE;
 
-#ifdef CONFIG_SPARK_BOARD
-static bat_status previous_bat_status = BAT_NOT_CHARGING;
-#endif
 /*==================== ADVERTISING DATA ====================
  * Manufacturer data is encoded in ASCII (hex values of characters)
  * instead of raw numeric values. This allows the mobile phone BLE application
@@ -150,7 +145,7 @@ static const struct bt_data sd[] = {
  * @param frame Null-terminated string to send
  * @return int 0 on success, negative error code on failure
  */
-static int send_frame(const char *frame) {
+int ble_send_frame(const char *frame) {
   int len;
   const int max_retries = 10;
 
@@ -225,53 +220,6 @@ static bool parse_incoming_frame(const char *data, parsed_frame_t *frame) {
 }
 
 /**
- * @brief Send battery level response to phone
- *
- * Format: "0,0,<size>,0:<level>,<Status>\r"
- * Updates GATT characteristic and sends via NUS.
- * @param cmd Command type - CMD_BATTERY for on-demand, CMD_STREAM_STS for
- * streaming
- */
-void send_battery_response(command_type_t cmd) {
-  char frame[FRAME_BUFFER_SIZE];
-  char data_part[DATA_PART_SIZE];
-#ifdef CONFIG_SPARK_BOARD
-  bat_status current_status = BAT_NOT_CHARGING;
-  current_status = check_bat_status();
-  battery_level = fuel_gauge_get_soc();
-  if (current_status == BAT_READ_FAILED || battery_level < 0) {
-    LOG_ERR("Failed to read battery status and soc (err sts= %d, soc= %d)\n",
-            current_status, battery_level);
-    return;
-  } else if (cmd != CMD_BATTERY) {
-    if (current_status == previous_bat_status && fg_int_flag == FLAG_DISABLE) {
-      return;
-    }
-    previous_bat_status = current_status;
-  }
-#else
-  int current_status = DUMMY_BATTERY_STATUS; // default / dummy for DK
-#endif
-
-  snprintf(data_part, sizeof(data_part), "%d:%d,%d\r", CMD_BATTERY,
-           battery_level, current_status);
-  int data_len = strlen(data_part);
-
-  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
-           data_part);
-
-  int err = send_frame(frame);
-#ifdef CONFIG_SPARK_BOARD
-  fg_int_flag = FLAG_DISABLE;
-#endif
-  if (err) {
-    LOG_ERR("Failed to send (err=%d)\n", err);
-  } else {
-    LOG_INF("Data part: \"%s\" (len=%d) [cmd=%d]\n", data_part, data_len, cmd);
-  }
-}
-
-/**
  * @brief Send device information as multi-frame response
  *
  * Splits device info into multiple frames:
@@ -297,7 +245,7 @@ static void send_device_info_response(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -311,7 +259,7 @@ static void send_device_info_response(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -325,7 +273,7 @@ static void send_device_info_response(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -339,7 +287,7 @@ static void send_device_info_response(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -362,7 +310,7 @@ void send_pdm_data(uint32_t data) {
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
            data_part);
 
-  int err = send_frame(frame);
+  int err = ble_send_frame(frame);
   if (err) {
     LOG_ERR(" Failed to send (err=%d)\n", err);
   }
@@ -372,7 +320,7 @@ void send_pdm_data(uint32_t data) {
  * @brief Send a command event frame over the communication channel.
  *
  * Constructs a framed message with the given command ID, label, and numeric
- * value, then transmits it via send_frame().
+ * value, then transmits it via ble_send_frame().
  *
  * Format: "<FRAME_SINGLE>,<seq>,<data_len>,<cmd>:<label>,<value>\r"
  * Example: "1,0,12,11:cat,0.91\r"
@@ -394,7 +342,7 @@ void send_event(int cmd, const char *label, float value) {
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
            data_part);
 
-  int err = send_frame(frame);
+  int err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send event (cmd=%d label=%s err=%d)", cmd, label, err);
   } else {
@@ -423,7 +371,7 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
            data_part);
 
-  int err = send_frame(frame);
+  int err = ble_send_frame(frame);
   if (err) {
     LOG_ERR(" Failed to send ACK (err=%d)\n", err);
   } else {
@@ -443,7 +391,7 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
  *
  *     FRAME_TYPE,FRAME_INDEX,DATA_LENGTH,DATA
  *
- * Frames are transmitted sequentially using the `send_frame()` function.
+ * Frames are transmitted sequentially using the ble_send_frame() function.
  *
  * Frame Structure:
  * - Frame 1: MF-START - Application name
@@ -470,7 +418,7 @@ static void app_display(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -484,7 +432,7 @@ static void app_display(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -498,7 +446,7 @@ static void app_display(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -517,7 +465,7 @@ static void app_display(void) {
  *
  *     FRAME_TYPE,FRAME_INDEX,DATA_LENGTH,DATA
  *
- * Frames are transmitted sequentially using the `send_frame()` function.
+ * Frames are transmitted sequentially using the ble_send_frame() function.
  *
  * Frame Structure:
  * - Frame 1: MF-START - Processor information
@@ -546,7 +494,7 @@ static void app_info(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -560,7 +508,7 @@ static void app_info(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -574,7 +522,7 @@ static void app_info(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -589,7 +537,7 @@ static void app_info(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -604,7 +552,7 @@ static void app_info(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -617,7 +565,7 @@ static void app_info(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -631,7 +579,7 @@ static void app_info(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -645,7 +593,7 @@ static void app_info(void) {
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
           data_len);
-  err = send_frame(frame);
+  err = ble_send_frame(frame);
   if (err) {
     LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
     return;
@@ -714,7 +662,7 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
 
   case CMD_BATTERY:
     LOG_INF("BATTERY command received\n");
-    send_battery_response(CMD_BATTERY);
+    battery_service_send(CMD_BATTERY);
     break;
 
   case CMD_DEVICE_INFO:
@@ -823,6 +771,9 @@ static void disconnected_ble(struct bt_conn *conn, uint8_t reason) {
   ble_connection_callback(BLE_NOT_CONNECTED);
   app_start_flag = FLAG_DISABLE;
   send_in_progress = false;
+#ifdef CONFIG_SPARK_BOARD
+  battery_service_on_disconnect();
+#endif
 }
 
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED

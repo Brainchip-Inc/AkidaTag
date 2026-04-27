@@ -38,9 +38,6 @@ extern struct k_sem led_sem;
  */
 #define LED_TICK_MS 120
 
-#define RUN_STATUS_LED DK_LED1
-
-#define RUN_LED_BLINK_INTERVAL 1000
 /**
  * @brief LED indication states.
  *

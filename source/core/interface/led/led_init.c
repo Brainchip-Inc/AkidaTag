@@ -1,6 +1,10 @@
 #include "led/led_init.h"
 #include <zephyr/sys/atomic.h>
 
+#ifdef CONFIG_DK_BOARD
+#define RUN_STATUS_LED DK_LED1
+#endif
+
 /*
  * Global semaphore used to synchronize the LED indication thread with
  * dmic_capture_thread
@@ -18,7 +22,9 @@ static atomic_t current_state = ATOMIC_INIT(LED_STATE_NORMAL_APP);
 
 static atomic_t ble_connected = ATOMIC_INIT(0);
 
+#ifdef CONFIG_DK_BOARD
 static int blink_status = 0;
+#endif
 /**
  * @brief Turn ON the RED LED.
  *
@@ -239,16 +245,14 @@ void led_ind_thread(void *a, void *b, void *c) {
  */
 void led_set_state(led_state_t state) { atomic_set(&current_state, state); }
 /**
- * @brief Blink the run status LED to indicate system is alive
+ * @brief Toggle the run status LED to indicate system is alive
  *
- * The LED toggles every RUN_LED_BLINK_INTERVAL milliseconds:
- *
- * Note: This function is only available when CONFIG_DK_BOARD is enabled.
- * @return void
+ * Pure LED toggle — no sleep. The caller is responsible for pacing
+ * (e.g. a k_msleep in the worker loop). On Spark this is a no-op since
+ * there is no dedicated run status LED.
  */
 void process_led(void) {
 #ifdef CONFIG_DK_BOARD
   dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
 #endif
-  k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 }

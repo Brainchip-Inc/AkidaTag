@@ -1,4 +1,5 @@
 #include "fuel_gauge/fuel_gauge.h"
+#include "battery/battery.h"
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
@@ -6,32 +7,24 @@
 #include <zephyr/sys/printk.h>
 
 /* ========== I2C ========== */
-const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-
+static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+#define BQ27427_FLAG_BAT_DET (1 << 3)
 /* ========== Interrupt GPIO ========== */
 #define FG_INT_NODE DT_ALIAS(fg_int)
 static const struct gpio_dt_spec fg_int = GPIO_DT_SPEC_GET(FG_INT_NODE, gpios);
 static struct gpio_callback fg_int_cb;
 
-volatile uint8_t fg_int_flag = FLAG_DISABLE;
-
 /**
  * @brief Interrupt handler for fuel gauge SOC change notification
  *
- * Called when the fuel gauge pulses the GPOUT pin
- * Sets fg_int_flag to indicate that SOC has changed and new value needs to be
- * sent to the phone app.
- *
- * The flag is cleared after sending the updated SOC value.
- *
- * @param port GPIO device that triggered the interrupt (unused)
- * @param cb Callback structure (unused)
- * @param pins Bitmask of pins that triggered interrupt (unused)
+ * Called from ISR context when the BQ27427 pulses its GPOUT / SOC_INT pin
+ * on a SOC change. Notifies the battery module via a semaphore so the
+ * battery thread can read the new SOC outside ISR context.
  */
 /* ========== Interrupt Thread ========== */
 static void fg_int_handler(const struct device *port, struct gpio_callback *cb,
                            gpio_port_pins_t pins) {
-  fg_int_flag = FLAG_ENABLE;
+  battery_isr_notify();
 }
 
 /**
@@ -168,7 +161,7 @@ static int fg_enter_config_update(void) {
       printk("[BQ27427] CONFIG UPDATE entered\n");
       return 0;
     }
-    k_msleep(100);
+    k_msleep(50);
   }
   printk("[BQ27427] CFGUPMODE not set\n");
   return -ETIMEDOUT;
@@ -199,13 +192,13 @@ static int fg_unseal(void) {
     printk("[BQ27427] CTRL_UNSEAL read failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(2); /* Allow gauge to unseal */
+  k_msleep(1); /* Allow gauge to unseal */
   ret = fg_control(BQ27427_CTRL_UNSEAL, BQ27427_CMD_NULL);
   if (ret) {
     printk("[BQ27427] CTRL_UNSEAL read failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(2); /* Allow gauge to unseal */
+  k_msleep(1); /* Allow gauge to unseal */
   ret = fg_control(BQ27427_CTRL_STATUS, &csts);
   if (ret) {
     printk("[BQ27427] CTRL_STATUS read failed (%d)\n", ret);
@@ -218,6 +211,15 @@ static int fg_unseal(void) {
   printk("[BQ27427] UNSEALED\n");
   return 0;
 }
+/**
+ * @brief Exit CONFIG UPDATE mode via SOFT_RESET and resume normal operation
+ *
+ * Sends SOFT_RESET command and polls CFGUPMODE bit for up to 1 second.
+ * Must be called after writing configuration parameters.
+ *
+ * @return 0 on success, -ETIMEDOUT if CFGUPMODE not cleared, negative on I2C
+ * error
+ */
 static int fg_exit_config_update(void) {
   int ret;
   ret = fg_control(BQ27427_CTRL_SOFT_RESET, BQ27427_CMD_NULL);
@@ -285,13 +287,13 @@ static int fg_set_chem_id_1202(void) {
     printk("[BQ27427] CHEM_B command failed (%d)\n", ret);
     return ret;
   }
-  /* 100ms delay after CHEM_B command:
+  /* 1000ms delay after CHEM_B command:
    * Allows the gauge sufficient time to process the chemistry change
    * and update internal tables before exiting CONFIG UPDATE mode.
    * Without this delay, the SOFT_RESET might occur before the chemistry
    * change is fully committed to RAM.
    */
-  k_msleep(100);
+  k_msleep(1000);
 
   ret = fg_exit_config_update();
   if (ret) {
@@ -299,7 +301,7 @@ static int fg_set_chem_id_1202(void) {
     return ret;
   }
   /* Wait for gauge to settle after SOFT_RESET before verification */
-  k_msleep(100);
+  k_msleep(10);
 
   ret = fg_control(BQ27427_CTRL_CHEM_ID, &chem_id);
   if (ret) {
@@ -330,21 +332,21 @@ static int fg_write_battery_params(void) {
     printk("[BQ27427] Block data control write failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(2); /* Allow gauge to enable block access mode */
+  k_msleep(1); /* Allow gauge to enable block access mode */
 
   ret = fg_write_byte(BQ27427_EXT_DATA_CLASS, BQ27427_SUBCLASS_STATE);
   if (ret) {
     printk("[BQ27427] Data class write failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(2); /* Allow gauge to load subclass into internal buffer */
+  k_msleep(1); /* Allow gauge to load subclass into internal buffer */
 
   ret = fg_write_byte(BQ27427_EXT_DATA_BLOCK, BQ27427_STATE_BLOCK);
   if (ret) {
     printk("[BQ27427] Data block write failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(2); /* Allow gauge to populate block data buffer */
+  k_msleep(1); /* Allow gauge to populate block data buffer */
 
   /* Read current block */
   uint8_t block[FG_DATA_MEMORY_BLOCK_SIZE] = {0};
@@ -386,7 +388,7 @@ static int fg_write_battery_params(void) {
     printk("[BQ27427] Checksum write failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(10); /* Allow gauge to verify and store checksum before readback */
+  k_msleep(5); /* Allow gauge to verify and store checksum before readback */
 
   printk("[BQ27427] Battery params written OK "
          "(Cap=%dmAh, Energy=%dmWh, TermV=%dmV, Taper=%d)\n",
@@ -417,7 +419,7 @@ static int fg_signal_bat_insert(void) {
     printk("[BQ27427] BAT_REMOVE command failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(10); /* Allow gauge to process BAT_REMOVE before BAT_INSERT */
+  k_msleep(5); /* Allow gauge to process BAT_REMOVE before BAT_INSERT */
 
   ret = fg_control(BQ27427_CTRL_BAT_INSERT, BQ27427_CMD_NULL);
   if (ret) {
@@ -441,7 +443,7 @@ static int fg_signal_bat_insert(void) {
       printk("[BQ27427] BAT_DET=1 — NORMAL mode\n");
       return 0;
     }
-    k_msleep(100);
+    k_msleep(50);
   }
   printk("[BQ27427] WARNING: BAT_DET still 0 after 1 s\n");
   return -ETIMEDOUT;
@@ -463,21 +465,21 @@ static int fg_fix_ccgain_tracked(void) {
     printk("[BQ27427] Block data control write failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(2); /* Allow gauge to enable block access mode */
+  k_msleep(1); /* Allow gauge to enable block access mode */
 
   ret = fg_write_byte(BQ27427_EXT_DATA_CLASS, BQ27427_SUBCLASS_CCGAIN);
   if (ret) {
     printk("[BQ27427] Data class write failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(2); /* Allow gauge to load subclass into internal buffer */
+  k_msleep(1); /* Allow gauge to load subclass into internal buffer */
 
   ret = fg_write_byte(BQ27427_EXT_DATA_BLOCK, BQ27427_CCGAIN_BLOCK);
   if (ret) {
     printk("[BQ27427] Data block write failed (%d)\n", ret);
     return ret;
   }
-  k_msleep(2); /* Allow gauge to populate block data buffer after selecting
+  k_msleep(1); /* Allow gauge to populate block data buffer after selecting
                   block 0 */
 
   uint8_t block[FG_DATA_MEMORY_BLOCK_SIZE] = {0};
@@ -636,20 +638,14 @@ int fuel_gauge_init(void) {
     /*Allow gauge to stabilize after BAT_INSERT
      *(BAT_DET typically sets within 100-200ms)
      */
-    k_msleep(200);
+    k_msleep(100);
     ret = fg_control(BQ27427_CTRL_SMOOTH_SYNC, BQ27427_CMD_NULL);
     if (ret) {
       printk("[BQ27427] SMOOTH_SYNC failed %d\n", ret);
     }
     printk("[BQ27427] SMOOTH_SYNC sent\n");
   } else {
-    uint16_t f = 0;
-    ret = fg_read_word(BQ27427_CMD_FLAGS, &f);
-    if (ret) {
-      printk("[BQ27427] CMD_FLAGS failed %d\n", ret);
-      return ret;
-    }
-    printk("[BQ27427] BAT_DET=%d\n", (f & BQ27427_FLAG_BAT_DET) ? 1 : 0);
+    printk("[BQ27427] Already Initialized\n");
   }
   return 0;
 }

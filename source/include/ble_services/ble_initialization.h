@@ -14,7 +14,6 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/settings/settings.h>
 
-#define DUMMY_BATTERY_STATUS 0
 /**
  * @brief 128-bit unsigned integer using two 64-bit values.
  *
@@ -79,7 +78,6 @@ extern uint32_t g_num_classes;
 extern uint8_t adv_manufacturer_data[];
 
 int ble_init(void);
-void send_battery_response(command_type_t cmd);
 /*
  * Send PDM audio data to the phone.
  * Used for real-time audio level visualization over BLE.
