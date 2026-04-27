@@ -66,7 +66,11 @@ int current_ic_init(void) {
         .buffer = &buf,
         .buffer_size = sizeof(buf),
     };
-    (void)adc_sequence_init_dt(&adc_channels[i], &sequences[i]);
+    err = adc_sequence_init_dt(&adc_channels[i], &sequences[i]);
+    if (err < 0) {
+      printk("ADC sequence init failed for channel %d: %d\n", i, err);
+      return err;
+    }
   }
   return 0;
 }
@@ -80,18 +84,27 @@ int current_ic_init(void) {
  * current for each channel. When all channels have reported their
  * averages, prints the total combined average current.
  *
- * @return int Always returns 0 (read errors are logged but don't stop
- * execution)
  */
 void current_data_thread(void *a, void *b, void *c) {
   int err;
   char data[DATA_BUFF_SIZE] = {0};
 
   while (1) {
-    float sum_1v8 = 0.0f;
-    float sum_0v8 = 0.0f;
 
-    if (is_ble_connected() && current_stream_flag) {
+    k_sem_take(&current_stream_sem, K_FOREVER); // sleep until signaled
+
+    printk("Current streaming started\n");
+
+    while (current_stream_flag == FLAG_ENABLE) {
+
+      // Guard: if BLE dropped, stop immediately
+      if (!is_ble_connected()) {
+        printk("BLE disconnected during current stream, stopping\n");
+        current_stream_flag = FLAG_DISABLE;
+        break;
+      }
+      float sum_1v8 = 0.0f;
+      float sum_0v8 = 0.0f;
       for (int cnt = 0; cnt < AVG_SAMPLES; cnt++) {
         // Channel 0 — 1V8 rail
         err = adc_read_dt(&adc_channels[ADC_CH_0], &sequences[ADC_CH_0]);
@@ -123,17 +136,28 @@ void current_data_thread(void *a, void *b, void *c) {
       float avg_0v8 = sum_0v8 / AVG_SAMPLES;
       printk("CH0 1V8 Avg Current: %.2f mA\n", (double)avg_1v8);
       printk("CH1 0V8 Avg Current: %.2f mA\n", (double)avg_0v8);
-      int int_1v8 = (int)avg_1v8;
-      int frac_1v8 = (int)((avg_1v8 - int_1v8) * 100);
+      /* Handle sign separately */
+      int sign_1v8 = (avg_1v8 < 0) ? -1 : 1;
+      int sign_0v8 = (avg_0v8 < 0) ? -1 : 1;
 
-      int int_0v8 = (int)avg_0v8;
-      int frac_0v8 = (int)((avg_0v8 - int_0v8) * 100);
+      /* Work with absolute values */
+      float abs_1v8 = avg_1v8 * sign_1v8;
+      float abs_0v8 = avg_0v8 * sign_0v8;
 
-      snprintf(data, sizeof(data), "%d.%02d,%d.%02d", int_1v8, frac_1v8,
-               int_0v8, frac_0v8);
+      /* Split into integer and fractional parts */
+      int int_1v8 = (int)abs_1v8;
+      int frac_1v8 = (int)((abs_1v8 - int_1v8) * 100);
+
+      int int_0v8 = (int)abs_0v8;
+      int frac_0v8 = (int)((abs_0v8 - int_0v8) * 100);
+
+      /* Format with sign added explicitly */
+      snprintf(data, sizeof(data), "%s%d.%02d,%s%d.%02d",
+               (sign_1v8 < 0 ? "-" : ""), int_1v8, frac_1v8,
+               (sign_0v8 < 0 ? "-" : ""), int_0v8, frac_0v8);
 
       send_current_value(data);
+      k_msleep(50);
     }
-    k_msleep(1);
   }
 }

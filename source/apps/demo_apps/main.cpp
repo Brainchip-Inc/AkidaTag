@@ -925,11 +925,9 @@ static int start_led_ind(void) {
 }
 #ifdef CONFIG_SPARK_BOARD
 static int start_current_proc(void) {
-  current_tid = k_thread_create(&current_thread, current_stack,
-                                CURRENT_STACK_SIZE, current_data_thread, NULL,
-                                NULL, NULL, CURRENT_PRIORITY, K_USER,
-                                K_FOREVER 
-  );
+  current_tid = k_thread_create(
+      &current_thread, current_stack, CURRENT_STACK_SIZE, current_data_thread,
+      NULL, NULL, NULL, CURRENT_PRIORITY, K_USER, K_FOREVER);
 
   k_thread_start(current_tid);
   return 0;

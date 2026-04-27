@@ -93,6 +93,7 @@ uint8_t app_start_flag = FLAG_DISABLE;
  */
 uint8_t current_stream_flag = FLAG_DISABLE;
 #ifdef CONFIG_SPARK_BOARD
+K_SEM_DEFINE(current_stream_sem, 0, 1);
 static bat_status previous_bat_status = BAT_NOT_CHARGING;
 #endif
 /*==================== ADVERTISING DATA ====================
@@ -768,11 +769,14 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
     LOG_INF("STREAM CURRENT START command received\n");
     pdm_stream_flag = FLAG_DISABLE;
     current_stream_flag = FLAG_ENABLE;
+    #ifdef CONFIG_SPARK_BOARD
+      k_sem_give(&current_stream_sem);
+    #endif
     break;
   case CMD_CURRENT_STOP:
     LOG_INF("STREAM CURRENT STOP command received\n");
     current_stream_flag = FLAG_DISABLE;
-    send_ack(ACK_DONE, CMD_CURRENT_START);
+    send_ack(ACK_DONE, CMD_CURRENT_STOP);
     break;
   case CMD_RESET:
     LOG_INF("RESET command received\n");
