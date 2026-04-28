@@ -1,6 +1,8 @@
 #ifndef CURRENT_IC_H
 #define CURRENT_IC_H
 
+#define CURRENT_STACK_SIZE 1024
+#define CURRENT_PRIORITY 5
 #define AVG_SAMPLES 20
 #define ADC_MAX_VALUE 4095.0f
 #define ADC_REF_MV_1v8 1800.0f
@@ -22,8 +24,8 @@ int bat_sts_gpio_init(void);
 /* Initializes ADC channels for current monitoring IC */
 int current_ic_init(void);
 
-/* Reads and averages current measurements from monitoring IC */
-int read_current_ic(void);
+/* thread to reads and averages current measurements from monitoring IC */
+void current_data_thread(void *a, void *b, void *c);
 
 /* Gets current battery charger status from GPIO pins */
 bat_status check_bat_status(void);

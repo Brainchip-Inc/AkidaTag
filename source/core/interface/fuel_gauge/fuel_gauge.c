@@ -668,7 +668,6 @@ int fuel_gauge_get_soc(void) {
     printk("[BQ27427] Read error (%d)\n", ret);
     return -1;
   }
-  printk("  SOC      : %u %%\n", soc_pct);
   return soc_pct;
 }
 
