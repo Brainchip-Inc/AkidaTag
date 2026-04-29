@@ -778,7 +778,6 @@ static struct bt_nus_cb nus_callbacks = {
     .send_enabled = nus_send_enabled_cb,
 };
 static void connected_ble(struct bt_conn *conn, uint8_t err) {
-  char addr[BT_ADDR_LE_STR_LEN];
 
   if (err) {
     LOG_ERR("Connection failed (err 0x%02x)\n", err);
@@ -786,10 +785,11 @@ static void connected_ble(struct bt_conn *conn, uint8_t err) {
   }
   led_set_state(LED_STATE_BLE_CONNECTED);
   ble_connection_callback(BLE_CONNECTED);
-  LOG_INF("connected_ble: %s\n", addr);
+  LOG_INF("connected_ble\n");
   current_conn = bt_conn_ref(conn);
 
 #ifdef CONFIG_BT_ENCRYPTION_EN
+  char addr[BT_ADDR_LE_STR_LEN];
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
   // FORCE SECURITY UPGRADE TO LEVEL 4
@@ -975,7 +975,7 @@ int ble_init(void)
   err = bt_nus_init(&nus_callbacks);
   if (err) {
     LOG_ERR("NUS init failed (err %d)\n", err);
-    return 0;
+    return -1;
   }
   LOG_INF("NUS initialized\n");
   if (IS_ENABLED(CONFIG_SETTINGS)) {

@@ -155,15 +155,23 @@ bat_status check_bat_status(void) {
   }
 }
 /**
- * @brief Read and average current measurements from the current monitoring IC
- *
- * Samples all ADC channels, converts raw ADC values to millivolts,
- * then to milliamps using shunt resistor gain. Accumulates samples
- * per channel until AVG_SAMPLES is reached, then prints the average
- * current for each channel. When all channels have reported their
- * averages, prints the total combined average current.
- *
+ *@brief Read and average current measurements from the current monitoring IC
+
+ * Periodically samples ADC channels corresponding to different voltage rails.
+ * Each channel is read up to AVG_SAMPLES times, and raw ADC values are
+ converted
+ * to millivolts and then to milliamps using the respective shunt resistor gain.
+
+ * ADC read failures are skipped, and only successfully acquired samples are
+ * accumulated. The average current for each channel is computed using the
+ * number of valid samples to avoid bias due to read errors.
+
+ * If no valid samples are available for a channel, its average is reported as
+ zero.
+ * The computed averages are formatted and transmitted over BLE while streaming
+ * is enabled.
  */
+
 void current_data_thread(void *a, void *b, void *c) {
   int err;
   char data[DATA_BUFF_SIZE] = {0};
@@ -184,6 +192,8 @@ void current_data_thread(void *a, void *b, void *c) {
       }
       float sum_1v8 = 0.0f;
       float sum_0v8 = 0.0f;
+      int valid_cnt_1v8 = 0;
+      int valid_cnt_0v8 = 0;
       for (int cnt = 0; cnt < AVG_SAMPLES; cnt++) {
         // Channel 0 — 1V8 rail
         err = adc_read_dt(&adc_channels[ADC_CH_0], &sequences[ADC_CH_0]);
@@ -193,6 +203,7 @@ void current_data_thread(void *a, void *b, void *c) {
         }
         float val_mv = (float)(int32_t)buf * adc_scale;
         sum_1v8 += val_mv / SHUNT_RESISTOR_GAIN_1V8;
+        valid_cnt_1v8++;
         k_msleep(10);
       }
 
@@ -208,13 +219,19 @@ void current_data_thread(void *a, void *b, void *c) {
         }
         float val_mv = (float)(int32_t)buf * adc_scale;
         sum_0v8 += val_mv / SHUNT_RESISTOR_GAIN_0V8;
+        valid_cnt_0v8++;
         k_msleep(10);
       }
 
-      float avg_1v8 = sum_1v8 / AVG_SAMPLES;
-      float avg_0v8 = sum_0v8 / AVG_SAMPLES;
-      printk("CH0 1V8 Avg Current: %.2f mA\n", (double)avg_1v8);
-      printk("CH1 0V8 Avg Current: %.2f mA\n", (double)avg_0v8);
+      // Avoid divide-by-zero
+      float avg_1v8 = (valid_cnt_1v8 > 0) ? (sum_1v8 / valid_cnt_1v8) : 0.0f;
+      float avg_0v8 = (valid_cnt_0v8 > 0) ? (sum_0v8 / valid_cnt_0v8) : 0.0f;
+
+      printk("CH0 1V8 Avg Current: %.2f mA (valid=%d)\n", (double)avg_1v8,
+             valid_cnt_1v8);
+      printk("CH1 0V8 Avg Current: %.2f mA (valid=%d)\n", (double)avg_0v8,
+             valid_cnt_0v8);
+
       /* Handle sign separately */
       int sign_1v8 = (avg_1v8 < 0) ? -1 : 1;
       int sign_0v8 = (avg_0v8 < 0) ? -1 : 1;

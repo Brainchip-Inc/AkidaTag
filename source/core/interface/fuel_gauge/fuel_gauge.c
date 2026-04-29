@@ -548,12 +548,17 @@ static int fg_fix_ccgain_tracked(void) {
  * 2. Unseal the device for configuration access
  * 3. Read ITPOR flag to determine if config was lost
  * 4. Set Chem ID to 0x1202 (4.2V Li-ion) if needed
+ *
+ * If ITPOR=1 (config lost):
  * 5. Enter CONFIG UPDATE mode
- * 6. Write battery params only on ITPOR=1 (config lost)
- * 7. Fix CCGain sign bit (always, every boot)
+ * 6. Write battery params
+ * 7. Fix CCGain sign bit
  * 8. Exit CONFIG UPDATE via SOFT_RESET
  * 9. Signal battery insertion to start gauging
  * 10. Send SMOOTH_SYNC to synchronize filtered capacity
+ *
+ * If ITPOR=0 (config retained):
+ * Skip 5-10 and print gauge already initialized
  *
  * @return 0 on success, negative error code on failure
  */
@@ -620,12 +625,12 @@ int fuel_gauge_init(void) {
       printk("[BQ27427] Battery params failed — continuing to CCGain\n");
     }
 
-    /* Fix CCGain — always attempt even if params failed */
+    /* Fix CCGain — attempt even if params failed (ITPOR=1)*/
     ret = fg_fix_ccgain_tracked();
     if (ret)
       printk("[BQ27427] CCGain fix failed\n");
 
-    /* Always exit CONFIG UPDATE */
+    /* exit CONFIG UPDATE */
     ret = fg_exit_config_update();
     if (ret) {
       printk("[BQ27427] config_update failed\n");
