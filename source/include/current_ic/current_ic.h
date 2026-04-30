@@ -30,4 +30,26 @@ void current_data_thread(void *a, void *b, void *c);
 /* Gets current battery charger status from GPIO pins */
 bat_status check_bat_status(void);
 
+#define INF_SAMPLE_PERIOD_US  40
+#define INF_SAMPLE_TIMEOUT_US 400
+#define INF_SAMPLE_BUF_LEN    32
+#define INF_SPIKE_THRESH_MA   50.0f
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Arm the per-inference 0V8 sampler. Re-arming cancels any in-flight session. */
+void inference_current_start(void);
+
+/* Stop the sampler. IRQ-safe and idempotent. */
+void inference_current_stop(void);
+
+/* Print every captured sample, the average, and a spike flag. */
+void inference_current_dump(void);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

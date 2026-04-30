@@ -1,3 +1,4 @@
+#include "current_ic/current_ic.h"
 #include "gpio/gpio.h"
 #include <errno.h>
 #include <stdio.h>
@@ -70,6 +71,7 @@ int akd_async_sem_take(k_timeout_t timeout) {
 
 static void akd_async_isr_handler(const struct device *dev,
                                   struct gpio_callback *cb, uint32_t pins) {
+  inference_current_stop();
   if (akd_in_learning()) {
     schedule_akd_learning_wq();
   } else {

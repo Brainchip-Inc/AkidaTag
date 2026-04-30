@@ -12,6 +12,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
@@ -44,6 +45,131 @@ static const struct gpio_dt_spec chgr_sts2 =
 
 static uint16_t buf;
 static struct adc_sequence sequences[ARRAY_SIZE(adc_channels)];
+
+/* Per-inference 0V8 sampler state: dedicated buffer + sequence so it cannot
+ * collide with the BLE-streaming current_data_thread that uses sequences[]. */
+static uint16_t            inf_raw_buf;
+static struct adc_sequence inf_seq;
+static bool                inf_seq_inited;
+
+static float    inf_samples[INF_SAMPLE_BUF_LEN];
+static uint8_t  inf_head;
+static uint8_t  inf_count;
+static atomic_t inf_active = ATOMIC_INIT(0);
+
+static struct k_timer inf_period_timer;
+static struct k_timer inf_timeout_timer;
+static struct k_work  inf_sample_work;
+
+static void inf_sample_work_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  if (!atomic_get(&inf_active)) {
+    return;
+  }
+  int err = adc_read_dt(&adc_channels[ADC_CH_1], &inf_seq);
+  if (err < 0) {
+    return;
+  }
+  float val_mv = (float)(int32_t)inf_raw_buf * adc_scale;
+  float mA = val_mv / SHUNT_RESISTOR_GAIN_0V8;
+  inf_samples[inf_head] = mA;
+  inf_head = (inf_head + 1U) % INF_SAMPLE_BUF_LEN;
+  if (inf_count < INF_SAMPLE_BUF_LEN) {
+    inf_count++;
+  }
+}
+
+static void inf_period_expiry(struct k_timer *t) {
+  ARG_UNUSED(t);
+  if (atomic_get(&inf_active)) {
+    k_work_submit(&inf_sample_work);
+  }
+}
+
+static void inf_timeout_expiry(struct k_timer *t) {
+  ARG_UNUSED(t);
+  inference_current_stop();
+}
+
+void inference_current_start(void) {
+  /* Cancel any in-flight session and reset state. */
+  atomic_set(&inf_active, 0);
+  k_timer_stop(&inf_period_timer);
+  k_timer_stop(&inf_timeout_timer);
+
+  if (!inf_seq_inited) {
+    inf_seq = (struct adc_sequence){
+        .buffer      = &inf_raw_buf,
+        .buffer_size = sizeof(inf_raw_buf),
+    };
+    int err = adc_sequence_init_dt(&adc_channels[ADC_CH_1], &inf_seq);
+    if (err < 0) {
+      printk("INF[0V8]: seq init failed (%d)\n", err);
+      return;
+    }
+    inf_seq_inited = true;
+  }
+
+  inf_head  = 0;
+  inf_count = 0;
+  atomic_set(&inf_active, 1);
+  k_timer_start(&inf_period_timer,
+                K_USEC(INF_SAMPLE_PERIOD_US),
+                K_USEC(INF_SAMPLE_PERIOD_US));
+  k_timer_start(&inf_timeout_timer,
+                K_USEC(INF_SAMPLE_TIMEOUT_US),
+                K_NO_WAIT);
+}
+
+void inference_current_stop(void) {
+  if (!atomic_cas(&inf_active, 1, 0)) {
+    return;
+  }
+  k_timer_stop(&inf_period_timer);
+  k_timer_stop(&inf_timeout_timer);
+}
+
+void inference_current_dump(void) {
+  uint8_t n = inf_count;
+  if (n == 0U) {
+    printk("INF[0V8]: no samples\n");
+    return;
+  }
+
+  float sum = 0.0f;
+  for (uint8_t i = 0; i < n; i++) {
+    sum += inf_samples[i];
+  }
+  float avg = sum / (float)n;
+
+  int spike = 0;
+  for (uint8_t i = 0; i < n; i++) {
+    if (inf_samples[i] > avg + INF_SPIKE_THRESH_MA) {
+      spike = 1;
+      break;
+    }
+  }
+
+  int avg_sign = (avg < 0.0f) ? -1 : 1;
+  float avg_abs = avg * avg_sign;
+  int   avg_int = (int)avg_abs;
+  int   avg_frac = (int)((avg_abs - avg_int) * 100.0f);
+  printk("INF[0V8] N=%u avg=%s%d.%02d mA spike=%d\n",
+         (unsigned)n,
+         (avg_sign < 0 ? "-" : ""), avg_int, avg_frac,
+         spike);
+
+  printk("INF[0V8] samples:");
+  for (uint8_t i = 0; i < n; i++) {
+    float s = inf_samples[i];
+    int   s_sign = (s < 0.0f) ? -1 : 1;
+    float s_abs  = s * s_sign;
+    int   s_int  = (int)s_abs;
+    int   s_frac = (int)((s_abs - s_int) * 100.0f);
+    printk(" %s%d.%02d", (s_sign < 0 ? "-" : ""), s_int, s_frac);
+  }
+  printk("\n");
+}
 /**
  * @brief Initialize GPIO pins for battery charger status monitoring
  *
@@ -114,6 +240,11 @@ int current_ic_init(void) {
       return err;
     }
   }
+
+  k_timer_init(&inf_period_timer,  inf_period_expiry,  NULL);
+  k_timer_init(&inf_timeout_timer, inf_timeout_expiry, NULL);
+  k_work_init (&inf_sample_work,   inf_sample_work_handler);
+
   return 0;
 }
 /**
