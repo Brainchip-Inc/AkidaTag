@@ -486,12 +486,11 @@ static inline void restore_default_led_state(void) {
 
 float mfcc_fs = 123.56967163085938f;
 
-// KWS class definitions
-#define KWS_SILENCE_CLASS 10
-#define KWS_UNKNOWN_CLASS 11
+// KWS class definitions — defaults overridden from model metadata at runtime
+static int g_silence_class = 10;
+static int g_unknown_class = 11;
 
 // Softmax EMA smoothing and chiming trigger parameters
-#define MAX_KWS_CLASSES 15
 #define SMOOTHING_ALPHA 0.7f
 #define SCORE_THRESHOLD 0.5f
 #define CHIMING_THRESHOLD 3
@@ -502,10 +501,9 @@ float score_threshold = SCORE_THRESHOLD; // Smoothed softmax score threshold
 int chiming_threshold =
     CHIMING_THRESHOLD; // Consecutive detections needed to trigger
 
-static float
-    smoothed_scores[MAX_KWS_CLASSES]; // EMA smoothed softmax scores per class
-static int chiming_counters[MAX_KWS_CLASSES]; // Consecutive detection counters
-                                              // per class
+static float *smoothed_scores = nullptr;
+static int *chiming_counters = nullptr;
+static float *softmax_scores = nullptr;
 
 // Metrics mode: show confidence and timing details on keyword detection
 int metrics_on = 0;
@@ -1031,6 +1029,19 @@ static void update_model_params(model_meta_t kws_meta) {
   delete[] akida_output_dq;
   akida_output_dq = new float[g_num_classes * g_num_neurons_per_class];
   akd_op_size = sizeof(int32_t) * g_num_classes * g_num_neurons_per_class;
+
+  delete[] smoothed_scores;
+  smoothed_scores = new float[g_num_classes]();
+  delete[] chiming_counters;
+  chiming_counters = new int[g_num_classes]();
+  delete[] softmax_scores;
+  softmax_scores = new float[g_num_classes]();
+
+  if (kws_meta.mfcc_fs_bits != 0) {
+    memcpy(&mfcc_fs, &kws_meta.mfcc_fs_bits, sizeof(float));
+  }
+  g_silence_class = (int)kws_meta.silence_class;
+  g_unknown_class = (int)kws_meta.unknown_class;
 }
 
 static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
@@ -1354,8 +1365,8 @@ extern "C" void reset_stale_inference_data(void) {
   if (cur_kws_edge_state != STATE_LEARNING) {
     reset_kws_spectrogram();
   }
-  memset(smoothed_scores, 0, sizeof(smoothed_scores));
-  memset(chiming_counters, 0, sizeof(chiming_counters));
+  memset(smoothed_scores, 0, g_num_classes * sizeof(float));
+  memset(chiming_counters, 0, g_num_classes * sizeof(int));
   if (verbose_on) {
     printk("reset: clearing stale inference data\n\r");
   }
@@ -1383,9 +1394,7 @@ static void reset_kws_spectrogram(void) {
 
 static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
   // Step 1: Per-class max pooling from dequantized output
-  int num_cls_capped =
-      (g_num_classes < MAX_KWS_CLASSES) ? g_num_classes : MAX_KWS_CLASSES;
-  float softmax_scores[MAX_KWS_CLASSES];
+  int num_cls_capped = (int)g_num_classes;
   compute_per_class_max(akida_output_dq, num_cls_capped,
                         (int)g_num_neurons_per_class, softmax_scores);
 
@@ -1411,7 +1420,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
   int triggered_class = -1;
   float triggered_score = 0.0f;
   for (int c = 0; c < num_cls_capped; c++) {
-    if (c == KWS_SILENCE_CLASS || c == KWS_UNKNOWN_CLASS) {
+    if (c == g_silence_class || c == g_unknown_class) {
       continue;
     }
     if (smoothed_scores[c] >= score_threshold) {
@@ -1433,7 +1442,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
             "chiming=%d/%d",
             found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
             softmax_scores[found], smoothed_scores[found],
-            (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
+            (found < num_cls_capped) ? chiming_counters[found] : 0,
             chiming_threshold);
   }
 

@@ -47,7 +47,8 @@ def _load_shapes_json(output_dir, prefix):
 
 
 def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                     flash_address, is_el, neurons_per_class, num_el_classes):
+                     flash_address, is_el, neurons_per_class, num_el_classes,
+                     mfcc_fs=0.0, silence_class=0, unknown_class=0):
     """Write info.yaml metadata alongside the bin files."""
     npc = int(neurons_per_class) if neurons_per_class else 1
     num_classes = 0
@@ -58,15 +59,18 @@ def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
             num_classes = int(output_shape[-1])
 
     data = {
-        "app":   prefix,
+        "app":           prefix,
         "flash_address": str(flash_address),
-        "input_shape":  list(input_shape)  if input_shape  else [],
-        "output_shape": list(output_shape) if output_shape else [],
+        "input_shape":   list(input_shape)  if input_shape  else [],
+        "output_shape":  list(output_shape) if output_shape else [],
+        "mfcc_fs":       float(mfcc_fs),
+        "silence_class": int(silence_class),
+        "unknown_class": int(unknown_class),
         "edge_learning": {
-            "enabled":      is_el,
-            "num_classes":  num_classes,
+            "enabled":        is_el,
+            "num_classes":    num_classes,
             "num_el_classes": int(num_el_classes) if is_el else 0,
-            "num_neurons":  npc,
+            "num_neurons":    npc,
         },
     }
 
@@ -92,7 +96,10 @@ def fetch_and_convert(args):
         input_shape, output_shape, is_el_cached = _load_shapes_json(output_dir, prefix)
         _write_info_yaml(output_dir, prefix, input_shape, output_shape,
                          flash_address, is_el_cached,
-                         args.neurons_per_class, args.num_el_classes)
+                         args.neurons_per_class, args.num_el_classes,
+                         mfcc_fs=args.mfcc_fs,
+                         silence_class=args.silence_class,
+                         unknown_class=args.unknown_class)
         _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
         return input_shape, output_shape
 
@@ -213,7 +220,10 @@ def fetch_and_convert(args):
     _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el)
     _write_info_yaml(output_dir, prefix, input_shape, output_shape,
                      flash_address, is_el,
-                     args.neurons_per_class, args.num_el_classes)
+                     args.neurons_per_class, args.num_el_classes,
+                     mfcc_fs=args.mfcc_fs,
+                     silence_class=args.silence_class,
+                     unknown_class=args.unknown_class)
     _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
     return input_shape, output_shape
 
@@ -264,6 +274,12 @@ if __name__ == "__main__":
                         help="Akida MapMode value passed to model.map() (default: 1)")
     parser.add_argument("--num_el_classes", type=int, default=0,
                         help="Number of edge learning classes")
+    parser.add_argument("--mfcc_fs", type=float, default=0.0,
+                        help="MFCC normalisation scalar written to info.yaml (default: 0.0)")
+    parser.add_argument("--silence_class", type=int, default=0,
+                        help="Output index of the silence class (default: 0)")
+    parser.add_argument("--unknown_class", type=int, default=0,
+                        help="Output index of the unknown/garbage class (default: 0)")
 
     args = parser.parse_args()
     fetch_and_convert(args)

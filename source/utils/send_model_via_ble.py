@@ -41,7 +41,8 @@ def compute_data_crc32(data_path):
 
 def compute_combined_crc32(total_length, input_shape, output_shape,
                            flash_address, is_edge_learned, num_edge_classes,
-                           info_path, model_name=""):
+                           info_path, model_name="",
+                           mfcc_fs=0.0, silence_class=0, unknown_class=0):
     """CRC32 over header fields [total_length..model_name] + info file bytes.
 
     Matches the firmware's model_info_hdr_crc32 computation in file_transfer.c.
@@ -49,6 +50,7 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
     (all uint32_t, little-endian; shape arrays zero-padded to 3 elements).
     Layout: total_length, input_shape[3], output_shape[3],
             flash_address, is_edge_learned, num_edge_classes, info_data_len,
+            mfcc_fs_bits, silence_class, unknown_class,
             model_name[64]  (null-padded to MAX_FS_NAME_LEN bytes)
     """
     MAX_DIMS = 3
@@ -56,11 +58,12 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
     info_data_len = Path(info_path).stat().st_size
     in_pad  = list(input_shape)  + [0] * (MAX_DIMS - len(input_shape))
     out_pad = list(output_shape) + [0] * (MAX_DIMS - len(output_shape))
+    mfcc_fs_bits = struct.unpack('<I', struct.pack('<f', float(mfcc_fs)))[0]
     # Pack uint32_t fields: total_length, input_shape[3], output_shape[3],
     #                       flash_address, is_edge_learned, num_edge_classes,
-    #                       info_data_len
+    #                       info_data_len, mfcc_fs_bits, silence_class, unknown_class
     header_bytes = struct.pack(
-        "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 4),
+        "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 4 + 3),
         total_length,
         *in_pad,
         *out_pad,
@@ -68,6 +71,9 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
         int(is_edge_learned),
         num_edge_classes,
         info_data_len,
+        mfcc_fs_bits,
+        int(silence_class),
+        int(unknown_class),
     )
     # Append model_name as MAX_FS_NAME_LEN bytes, null-padded
     name_bytes = model_name.encode("utf-8")[:MAX_FS_NAME_LEN]
@@ -100,6 +106,9 @@ TOTAL_LENGTH_CHAR_UUID       = "f000aa0b-0451-4000-b000-000000000000"  # info+da
 IS_EDGE_LEARNED_CHAR_UUID    = "f000aa0c-0451-4000-b000-000000000000"  # 1 = edge-learned model (32-bit LE)
 NUM_EDGE_CLASSES_CHAR_UUID   = "f000aa0d-0451-4000-b000-000000000000"  # number of EL classes (32-bit LE)
 FS_NAME_CHAR_UUID            = "f000aa0e-0451-4000-b000-000000000000"  # LittleFS metadata path (UTF-8)
+MFCC_FS_CHAR_UUID            = "f000aa0f-0451-4000-b000-000000000000"  # MFCC normalisation scalar (float bits, 32-bit LE)
+SILENCE_CLASS_CHAR_UUID      = "f000aa10-0451-4000-b000-000000000000"  # silence class output index (32-bit LE)
+UNKNOWN_CLASS_CHAR_UUID      = "f000aa11-0451-4000-b000-000000000000"  # unknown class output index (32-bit LE)
 
 TRANSFER_TYPE_INFO = 0x00
 TRANSFER_TYPE_DATA = 0x01
@@ -151,7 +160,8 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
                              input_shape=None, output_shape=None,
                              flash_address=0x1000,
                              is_edge_learned=False, num_edge_classes=None,
-                             fs_name=None):
+                             fs_name=None,
+                             mfcc_fs=0.0, silence_class=0, unknown_class=0):
     """Transfer one binary file over BLE.
 
     Metadata fields (CRC, total_length, shapes, address, EL fields) are sent
@@ -269,6 +279,31 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent neurons in higher order 16 bites and num_edge_classes in lower 16bits: {classes}")
 
+        # 9. MFCC normalisation scalar (float → IEEE-754 bits, 32-bit LE)
+        mfcc_fs_bits = struct.unpack('<I', struct.pack('<f', float(mfcc_fs)))[0]
+        await client.write_gatt_char(
+            MFCC_FS_CHAR_UUID,
+            mfcc_fs_bits.to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent mfcc_fs: {mfcc_fs} (bits=0x{mfcc_fs_bits:08X})")
+
+        # 10. Silence class index (32-bit LE)
+        await client.write_gatt_char(
+            SILENCE_CLASS_CHAR_UUID,
+            int(silence_class).to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent silence_class: {silence_class}")
+
+        # 11. Unknown class index (32-bit LE)
+        await client.write_gatt_char(
+            UNKNOWN_CLASS_CHAR_UUID,
+            int(unknown_class).to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent unknown_class: {unknown_class}")
+
         # (fs_name already sent before file_size – see step 1b above)
 
     # Stream file data in chunks
@@ -315,7 +350,8 @@ async def send_file(address, filepath, info_path, write_to_sram,
                     input_shape=None, output_shape=None,
                     flash_address=0x1000,
                     is_edge_learned=False, num_edge_classes=None,
-                    fs_name=None, model_name=""):
+                    fs_name=None, model_name="",
+                    mfcc_fs=0.0, silence_class=0, unknown_class=0):
     source_file = filepath or info_path
     try:
         APP = detect_app_index(source_file)
@@ -340,6 +376,9 @@ async def send_file(address, filepath, info_path, write_to_sram,
             num_edge_classes=num_edge_classes if num_edge_classes is not None else 0,
             info_path=info_path,
             model_name=model_name,
+            mfcc_fs=mfcc_fs,
+            silence_class=silence_class,
+            unknown_class=unknown_class,
         )
     elif info_path and Path(info_path).exists():
         # Shapes not available – warn; CRC will be 0 (skipped at load time)
@@ -376,6 +415,9 @@ async def send_file(address, filepath, info_path, write_to_sram,
                 is_edge_learned=is_edge_learned,
                 num_edge_classes=num_edge_classes,
                 fs_name=fs_name,
+                mfcc_fs=mfcc_fs,
+                silence_class=silence_class,
+                unknown_class=unknown_class,
             )
             if not ok:
                 print("Info transfer failed, aborting.")
@@ -419,6 +461,9 @@ def _load_info_yaml(yaml_path):
         "num_classes":      int(el.get("num_classes",  0)),
         "neurons_per_class": int(el.get("num_neurons", 1)),
         "num_el_classes":   int(el.get("num_el_classes", 0)),
+        "mfcc_fs":          float(data.get("mfcc_fs", 0.0)),
+        "silence_class":    int(data.get("silence_class", 0)),
+        "unknown_class":    int(data.get("unknown_class", 0)),
     }
 
 
@@ -470,6 +515,11 @@ async def main(args):
 
     # model_name: from YAML field (e.g. "kws"), falls back to empty string
     model_name = yaml_meta["model_name"] if yaml_meta else ""
+
+    # mfcc_fs / silence_class / unknown_class: from YAML only
+    mfcc_fs       = yaml_meta["mfcc_fs"]       if yaml_meta else 0.0
+    silence_class = yaml_meta["silence_class"] if yaml_meta else 0
+    unknown_class = yaml_meta["unknown_class"] if yaml_meta else 0
 
     # Default fs_name derived from prefix when not supplied
     fs_name = args.fs_name
@@ -529,6 +579,9 @@ async def main(args):
         num_edge_classes=packed_classes,
         fs_name=fs_name,
         model_name=model_name,
+        mfcc_fs=mfcc_fs,
+        silence_class=silence_class,
+        unknown_class=unknown_class,
     )
 
 

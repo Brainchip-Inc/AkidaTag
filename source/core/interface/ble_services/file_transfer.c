@@ -72,6 +72,17 @@ static ssize_t get_num_edge_classes(struct bt_conn *conn,
 static ssize_t get_fs_name(struct bt_conn *conn,
                            const struct bt_gatt_attr *attr, const void *buf,
                            uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t get_mfcc_fs(struct bt_conn *conn,
+                            const struct bt_gatt_attr *attr, const void *buf,
+                            uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t get_silence_class(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags);
+static ssize_t get_unknown_class(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags);
 
 /* -------------------------------------------------------------------------
  * UUID definitions – must match Python send_model_via_ble.py
@@ -107,6 +118,13 @@ static ssize_t get_fs_name(struct bt_conn *conn,
   BT_UUID_128_ENCODE(0xf000aa0d, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 #define BT_UUID_FS_NAME_CHAR_VAL                                               \
   BT_UUID_128_ENCODE(0xf000aa0e, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
+/* Model-specific inference parameters (aa0f–aa11) */
+#define BT_UUID_MFCC_FS_CHAR_VAL                                               \
+  BT_UUID_128_ENCODE(0xf000aa0f, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
+#define BT_UUID_SILENCE_CLASS_CHAR_VAL                                         \
+  BT_UUID_128_ENCODE(0xf000aa10, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
+#define BT_UUID_UNKNOWN_CLASS_CHAR_VAL                                         \
+  BT_UUID_128_ENCODE(0xf000aa11, 0x0451, 0x4000, 0xb000, 0x000000000000ULL)
 
 /* UUID struct instances */
 static struct bt_uuid_128 file_transfer_service_uuid =
@@ -137,6 +155,12 @@ static struct bt_uuid_128 num_edge_classes_uuid =
     BT_UUID_INIT_128(BT_UUID_NUM_EDGE_CLASSES_CHAR_VAL);
 static struct bt_uuid_128 fs_name_uuid =
     BT_UUID_INIT_128(BT_UUID_FS_NAME_CHAR_VAL);
+static struct bt_uuid_128 mfcc_fs_uuid =
+    BT_UUID_INIT_128(BT_UUID_MFCC_FS_CHAR_VAL);
+static struct bt_uuid_128 silence_class_uuid =
+    BT_UUID_INIT_128(BT_UUID_SILENCE_CLASS_CHAR_VAL);
+static struct bt_uuid_128 unknown_class_uuid =
+    BT_UUID_INIT_128(BT_UUID_UNKNOWN_CLASS_CHAR_VAL);
 
 /* UUID pointer macros */
 #define FILE_SVC_UUID (&file_transfer_service_uuid.uuid)
@@ -153,6 +177,9 @@ static struct bt_uuid_128 fs_name_uuid =
 #define IS_EDGE_LEARNED_UUID (&is_edge_learned_uuid.uuid)
 #define NUM_EDGE_CLASSES_UUID (&num_edge_classes_uuid.uuid)
 #define FS_NAME_UUID (&fs_name_uuid.uuid)
+#define MFCC_FS_UUID (&mfcc_fs_uuid.uuid)
+#define SILENCE_CLASS_UUID (&silence_class_uuid.uuid)
+#define UNKNOWN_CLASS_UUID (&unknown_class_uuid.uuid)
 
 /* Permission shorthand */
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED
@@ -189,6 +216,9 @@ static uint32_t meta_output_shape[MAX_MODEL_OUTP_SHAPE_DIMS] = {0};
 static uint32_t meta_flash_address = 0;
 static uint32_t meta_is_edge_learned = 0;
 static uint32_t meta_num_edge_classes = 0;
+static uint32_t meta_mfcc_fs_bits = 0;
+static uint32_t meta_silence_class = 0;
+static uint32_t meta_unknown_class = 0;
 static char meta_fs_name[MAX_FS_NAME_LEN] = {0};
 
 extern int infer(int app_index_l);
@@ -340,7 +370,19 @@ BT_GATT_SERVICE_DEFINE(
 
     /* aa0e – LittleFS metadata path (UTF-8, optional) */
     BT_GATT_CHARACTERISTIC(FS_NAME_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
-                           get_fs_name, NULL));
+                           get_fs_name, NULL),
+
+    /* aa0f – MFCC normalisation scalar (IEEE-754 float bits, 32-bit) */
+    BT_GATT_CHARACTERISTIC(MFCC_FS_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM, NULL,
+                           get_mfcc_fs, NULL),
+
+    /* aa10 – silence class output index (32-bit) */
+    BT_GATT_CHARACTERISTIC(SILENCE_CLASS_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, get_silence_class, NULL),
+
+    /* aa11 – unknown/garbage class output index (32-bit) */
+    BT_GATT_CHARACTERISTIC(UNKNOWN_CLASS_UUID, BT_GATT_CHRC_WRITE, WRITE_PERM,
+                           NULL, get_unknown_class, NULL));
 
 static void send_ack_to_host(uint8_t ack_code) {
   if (!notify_enabled) {
@@ -484,6 +526,41 @@ static ssize_t get_num_edge_classes(struct bt_conn *conn,
   return len;
 }
 
+static ssize_t get_mfcc_fs(struct bt_conn *conn,
+                            const struct bt_gatt_attr *attr, const void *buf,
+                            uint16_t len, uint16_t offset, uint8_t flags) {
+  if (len != 4) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memcpy(&meta_mfcc_fs_bits, buf, 4);
+  LOG_INF("MFCC fs bits: 0x%08X\n", meta_mfcc_fs_bits);
+  return len;
+}
+
+static ssize_t get_silence_class(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags) {
+  if (len != 4) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memcpy(&meta_silence_class, buf, 4);
+  LOG_INF("Silence class index: %u\n", meta_silence_class);
+  return len;
+}
+
+static ssize_t get_unknown_class(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags) {
+  if (len != 4) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+  memcpy(&meta_unknown_class, buf, 4);
+  LOG_INF("Unknown class index: %u\n", meta_unknown_class);
+  return len;
+}
+
 static ssize_t get_fs_name(struct bt_conn *conn,
                            const struct bt_gatt_attr *attr, const void *buf,
                            uint16_t len, uint16_t offset, uint8_t flags) {
@@ -618,6 +695,9 @@ ssize_t file_transfer_write(struct bt_conn *conn,
     m->is_edge_learned = meta_is_edge_learned;
     m->num_edge_classes = meta_num_edge_classes;
     m->info_data_len = (uint32_t)sram_info_offset;
+    m->mfcc_fs_bits = meta_mfcc_fs_bits;
+    m->silence_class = meta_silence_class;
+    m->unknown_class = meta_unknown_class;
     /* Extract and store model name from meta_fs_name (e.g. "kws" from
      * "/model_meta/kws") */
     memset(m->model_name, 0, MAX_FS_NAME_LEN);
