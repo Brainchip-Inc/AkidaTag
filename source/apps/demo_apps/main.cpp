@@ -1719,12 +1719,12 @@ generate_augmented_input(float captured[][SPECTROGRAM_RES], int keyword_len,
       compress_pos = 1 + (int)(learn_rand_float() * (keyword_len - 2));
     break;
   case 6: /* Frequency masking (1 random MFCC bin) */
-    freq_mask_bin = (int)(learn_rand_float() * SPECTROGRAM_RES);
+    freq_mask_bin = (int)(learn_rand_float() * (SPECTROGRAM_RES - 1));
     break;
   case 7: /* Heavy combined: bg noise + gain + freq mask */
     bg_noise_scale = 0.02f + learn_rand_float() * 0.02f; /* 2-4% */
     gain = 0.85f + learn_rand_float() * 0.30f;           /* 0.85 - 1.15 */
-    freq_mask_bin = (int)(learn_rand_float() * SPECTROGRAM_RES);
+    freq_mask_bin = (int)(learn_rand_float() * (SPECTROGRAM_RES - 1));
     break;
   }
 
