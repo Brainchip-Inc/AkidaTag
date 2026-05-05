@@ -1495,6 +1495,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       kws_post_processing(dma_time, inf_time);
     } else {
       printk("akida_predict failed\n");
+      reset_stale_inference_data();
     }
   } else {
     uint64_t start_time = time_ms();
