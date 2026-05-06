@@ -493,6 +493,7 @@ static int g_unknown_class = 11;
 // Softmax EMA smoothing and chiming trigger parameters
 #define SMOOTHING_ALPHA 0.7f
 #define SCORE_THRESHOLD 0.5f
+#define EDGE_CLASS_SCORE_THRESHOLD 0.4f
 #define CHIMING_THRESHOLD 3
 
 float smoothing_alpha =
@@ -1423,7 +1424,10 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
     if (c == g_silence_class || c == g_unknown_class) {
       continue;
     }
-    if (smoothed_scores[c] >= score_threshold) {
+    float thr = (c >= KWS_EDGE_NOVEL_CLASS_BASE_ID && c <= KWS_EDGE_MAX_NOVEL_CLASS_ID)
+                    ? EDGE_CLASS_SCORE_THRESHOLD
+                    : score_threshold;
+    if (smoothed_scores[c] >= thr) {
       chiming_counters[c]++;
     } else {
       chiming_counters[c] = 0;
