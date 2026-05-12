@@ -243,6 +243,8 @@ void stop_dmic(void) {
   printk("dmic_stop done ");
 }
 
+void dmic_reset_dc_state(void) { dc_block_init(&dc_state); }
+
 static int cmd_dmic_stop(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
     printk("invalid command ");

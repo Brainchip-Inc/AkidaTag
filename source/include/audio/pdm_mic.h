@@ -8,6 +8,10 @@ int dmic_start(void);
 int dmic_init(void);
 void dmic_capture_thread(void *a, void *b, void *c);
 void stop_dmic(void);
+/* Re-zero the DC-blocking IIR state. Intended to be called after stop_dmic()
+ * and before dmic_start() when restarting the pipeline mid-run so the first
+ * post-restart block doesn't carry a step transient. */
+void dmic_reset_dc_state(void);
 
 /* ================= CONFIG ================= */
 #define SAMPLE_RATE CONFIG_SAMPLING_RATE

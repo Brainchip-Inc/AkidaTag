@@ -3,6 +3,8 @@
 #include "ble_services/battery_service.h"
 #include "ble_services/ble_frame.h"
 
+#include "kws_app.h"
+#include "kws_config.h"
 #include "led_init.h"
 #include <hal/nrf_ficr.h>
 #include <zephyr/logging/log.h>
@@ -256,8 +258,15 @@ static bool parse_incoming_frame(const char *data, parsed_frame_t *frame) {
   frame->size = (uint8_t)sz;
   frame->command = (uint8_t)cmd;
 
-  LOG_INF("frame_type=%d, index=%d, size=%d, command=%d\n", frame->frame_type,
-          frame->index, frame->size, frame->command);
+  /* Locate the command-specific payload, which begins after "<cmd>:". The
+   * frame format is "<ft>,<idx>,<sz>,<cmd>:<payload>\r". We skip past the 4th
+   * comma and the numeric cmd to find the ':'. */
+  const char *colon = strchr(data, ':');
+  frame->payload = colon ? (colon + 1) : NULL;
+
+  LOG_INF("frame_type=%d, index=%d, size=%d, command=%d, payload=\"%s\"\n",
+          frame->frame_type, frame->index, frame->size, frame->command,
+          frame->payload ? frame->payload : "");
 
   return true;
 }
@@ -676,6 +685,167 @@ static void get_device_id(void) {
   device_id.low = 0;
 }
 
+/* Emit the 6-frame CMD_CONFIG snapshot burst — shared by GET and post-RESET
+ * replies. Matches the multi-frame style used by send_device_info_response()
+ * / app_info(): MF_START, four MF_MID, MF_LAST, one param per frame. */
+static void send_config_response(void) {
+  char frame[FRAME_BUFFER_SIZE];
+  char data_part[DATA_PART_SIZE];
+  char value_part[48];
+
+  static const uint8_t frame_types[KWS_PARAM_COUNT] = {
+      FRAME_MF_START, FRAME_MF_MID,  FRAME_MF_MID,
+      FRAME_MF_MID,   FRAME_MF_MID,  FRAME_MF_LAST,
+  };
+
+  LOG_INF("SENDING CONFIG SNAPSHOT (MULTI)\n");
+
+  for (uint8_t i = 0; i < KWS_PARAM_COUNT; i++) {
+    int vlen =
+        kws_config_format((kws_param_id_t)i, value_part, sizeof(value_part));
+    if (vlen < 0) {
+      LOG_ERR("kws_config_format(%u) failed", i);
+      return;
+    }
+    int data_len = snprintf(data_part, sizeof(data_part), "%d:%s\r",
+                            CMD_CONFIG, value_part);
+    snprintf(frame, sizeof(frame), "%d,%u,%d,%s", frame_types[i], i, data_len,
+             data_part);
+    int err = send_frame(frame);
+    if (err) {
+      LOG_ERR("send_config_response frame %u err %d", i, err);
+      return;
+    }
+  }
+}
+
+/* Single-frame ACK for a CMD_CONFIG SET result. err_reason is NULL on success
+ * (→ "4:<id>:OK"), otherwise it's a short token ("ID","RANGE","PARSE","NVS").
+ */
+static void send_config_ack(kws_param_id_t id, const char *err_reason) {
+  char frame[FRAME_BUFFER_SIZE];
+  char data_part[DATA_PART_SIZE];
+
+  int data_len;
+  if (err_reason == NULL) {
+    data_len = snprintf(data_part, sizeof(data_part), "%d:%d:OK\r", CMD_CONFIG,
+                        (int)id);
+  } else {
+    data_len = snprintf(data_part, sizeof(data_part), "%d:%d:ERR:%s\r",
+                        CMD_CONFIG, (int)id, err_reason);
+  }
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
+           data_part);
+  int err = send_frame(frame);
+  if (err) {
+    LOG_ERR("send_config_ack err %d", err);
+  }
+}
+
+/* Single-frame ACK for a CMD_CONFIG RESET — followed by the 6-frame snapshot
+ * so the phone can refresh without a separate GET. */
+static void send_config_reset_ack(void) {
+  char frame[FRAME_BUFFER_SIZE];
+  char data_part[DATA_PART_SIZE];
+
+  int data_len =
+      snprintf(data_part, sizeof(data_part), "%d:RESET:OK\r", CMD_CONFIG);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
+           data_part);
+  int err = send_frame(frame);
+  if (err) {
+    LOG_ERR("send_config_reset_ack err %d", err);
+  }
+}
+
+/* Map kws_cfg_err_t to the short wire token the phone switches on. */
+static const char *cfg_err_to_str(kws_cfg_err_t err) {
+  switch (err) {
+  case KWS_CFG_OK:        return NULL;
+  case KWS_CFG_ERR_ID:    return "ID";
+  case KWS_CFG_ERR_RANGE: return "RANGE";
+  case KWS_CFG_ERR_PARSE: return "PARSE";
+  case KWS_CFG_ERR_NVS:   return "NVS";
+  default:                return "UNKNOWN";
+  }
+}
+
+/* CMD_CONFIG payload dispatcher. Payload is everything after "4:" in the
+ * incoming frame (null-terminated, may have a trailing '\r').
+ *
+ * Shapes:
+ *   "GET"                → reply with 6-frame snapshot
+ *   "RESET"              → reset all to defaults, ACK + 6-frame snapshot
+ *   "<param_id>:<value>" → set single param, single-frame ACK
+ */
+static void handle_config_command(const char *payload) {
+  if (!payload) {
+    LOG_ERR("CMD_CONFIG with empty payload");
+    return;
+  }
+
+  if (strncmp(payload, "GET", 3) == 0) {
+    send_config_response();
+    return;
+  }
+
+  if (strncmp(payload, "RESET", 5) == 0) {
+    kws_cfg_err_t err = kws_config_reset_to_defaults();
+    if (err != KWS_CFG_OK && err != KWS_CFG_ERR_NVS) {
+      LOG_ERR("kws_config_reset_to_defaults err %d", err);
+    }
+    send_config_reset_ack();
+    send_config_response();
+    return;
+  }
+
+  /* SET: "<param_id>:<value>" */
+  char *sep = strchr(payload, ':');
+  if (!sep) {
+    LOG_ERR("CMD_CONFIG SET missing ':' in payload \"%s\"", payload);
+    send_config_ack((kws_param_id_t)0, "PARSE");
+    return;
+  }
+
+  char id_buf[8];
+  size_t id_len = (size_t)(sep - payload);
+  if (id_len == 0 || id_len >= sizeof(id_buf)) {
+    send_config_ack((kws_param_id_t)0, "PARSE");
+    return;
+  }
+  memcpy(id_buf, payload, id_len);
+  id_buf[id_len] = '\0';
+
+  char *endp = NULL;
+  long id_l = strtol(id_buf, &endp, 10);
+  if (endp == id_buf || *endp != '\0' || id_l < 0 || id_l >= KWS_PARAM_COUNT) {
+    send_config_ack((kws_param_id_t)0, "ID");
+    return;
+  }
+  kws_param_id_t id = (kws_param_id_t)id_l;
+
+  /* The value runs from after ':' to '\r' / '\0'. kws_config_set_from_string
+   * also strips trailing whitespace, so we don't need to copy — but we do
+   * need a NUL-terminated buffer without the '\r'. */
+  char value_buf[32];
+  const char *val = sep + 1;
+  size_t val_len = strlen(val);
+  while (val_len > 0 &&
+         (val[val_len - 1] == '\r' || val[val_len - 1] == '\n' ||
+          val[val_len - 1] == ' ')) {
+    val_len--;
+  }
+  if (val_len == 0 || val_len >= sizeof(value_buf)) {
+    send_config_ack(id, "PARSE");
+    return;
+  }
+  memcpy(value_buf, val, val_len);
+  value_buf[val_len] = '\0';
+
+  kws_cfg_err_t rc = kws_config_set_from_string(id, value_buf);
+  send_config_ack(id, cfg_err_to_str(rc));
+}
+
 /**
  * @brief Callback when data is received via NUS
  *
@@ -727,9 +897,15 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
     LOG_INF("APP INFO command received\n");
     app_info();
     break;
+  case CMD_CONFIG:
+    LOG_INF("CONFIG command received\n");
+    handle_config_command(frame.payload);
+    break;
   case CMD_DEPLOY_START:
     LOG_INF("DEPLOY START command received\n");
+    kws_app_start();
     event_flag = FLAG_ENABLE;
+    send_ack(ACK_DONE, CMD_DEPLOY_START);
     break;
   case CMD_STREAM_START:
     LOG_INF("STREAM START command received\n");
@@ -739,6 +915,7 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
   case CMD_DEPLOY_STOP:
     LOG_INF("DEPLOY STOP command received\n");
     event_flag = FLAG_DISABLE;
+    kws_app_stop();
     send_ack(ACK_DONE, CMD_DEPLOY_STOP);
     break;
   case CMD_STREAM_STOP:

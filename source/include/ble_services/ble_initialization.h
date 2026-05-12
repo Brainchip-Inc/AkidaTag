@@ -51,12 +51,18 @@ typedef enum {
   CMD_CURRENT_STOP = 14
 } command_type_t;
 
-/* Structure representing a parsed command frame received from the host */
+/* Structure representing a parsed command frame received from the host.
+ *
+ * `payload` points into the caller's receive buffer at the first byte after
+ * `<cmd>:` (i.e. the start of the command-specific data), or is NULL if the
+ * frame has no ':' separator. Only valid until the receive buffer is reused.
+ */
 typedef struct {
   uint8_t frame_type;
   uint8_t index;
   uint8_t size;
   uint8_t command;
+  const char *payload;
 } parsed_frame_t;
 
 /* Flag indicating whether deployment mode is active.
