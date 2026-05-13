@@ -120,6 +120,9 @@ The DK board defines only basic LED GPIOs. The Spark board adds full power-enabl
 | `acc-enb` | `acc_enb` | P0.20 | Output | HIGH |  Not defined |  Added |
 | `pdm-enb` | `pdm_enb` | P0.21 | Output | HIGH |  Not defined |  Added |
 | `akd-0v-enb` | `akd_0v_enb` | P0.22 | Output | HIGH |  Not defined |  Added |
+| `cam_enb` | `cam_enb` | P1.15 | Output | HIGH |  Not defined |  Added |
+
+---
 
 ### Control GPIOs
 
@@ -128,6 +131,10 @@ The DK board defines only basic LED GPIOs. The Spark board adds full power-enabl
 | `akdsleep` | `akdsleep` | P0.23 |  Defined |  Defined |
 | `akdreset` | `akdreset` | P1.13 |  Defined |  Defined |
 | `imui` | `imui` | P0.31 |  Defined |  Defined |
+| `akd_async` | `akd_async` | P0.03 |  Not defined |  Defined |
+| `fg_int` | `fg_int` | P0.30 |  Not defined |  Defined |
+| `chgr_sts1` | `chgr_sts1` | P0.23 |  Not defined |  Defined |
+| `chgr_sts2` | `chgr_sts2` | P0.24 |  Not defined |  Defined |
 
 ---
 
@@ -145,7 +152,18 @@ The DK board defines only basic LED GPIOs. The Spark board adds full power-enabl
 
 ---
 
-## 7. LED Configuration
+## 7. DFU Button
+
+| Property | DK Board | Spark Board |
+|----------|----------|-------------|
+| Node | Not defined | `dfu_button` |
+| Pin | — | P1.01 |
+| Flags | — | `GPIO_PULL_UP \| GPIO_ACTIVE_LOW` |
+| Alias | — | `mcuboot-button0` |
+
+---
+
+## 8. LED Configuration
 
 | LED | Pin | DK Board | Spark Board |
 |-----|-----|----------|-------------|
@@ -156,7 +174,7 @@ Both boards define the same LED pins. Default DK board LEDs (`led0`–`led3`) ar
 
 ---
 
-## 8. External Flash Node Location Change
+## 9. External Flash Node Location Change
 
 | Property | DK Board | Spark Board |
 |----------|----------|-------------|
@@ -171,7 +189,16 @@ Both boards define the same LED pins. Default DK board LEDs (`led0`–`led3`) ar
 
 ---
 
-## 9. Disabled Peripherals (Both Boards)
+## 10.ADC Configuration
+
+| Channel | Rail       | Pin     | Gain      | Reference       | Resolution |
+|---------|------------|---------|-----------|-----------------|------------|
+| CH0     | 1V8_AKD    | P0.04   | 1/3       | Internal (0.6V) | 12-bit     |
+| CH1     | 0V8_AKD    | P0.05   | 1/3       | Internal (0.6V) | 12-bit     |
+
+---
+
+## 11. Disabled Peripherals (Both Boards)
 
 Both overlays disable the following DK-specific peripherals to avoid conflicts:
 
@@ -184,7 +211,7 @@ Both overlays disable the following DK-specific peripherals to avoid conflicts:
 
 ---
 
-## 10. Full Pin Map Reference
+## 12. Full Pin Map Reference
 
 | Function | Signal | DK Board Pin | Spark Board Pin | Changed |
 |----------|--------|-------------|----------------|---------|
@@ -208,8 +235,11 @@ Both overlays disable the following DK-specific peripherals to avoid conflicts:
 | PDM DIN | Microphone DATA | P1.10 | P1.10 | — |
 | I2C SCL | IMU/Sensor | P1.03 | P1.03 | — |
 | I2C SDA | IMU/Sensor | P1.02 | P1.02 | — |
+| GPIO | user_btn | — | P0.26 | Added |
+| GPIO | dfu_button | — | P1.01 | Added |
 | GPIO | AKD Sleep | P0.23 | P0.23 | — |
 | GPIO | AKD Reset | P1.13 | P1.13 | — |
+| GPIO | akd_async | — | P0.03 | Added |
 | GPIO | IMU Interrupt | P0.31 | P0.31 | — |
 | GPIO | AKD Enable | — | **P0.19** | Added |
 | GPIO | ACC Enable | — | **P0.20** | Added |
@@ -218,5 +248,11 @@ Both overlays disable the following DK-specific peripherals to avoid conflicts:
 | GPIO | User Button | — | **P0.26** | Added |
 | GPIO | LED Red | P0.28 | P0.28 | — |
 | GPIO | LED Green | P0.27 | P0.27 | — |
+| GPIO | cam_enb | — | P1.15 | Added |
+| GPIO | fg_int | — | P0.30 | Added |
+| GPIO | chgr_sts1 | — | P0.23 | Added |
+| GPIO | chgr_sts2 | — | P0.24 | Added |
+| ADC  | CH0 | — | P0.04 | Added |
+| ADC  | CH1 | — | P0.05 | Added |
 
 ---
