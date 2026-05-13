@@ -390,7 +390,8 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_STREAM_START"     │                           │
-     │                           │                           ├───Set pdm_stream_flag = true
+     │                           │                           ├───Set pdm_stream_flag = FLAG_ENABLE
+     |                           |                           |   current_stream_flag = FLAG_DISABLE;
      │                           │                           │    (Audio streaming active)
      │                           │                           │
      │◄──Receive PDM Audio Data──┼──────────────────────────────┤
@@ -400,7 +401,7 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_STOP"      │                           │
-     │                           │                           ├───Set event_flag = false
+     │                           │                           ├───Set event_flag = FLAG_DISABLE
      │                           │                           │    (KWS detection sending stopped)
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
@@ -408,7 +409,7 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_STREAM_STOP"      │                           │
-     │                           │                           ├───Set pdm_stream_flag = false
+     │                           │                           ├───Set pdm_stream_flag = FLAG_DISABLE
      │                           │                           │    (Audio streaming stopped)
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
@@ -420,6 +421,20 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │    Trigger system reboot
      │                           │                           │    sys_reboot()
      │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CURRENT_START"    │                           │
+     │                           │                           ├───   pdm_stream_flag = FLAG_DISABLE;
+     │                           │                           │      current_stream_flag = FLAG_ENABLE;
+     │                           │                           │      (Current streaming active)
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CURRENT_STOP"     │                           │
+     │                           │                           ├───current_stream_flag = FLAG_DISABLE;
+     │                           │                           │    (Current streaming stopped)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │   "CURRENT_STOP:ACK"      │                           │
+     │                           │                           │
 
 3. How It Works
 
@@ -429,7 +444,6 @@ Firmware prepares response - Based on the command type, the appropriate data is 
 Response is sent back - Data is formatted and transmitted to the phone via NUS
 Phone displays the data - The app receives and presents the information to the user
 
-NOTE: A static MAC address is required for phone app testing. Hence, CONFIG_BT_PRIVACY is disabled(CONFIG_BT_PRIVACY = n). Ensure this is re-enabled for the final production build.
 
 ## Current Monitoring IC & Battery Status
 This module provides battery charger status monitoring and current sensing capabilities using GPIO status pins and an external current monitoring IC (ADC-based). It enables real-time tracking of battery charging state and current consumption for power management and diagnostics.
@@ -839,7 +853,6 @@ Use the following commands on the console:
 | `kws_mode async` | Switches the system to Async mode. |
 | `kws_mode sync` | Switches the system to Sync mode. |
 | `kws_mode_get` | Displays the currently active KWS mode (Sync or Async). |
-| `read_current_ic` | Print both ADC channels (1V8 and 0V8 rails) current |
 
 __Inference mode__
  -  Default mode, in this mode it captures live audio data and shows the inferred class id.
@@ -960,6 +973,9 @@ The following GPIOs are added in the board overlay to control **power enabling f
 | `akd_0v_enb`  | P0.22 | Enable control for AKIDA 0V supply |
 | `cam_enb`     | P1.15 | Enable pin for the camera module |
 | `akd_async`   | P0.03 | Enable pin for the AKIDA ASYNC |
+| `fg_int`      | P0.30 | Fuel Gauge interrupt signal |
+| `chgr_sts1`   | P0.23 | Read pin for battery status |
+| `chgr_sts2`   | P0.24 | Read pin for battery status  |
 
 These GPIOs are defined in the **DeviceTree overlay** and are used to manage power enabling of onboard components in the Spark board.
 
