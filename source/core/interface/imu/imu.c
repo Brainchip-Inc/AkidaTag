@@ -10,8 +10,8 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
-#include <zephyr/shell/shell.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/sys/atomic.h>
 
 LOG_MODULE_REGISTER(imu, LOG_LEVEL_DBG);

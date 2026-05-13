@@ -16,8 +16,8 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/byteorder.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/types.h>
 
