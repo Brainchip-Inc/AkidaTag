@@ -88,6 +88,8 @@ void led_set_state(led_state_t state);
  */
 void led_ind_thread(void *a, void *b, void *c);
 
+void process_led(void);
+
 /* Get current BLE connection status. */
 bool is_ble_connected(void);
 #endif /* _LED_INIT_H */

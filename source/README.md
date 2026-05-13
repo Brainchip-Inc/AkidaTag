@@ -390,7 +390,8 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_STREAM_START"     │                           │
-     │                           │                           ├───Set pdm_stream_flag = true
+     │                           │                           ├───Set pdm_stream_flag = FLAG_ENABLE
+     |                           |                           |   current_stream_flag = FLAG_DISABLE;
      │                           │                           │    (Audio streaming active)
      │                           │                           │
      │◄──Receive PDM Audio Data──┼──────────────────────────────┤
@@ -400,7 +401,7 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_STOP"      │                           │
-     │                           │                           ├───Set event_flag = false
+     │                           │                           ├───Set event_flag = FLAG_DISABLE
      │                           │                           │    (KWS detection sending stopped)
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
@@ -408,7 +409,7 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_STREAM_STOP"      │                           │
-     │                           │                           ├───Set pdm_stream_flag = false
+     │                           │                           ├───Set pdm_stream_flag = FLAG_DISABLE
      │                           │                           │    (Audio streaming stopped)
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
@@ -420,6 +421,20 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │    Trigger system reboot
      │                           │                           │    sys_reboot()
      │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CURRENT_START"    │                           │
+     │                           │                           ├───   pdm_stream_flag = FLAG_DISABLE;
+     │                           │                           │      current_stream_flag = FLAG_ENABLE;
+     │                           │                           │      (Current streaming active)
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CURRENT_STOP"     │                           │
+     │                           │                           ├───current_stream_flag = FLAG_DISABLE;
+     │                           │                           │    (Current streaming stopped)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │   "CURRENT_STOP:ACK"      │                           │
+     │                           │                           │
 
 3. How It Works
 
@@ -429,7 +444,55 @@ Firmware prepares response - Based on the command type, the appropriate data is 
 Response is sent back - Data is formatted and transmitted to the phone via NUS
 Phone displays the data - The app receives and presents the information to the user
 
-NOTE: A static MAC address is required for phone app testing. Hence, CONFIG_BT_PRIVACY is disabled(CONFIG_BT_PRIVACY = n). Ensure this is re-enabled for the final production build.
+
+## Current Monitoring IC & Battery Status
+This module provides battery charger status monitoring and current sensing capabilities using GPIO status pins and an external current monitoring IC (ADC-based). It enables real-time tracking of battery charging state and current consumption for power management and diagnostics.
+
+1. Current Monitoring IC (ADC)
+The application uses a multi-channel ADC to measure current through a shunt resistor. The ADC is configured for single-ended measurements (AIN0 and AIN1 relative to ground) as defined in the DeviceTree.
+
+## Configuration
+Channels: 2 (1V8_AKD rail on AIN0, 0V8_AKD rail on AIN1)
+Resolution: 12-bit (0-4095)
+Reference: 1800 mV internal
+Gain: 1/3 
+
+Sampling & Averaging:
+Each channel is sampled continuously to obtain stable and reliable current measurements.
+AVG_SAMPLES = 20 samples per averaging window
+Per-channel moving average calculated every 20 samples
+Total combined average printed after all channels report
+
+2. Battery Charger Status Monitoring
+The battery charger status is monitored using two GPIO input pins (chgr_sts1 and chgr_sts2) connected to the charger IC. These pins provide real-time charging state and fault detection.
+
+## Pin Status:
+STS1	STS2	Status	                    Description
+
+High	High	BAT_NOT_CHARGING	        Battery not charging (idle/standby)
+High	Low	    BAT_CHARGING	            Battery actively charging
+Low	    High	BAT_FAULT_RECOVERABLE	    Recoverable fault (e.g., over-temperature, timeout)
+Low	    Low	    BAT_FAULT_NON_RECOVERABLE	Non-recoverable fault (e.g., battery over-voltage)
+
+## Fuel Gauge (Battery SOC Monitoring)
+This module provides battery State of Charge (SOC) monitoring using the BQ27427 Impedance Track™ fuel gauge via I2C communication.
+Reads the current battery State of Charge (SOC) percentage from the BQ27427 fuel gauge and Send to Mobile app
+
+ISR-Based SOC Notification
+The BQ27427 fuel gauge can generate hardware interrupts on the SOC_INT pin whenever the State of Charge (SOC) changes by a configured delta (default 1%). This enables event-driven battery level reporting to the phone app instead of continuous polling, reducing I2C traffic and power consumption
+
+## Configuration
+Battery Parameters (1100mAh 4.2V Li-ion)
+
+Parameter	            Value	    Description
+Design Capacity	        1100 mAh	Battery capacity
+Design Energy	        4070 mWh	Capacity × 3.7V
+Terminate Voltage	    3000 mV	    0% SOC cutoff
+Taper Rate	            100	        Full charge detection
+Taper Voltage           4150        Charge termination voltage
+
+**NOTE**: These values are for testing purposes only using a 1100mAh test battery.
+Always connect the battery before connecting USB power.
 
 ### Edge Learning BLE Service
 
@@ -910,6 +973,9 @@ The following GPIOs are added in the board overlay to control **power enabling f
 | `akd_0v_enb`  | P0.22 | Enable control for AKIDA 0V supply |
 | `cam_enb`     | P1.15 | Enable pin for the camera module |
 | `akd_async`   | P0.03 | Enable pin for the AKIDA ASYNC |
+| `fg_int`      | P0.30 | Fuel Gauge interrupt signal |
+| `chgr_sts1`   | P0.23 | Read pin for battery status |
+| `chgr_sts2`   | P0.24 | Read pin for battery status  |
 
 These GPIOs are defined in the **DeviceTree overlay** and are used to manage power enabling of onboard components in the Spark board.
 

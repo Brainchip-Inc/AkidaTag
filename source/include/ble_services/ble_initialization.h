@@ -13,6 +13,7 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/settings/settings.h>
+
 /**
  * @brief 128-bit unsigned integer using two 64-bit values.
  *
@@ -32,6 +33,7 @@ typedef struct {
  * Used to identify and handle commands received from the mobile application.
  */
 typedef enum {
+  CMD_STREAM_STS = -1,
   CMD_BATTERY = 0,
   CMD_DEVICE_INFO = 1,
   CMD_APPS = 2,
@@ -44,6 +46,8 @@ typedef enum {
   CMD_STREAM_START = 9,
   CMD_DEPLOY_STOP = 10,
   CMD_STREAM_STOP = 11,
+  CMD_CURRENT_START = 12,
+  CMD_CURRENT_STOP = 13
 } command_type_t;
 
 /* Structure representing a parsed command frame received from the host */
@@ -64,20 +68,40 @@ extern uint8_t event_flag;
  */
 extern uint8_t pdm_stream_flag;
 
+/* Flag set when phone enters main app page -
+ * controls app-specific features and streaming battery status
+ */
+extern uint8_t app_start_flag;
+
+/* Flag indicating whether battery current streaming is active or not.
+ * When set, current values are sent to the phone in real-time.
+ */
+extern uint8_t current_stream_flag;
+
+/* Semaphore used to signal the current streaming thread to start.
+ * The streaming thread waits on this semaphore and begins sending
+ * data when the semaphore is given (after a start command).
+ */
+extern struct k_sem current_stream_sem;
 /* Access in main.c, and variable changes based on info.yaml */
 extern model_meta_t kws_meta;
 extern model_data_meta_t kws_data_meta;
 extern uint32_t g_num_classes;
 extern uint8_t adv_manufacturer_data[];
-int ble_init(void);
-void prcess_led(void);
 
+int ble_init(void);
 /*
  * Send PDM audio data to the phone.
  * Used for real-time audio level visualization over BLE.
  */
 void send_pdm_data(uint32_t data);
-
+#ifdef CONFIG_SPARK_BOARD
+/**
+ * @brief Send current value to phone for real-time monitoring
+ * @param data Pointer to string containing current reading
+ */
+void send_current_value(char *);
+#endif
 typedef enum { FLAG_DISABLE = 0, FLAG_ENABLE = 1 } flag_state_t;
 /*
  * Send a keyword spotting (KWS) detection event to the phone.

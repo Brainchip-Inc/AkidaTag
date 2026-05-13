@@ -63,7 +63,10 @@ extern "C" {
 #include "imu_h/imu.h"
 #endif
 #ifdef CONFIG_SPARK_BOARD
+#include "battery/battery.h"
+#include "ble_services/battery_service.h"
 #include "button/user_button.h"
+#include "current_ic/current_ic.h"
 #include "gpio/gpio.h"
 #endif
 #include "led_init.h"
@@ -421,6 +424,12 @@ struct k_thread imu_thread;
 k_tid_t imu_tid;
 #endif
 
+#ifdef CONFIG_SPARK_BOARD
+/* CURRENT thread variables*/
+K_THREAD_STACK_DEFINE(current_stack, CURRENT_STACK_SIZE);
+struct k_thread current_thread;
+k_tid_t current_tid;
+#endif
 const struct device *wdt_dev; // Global watchdog device
 void kick_watchdog(void) {
   if (wdt_dev) {
@@ -916,7 +925,16 @@ static int start_led_ind(void) {
   k_thread_start(led_tid);
   return 0;
 }
+#ifdef CONFIG_SPARK_BOARD
+static int start_current_proc(void) {
+  current_tid = k_thread_create(
+      &current_thread, current_stack, CURRENT_STACK_SIZE, current_data_thread,
+      NULL, NULL, NULL, CURRENT_PRIORITY, K_USER, K_FOREVER);
 
+  k_thread_start(current_tid);
+  return 0;
+}
+#endif
 static void update_model_params(model_meta_t kws_meta) {
   g_input_size = kws_meta.input_shape[0] * kws_meta.input_shape[1] *
                  kws_meta.input_shape[2];
@@ -1083,6 +1101,10 @@ int main(void) {
     printk("User button init failed\n");
   }
   spark_peripherals_power_enable();
+  int ret = battery_init();
+  if (ret) {
+    printf("Battery init failed (err %d)\n", ret);
+  }
 #endif
   uart_init();
   start_led_ind();
@@ -1116,6 +1138,12 @@ int main(void) {
   }
 
   init_boot_count();
+#ifdef CONFIG_SPARK_BOARD
+  /* Battery thread runs fuel_gauge_init in the background — boot continues. */
+  battery_start();
+  start_current_proc();
+#endif
+
   cli_worker_tid = k_thread_create(
       &cli_worker_thread, cli_worker_stack, CONFIG_SHELL_STACK_SIZE,
       cli_worker_proc_thread, NULL, NULL, NULL, CLI_WORKER_PRIORITY, K_USER,
@@ -1239,7 +1267,13 @@ void cli_worker_proc_thread(void *a, void *b, void *c) {
       wdt_feed(wdt, wdt_channel_id);
     }
 #endif
-    prcess_led();
+#ifdef CONFIG_SPARK_BOARD
+    if (is_ble_connected() && app_start_flag) {
+      battery_service_send(CMD_STREAM_STS);
+    }
+#endif
+    process_led();
+    k_msleep(1000);
   }
 }
 

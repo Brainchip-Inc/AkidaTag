@@ -55,6 +55,7 @@ target_sources(app PRIVATE
 	core/interface/akd_spi_flash/akd_spi_flash_handler.cpp
 	core/interface/ble_services/file_transfer.c
 	core/interface/ble_services/ble_initialization.c
+    core/interface/ble_services/battery_service.c
     core/interface/ble_services/edge_learning.c
 	core/interface/audio/pdm_mic.c
     core/interface/led/led_init.c
@@ -73,8 +74,11 @@ if(CONFIG_CAMERA_ENABLE_THREAD)
 endif()
 if(CONFIG_SPARK_BOARD)
     target_sources(app PRIVATE
-        core/interface/button/user_button.c
         core/interface/gpio/gpio.c
+        core/interface/button/user_button.c
+        core/interface/current_ic/current_ic.c
+        core/interface/fuel_gauge/fuel_gauge.c
+        core/interface/battery/battery.c
     )
 endif()
 
