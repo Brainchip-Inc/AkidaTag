@@ -8,7 +8,6 @@
 
 /* ========== I2C ========== */
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
-#define BQ27427_FLAG_BAT_DET (1 << 3)
 /* ========== Interrupt GPIO ========== */
 #define FG_INT_NODE DT_ALIAS(fg_int)
 static const struct gpio_dt_spec fg_int = GPIO_DT_SPEC_GET(FG_INT_NODE, gpios);

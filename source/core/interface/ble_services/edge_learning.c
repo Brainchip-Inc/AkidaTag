@@ -2,15 +2,18 @@
 
 static void edge_ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,
                                      uint16_t value);
+static ssize_t edge_cmd_write(struct bt_conn *conn,
+                              const struct bt_gatt_attr *attr, const void *buf,
+                              uint16_t len, uint16_t offset, uint8_t flags);
 static bool notify_enabled = false;
 #define BT_UUID_EDGE_SERVICE_VAL                                               \
-  BT_UUID_128_ENCODE(0xf000bb11, 0x0111, 0x9000, 0xc000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000bb11, 0x0111, 0x9000, 0xc000, 0x000000000000ULL)
 
 #define BT_UUID_EDGE_CMD_VAL                                                   \
-  BT_UUID_128_ENCODE(0xf000bb10, 0x0111, 0x9000, 0xc000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000bb10, 0x0111, 0x9000, 0xc000, 0x000000000000ULL)
 
 #define BT_UUID_EDGE_ACK_VAL                                                   \
-  BT_UUID_128_ENCODE(0xf000bb12, 0x0111, 0x9000, 0xc000, 0x000000000000)
+  BT_UUID_128_ENCODE(0xf000bb12, 0x0111, 0x9000, 0xc000, 0x000000000000ULL)
 
 /**
  * @brief BLE UUID structure for Edge Learning Service

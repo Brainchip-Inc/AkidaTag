@@ -18,13 +18,6 @@
 void edge_learning_cmd_process(uint8_t value);
 
 /**
- * @brief BLE write handler for the Edge Learning command characteristic.
- */
-static ssize_t edge_cmd_write(struct bt_conn *conn,
-                              const struct bt_gatt_attr *attr, const void *buf,
-                              uint16_t len, uint16_t offset, uint8_t flags);
-
-/**
  * @brief Notify that edge learning has started & completed.
  */
 void learning_completed(void);

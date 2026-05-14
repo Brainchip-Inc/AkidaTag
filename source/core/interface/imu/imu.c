@@ -1,4 +1,5 @@
 #include "imu_h/imu.h"
+#include <stdlib.h>
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 #include "watchdog_h/watchdog.h"
 #endif
@@ -9,20 +10,26 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/atomic.h>
+
+LOG_MODULE_REGISTER(imu, LOG_LEVEL_DBG);
+
 /* ================= CONFIG ================= */
 
 #define I2C_NODE DT_NODELABEL(mysensor)
 static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C_NODE);
 
+#if CONFIG_IMU_USE_INTERRUPT
 #define IMUI DT_ALIAS(imui)
 static const struct gpio_dt_spec imu_int = GPIO_DT_SPEC_GET(IMUI, gpios);
-
-static atomic_t is_imu_start;
 static uint32_t interrupt_count = 0;
 static uint32_t overflow_count = 0;
 static uint32_t error_count = 0;
+#endif
+
+static atomic_t is_imu_start;
 
 struct imu_sample {
   float acc[SEN_DATA_COUNT];
@@ -36,8 +43,10 @@ static float gyr_sens;
 
 static float acc_offset[SEN_DATA_COUNT];
 static float gyro_offset[SEN_DATA_COUNT];
+#if CONFIG_IMU_USE_INTERRUPT
 static float acc_filt[SEN_DATA_COUNT];
 static float gyro_filt[SEN_DATA_COUNT];
+#endif
 
 /* Accelerometer sensitivity (mg/LSB)
  * Source: ISM330 datasheet, Table 2 – Mechanical characteristics (page 10)
@@ -58,10 +67,12 @@ static const float gyr_sens_mdps_per_lsb[] = {
     [ISM_G_FS_1000DPS] = 35.0f,
     [ISM_G_FS_2000DPS] = 70.0f,
 };
+#if CONFIG_IMU_USE_INTERRUPT
 /* ================= FIFO INTERRUPT ================= */
 
 static struct gpio_callback imu_gpio_cb;
 K_SEM_DEFINE(fifo_sem, 0, 1);
+#endif
 
 /*
  * Values can also be updated at runtime using the imu_start shell command.
@@ -75,6 +86,7 @@ static uint8_t imu_fifo_acc_odr = CONFIG_IMU_FIFO_ACC_ODR;
 static uint8_t imu_fifo_gyro_odr = CONFIG_IMU_FIFO_GYRO_ODR;
 static uint8_t imu_fifo_watermark = CONFIG_IMU_FIFO_WATERMARK;
 
+#if CONFIG_IMU_USE_INTERRUPT
 /**
  * @brief IMU FIFO interrupt callback
  *
@@ -95,6 +107,7 @@ static void imu_int_cb(const struct device *dev, struct gpio_callback *cb,
   interrupt_count++;
   k_sem_give(&fifo_sem);
 }
+#endif /* CONFIG_IMU_USE_INTERRUPT */
 
 /**
  * @brief Update accelerometer and gyroscope sensitivity values
@@ -198,6 +211,7 @@ static int ism330_configure(void) {
   return 0;
 }
 
+#if CONFIG_IMU_USE_INTERRUPT
 /**
  * @brief Reset the IMU FIFO
  *
@@ -330,7 +344,6 @@ static void imu_fifo_read(void) {
   uint8_t raw[RAW_DATA_INTR_SIZE];
   int ret;
   int samples_read = 0;
-  struct imu_sample sample;
 
   /* Read FIFO status */
   ret = i2c_reg_read_byte_dt(&dev_i2c, ISM_FIFO_STATUS1, &s1);
@@ -411,6 +424,7 @@ static void imu_fifo_read(void) {
     }
   }
 }
+#endif /* CONFIG_IMU_USE_INTERRUPT */
 
 /**
  * @brief Initialize IMU hardware and interrupt configuration
@@ -421,8 +435,6 @@ static void imu_fifo_read(void) {
  * @return 0 on success, negative error code on failure
  */
 int32_t imu_init(void) {
-  int ret;
-
   if (!device_is_ready(dev_i2c.bus)) {
     printk("I2C not ready\n");
     return -ENODEV;
@@ -433,6 +445,7 @@ int32_t imu_init(void) {
     return -EIO;
   }
 #if CONFIG_IMU_USE_INTERRUPT
+  int ret;
   /* Setup GPIO interrupt */
   if (!device_is_ready(imu_int.port)) {
     printk("GPIO not ready\n");
@@ -490,7 +503,6 @@ static void imu_read_raw(struct ism330_data *d) {
  * to calculate accelerometer and gyroscope offsets.
  * Gravity is compensated on the Z-axis of the accelerometer.
  */
-
 static void imu_calibrate(void) {
   struct ism330_data d;
   int32_t acc_sum[SEN_DATA_COUNT] = {0};
@@ -510,7 +522,7 @@ static void imu_calibrate(void) {
 
   acc_offset[0] = acc_sum[0] / CAL_SAMPLES;
   acc_offset[1] = acc_sum[1] / CAL_SAMPLES;
-  acc_offset[2] = (acc_sum[2] / CAL_SAMPLES) - acc_sens;
+  acc_offset[2] = (acc_sum[2] / CAL_SAMPLES) - (int32_t)acc_sens;
 
   gyro_offset[0] = gyr_sum[0] / CAL_SAMPLES;
   gyro_offset[1] = gyr_sum[1] / CAL_SAMPLES;
@@ -610,14 +622,13 @@ static int32_t cmd_imu_start(const struct shell *shell, size_t argc,
   ret = ism330_configure();
   if (ret) {
     printk("IMU config failed: %d\n", ret);
-    return;
+    return -EIO;
   }
   imu_update_sensitivity();
 
   if (acc_sens <= 0.0f || gyr_sens <= 0.0f) {
-    printk("ERROR: Invalid IMU sensitivity (acc=%f gyr=%f)\n", acc_sens,
-           gyr_sens);
-    return;
+    LOG_ERR("Invalid IMU sensitivity (acc=%f gyr=%f)", acc_sens, gyr_sens);
+    return -EIO;
   }
 
   k_msleep(100);
@@ -626,7 +637,7 @@ static int32_t cmd_imu_start(const struct shell *shell, size_t argc,
   ret = ism330_fifo_enable();
   if (ret) {
     printk("FIFO enable failed: %d\n", ret);
-    return;
+    return -EIO;
   }
   printk("  Watermark: %d samples\n", FIFO_WATERMARK);
   printk("  Time out: %dms\n", INTERRUPT_TIMEOUT_MS);

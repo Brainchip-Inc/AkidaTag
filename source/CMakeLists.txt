@@ -62,6 +62,7 @@ target_sources(app PRIVATE
 	core/common/audio/mfcc.c
 	core/common/audio/audio_processor.c
 	core/common/inference/akida.cpp
+	core/common/inference/infer_utils.c
     core/interface/camera/spi_camera.c
 	core/io_objects.cpp
 	core/boot_manager.c
@@ -131,6 +132,8 @@ target_compile_options(app PRIVATE
     -fdata-sections
     -fno-common
 )
+
+zephyr_compile_options(-Wno-double-promotion)
 
 #
 # -------------------------------------------------------------
