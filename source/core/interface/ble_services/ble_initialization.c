@@ -617,7 +617,7 @@ static void app_info(void) {
 
   /* Frame 8: MF-LAST - pwr_con */
   data_len = snprintf(data_part, sizeof(data_part), "%d:%.2f,\r", CMD_APP_INFO,
-                      pwr_con);
+                      (double)pwr_con);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_LAST, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
@@ -836,9 +836,22 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 }
 #endif
 
+static void recycled_cb(void) {
+  int err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN,
+                                            BT_GAP_ADV_FAST_INT_MIN_2,
+                                            BT_GAP_ADV_FAST_INT_MAX_2, NULL),
+                            ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+  if (err) {
+    LOG_ERR("Advertising restart failed (err %d)\n", err);
+  } else {
+    LOG_INF("Advertising restarted\n");
+  }
+}
+
 BT_CONN_CB_DEFINE(conn_callbacks) = {
     .connected = connected_ble,
     .disconnected = disconnected_ble,
+    .recycled = recycled_cb,
 #ifdef CONFIG_BT_LBS_SECURITY_ENABLED
     .security_changed = security_changed,
 #endif
@@ -991,7 +1004,10 @@ int ble_init(void)
   }
 #endif
   get_device_id();
-  err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+  err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN,
+                                        BT_GAP_ADV_FAST_INT_MIN_2,
+                                        BT_GAP_ADV_FAST_INT_MAX_2, NULL),
+                        ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
   if (err) {
     LOG_ERR("Advertising failed to start (err %d)\n", err);
     return -1;

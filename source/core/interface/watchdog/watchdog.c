@@ -127,7 +127,7 @@ static int cmd_wdt_disable(const struct shell *shell, size_t argc,
   int timeout_sec = WDT_TIMEOUT_MS / 1000;
   shell_print(shell, "Watchdog feeding DISABLED - reset in ~%d s", timeout_sec);
 
-  unsigned int key = irq_lock();
+  (void)irq_lock();
   while (1) {
     /* Spin with interrupts disabled; WDT hardware fires after timeout */
   }

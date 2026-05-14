@@ -25,10 +25,10 @@ LOG_MODULE_REGISTER(battery_service, CONFIG_LOG_DEFAULT_LEVEL);
  * @param cmd Command type (CMD_BATTERY) to determine if forced send
  */
 void battery_service_send(command_type_t cmd) {
-  battery_status_t sts;
-  bool changed;
   char data_part[DATA_PART_SIZE];
 #ifdef CONFIG_SPARK_BOARD
+  battery_status_t sts;
+  bool changed;
   battery_get_status(&sts, &changed);
   if (cmd != CMD_BATTERY && !changed) {
     return;

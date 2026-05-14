@@ -451,6 +451,7 @@ int camera_start(void) {
   camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
   k_msleep(1);
   camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
+  return 0;
 }
 
 /**

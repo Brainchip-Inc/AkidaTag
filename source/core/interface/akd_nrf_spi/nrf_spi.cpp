@@ -67,7 +67,7 @@ void ZephyrSpiDriver::read_api(uint32_t header_size, uint8_t *data,
     LOG_ERR("NRF_SPI: SPI transfer failed: %d\n", err);
     return;
   }
-  memcpy(&data[0], &tx_buf[header_size], size);
+  memcpy(&data[0], &tx_buf[header_size], size - header_size);
 
   return;
 }
