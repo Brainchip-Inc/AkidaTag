@@ -2488,7 +2488,8 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
       printk("  app score <0.0-1.0>\n\r");
       printk("  app chiming <n>\n\r");
       printk("  app speech <ms>\n\r");
-      printk("  app reset                (restore all KWS params to defaults)\n\r");
+      printk("  app reset                (restore all KWS params to "
+             "defaults)\n\r");
       printk("  app metrics <0|1>\n\r");
       printk("  app show\n\r");
       printk("  app start                (resume KWS pipeline)\n\r");

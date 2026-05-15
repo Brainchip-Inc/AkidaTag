@@ -1,29 +1,29 @@
 #ifndef KWS_CONFIG_H
 #define KWS_CONFIG_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef enum {
-  KWS_PARAM_RMS              = 0,
-  KWS_PARAM_DEBOUNCE_MS      = 1,
-  KWS_PARAM_SMOOTHING_ALPHA  = 2,
-  KWS_PARAM_SCORE_THRESHOLD  = 3,
-  KWS_PARAM_CHIMING          = 4,
-  KWS_PARAM_SPEECH_TIMEOUT   = 5,
+  KWS_PARAM_RMS = 0,
+  KWS_PARAM_DEBOUNCE_MS = 1,
+  KWS_PARAM_SMOOTHING_ALPHA = 2,
+  KWS_PARAM_SCORE_THRESHOLD = 3,
+  KWS_PARAM_CHIMING = 4,
+  KWS_PARAM_SPEECH_TIMEOUT = 5,
   KWS_PARAM_COUNT
 } kws_param_id_t;
 
 typedef enum {
-  KWS_CFG_OK        = 0,
-  KWS_CFG_ERR_ID    = -1,
+  KWS_CFG_OK = 0,
+  KWS_CFG_ERR_ID = -1,
   KWS_CFG_ERR_RANGE = -2,
   KWS_CFG_ERR_PARSE = -3,
-  KWS_CFG_ERR_NVS   = -4,
+  KWS_CFG_ERR_NVS = -4,
 } kws_cfg_err_t;
 
 /* Call once during boot, right after init_setting_sub_system() and before

@@ -53,8 +53,10 @@ static void compute_envelope(const int16_t *x, int N, int16_t *out_pairs,
     const int16_t *p = &x[w * win_len];
     for (int i = 0; i < win_len; i++) {
       int16_t s = p[i];
-      if (s < lo) lo = s;
-      if (s > hi) hi = s;
+      if (s < lo)
+        lo = s;
+      if (s > hi)
+        hi = s;
     }
     out_pairs[2 * w] = lo;
     out_pairs[2 * w + 1] = hi;

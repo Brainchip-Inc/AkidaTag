@@ -128,8 +128,6 @@ bool wave_fallback_active(void);
 void send_current_value(char *);
 #endif
 
-
-
 typedef enum { FLAG_DISABLE = 0, FLAG_ENABLE = 1 } flag_state_t;
 /*
  * Send a keyword spotting (KWS) detection event to the phone.

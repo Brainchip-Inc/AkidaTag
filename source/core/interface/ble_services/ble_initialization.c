@@ -61,7 +61,7 @@ static bool send_in_progress = false;
  * frames. See send_pcm_wave() and wave_fallback_active(). */
 #define WAVE_MAGIC 0x42
 #define WAVE_HEADER_LEN 6
-#define WAVE_ENV_N_SAMPLES 64  /* 32 min/max pairs */
+#define WAVE_ENV_N_SAMPLES 64 /* 32 min/max pairs */
 #define WAVE_DEC_N_SAMPLES 32
 #define WAVE_ENV_FRAME_LEN (WAVE_HEADER_LEN + WAVE_ENV_N_SAMPLES * 2)
 #define WAVE_DEC_FRAME_LEN (WAVE_HEADER_LEN + WAVE_DEC_N_SAMPLES * 2)
@@ -399,8 +399,7 @@ void send_pcm_wave(const int16_t *samples, uint16_t n_samples) {
   }
 
   if (frames_in_window >= WAVE_FALLBACK_WINDOW) {
-    if (!wave_fallback &&
-        retries_in_window > WAVE_FALLBACK_RETRY_THRESHOLD) {
+    if (!wave_fallback && retries_in_window > WAVE_FALLBACK_RETRY_THRESHOLD) {
       LOG_WRN("wave: %u retries in last %u frames, downshift to decimation",
               retries_in_window, WAVE_FALLBACK_WINDOW);
       wave_fallback = true;
@@ -631,8 +630,8 @@ static void app_info(void) {
 
   /* Frame 3: MF-MID - number of user-visible classes (10 keywords + silence +
    * unknown, excluding the 3 edge-learning slots in kws_new_tags[]). */
-  data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO,
-                      12);
+  data_len =
+      snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO, 12);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
@@ -694,8 +693,8 @@ static void send_config_response(void) {
   char value_part[48];
 
   static const uint8_t frame_types[KWS_PARAM_COUNT] = {
-      FRAME_MF_START, FRAME_MF_MID,  FRAME_MF_MID,
-      FRAME_MF_MID,   FRAME_MF_MID,  FRAME_MF_LAST,
+      FRAME_MF_START, FRAME_MF_MID, FRAME_MF_MID,
+      FRAME_MF_MID,   FRAME_MF_MID, FRAME_MF_LAST,
   };
 
   LOG_INF("SENDING CONFIG SNAPSHOT (MULTI)\n");
@@ -707,8 +706,8 @@ static void send_config_response(void) {
       LOG_ERR("kws_config_format(%u) failed", i);
       return;
     }
-    int data_len = snprintf(data_part, sizeof(data_part), "%d:%s\r",
-                            CMD_CONFIG, value_part);
+    int data_len = snprintf(data_part, sizeof(data_part), "%d:%s\r", CMD_CONFIG,
+                            value_part);
     snprintf(frame, sizeof(frame), "%d,%u,%d,%s", frame_types[i], i, data_len,
              data_part);
     int err = send_frame(frame);
@@ -761,12 +760,18 @@ static void send_config_reset_ack(void) {
 /* Map kws_cfg_err_t to the short wire token the phone switches on. */
 static const char *cfg_err_to_str(kws_cfg_err_t err) {
   switch (err) {
-  case KWS_CFG_OK:        return NULL;
-  case KWS_CFG_ERR_ID:    return "ID";
-  case KWS_CFG_ERR_RANGE: return "RANGE";
-  case KWS_CFG_ERR_PARSE: return "PARSE";
-  case KWS_CFG_ERR_NVS:   return "NVS";
-  default:                return "UNKNOWN";
+  case KWS_CFG_OK:
+    return NULL;
+  case KWS_CFG_ERR_ID:
+    return "ID";
+  case KWS_CFG_ERR_RANGE:
+    return "RANGE";
+  case KWS_CFG_ERR_PARSE:
+    return "PARSE";
+  case KWS_CFG_ERR_NVS:
+    return "NVS";
+  default:
+    return "UNKNOWN";
   }
 }
 
@@ -830,9 +835,8 @@ static void handle_config_command(const char *payload) {
   char value_buf[32];
   const char *val = sep + 1;
   size_t val_len = strlen(val);
-  while (val_len > 0 &&
-         (val[val_len - 1] == '\r' || val[val_len - 1] == '\n' ||
-          val[val_len - 1] == ' ')) {
+  while (val_len > 0 && (val[val_len - 1] == '\r' || val[val_len - 1] == '\n' ||
+                         val[val_len - 1] == ' ')) {
     val_len--;
   }
   if (val_len == 0 || val_len >= sizeof(value_buf)) {
@@ -1029,8 +1033,8 @@ static void le_phy_updated_cb(struct bt_conn *conn,
 static void le_data_len_updated_cb(struct bt_conn *conn,
                                    struct bt_conn_le_data_len_info *info) {
   ARG_UNUSED(conn);
-  LOG_INF("Data length updated: tx_max_len=%u, rx_max_len=%u",
-          info->tx_max_len, info->rx_max_len);
+  LOG_INF("Data length updated: tx_max_len=%u, rx_max_len=%u", info->tx_max_len,
+          info->rx_max_len);
 }
 
 static void connected_ble(struct bt_conn *conn, uint8_t err) {

@@ -29,20 +29,20 @@ extern int chiming_threshold;
  * extern "C" at the definition site so C linkage is fine. */
 extern void reset_stale_inference_data(void);
 
-#define DEFAULT_RMS_THRESHOLD     550
-#define DEFAULT_DEBOUNCE_MS       300u
-#define DEFAULT_SMOOTHING_ALPHA   0.70f
-#define DEFAULT_SCORE_THRESHOLD   0.50f
+#define DEFAULT_RMS_THRESHOLD 550
+#define DEFAULT_DEBOUNCE_MS 300u
+#define DEFAULT_SMOOTHING_ALPHA 0.70f
+#define DEFAULT_SCORE_THRESHOLD 0.50f
 #define DEFAULT_CHIMING_THRESHOLD 3
 #define DEFAULT_SPEECH_TIMEOUT_MS 1300
 
-#define NVS_KEY_RMS      "rms"
+#define NVS_KEY_RMS "rms"
 #define NVS_KEY_DEBOUNCE "debounce"
-#define NVS_KEY_ALPHA    "alpha"
-#define NVS_KEY_SCORE    "score"
-#define NVS_KEY_CHIMING  "chiming"
-#define NVS_KEY_SPEECH   "speech"
-#define NVS_KEY_FW_VER   "fw_ver"
+#define NVS_KEY_ALPHA "alpha"
+#define NVS_KEY_SCORE "score"
+#define NVS_KEY_CHIMING "chiming"
+#define NVS_KEY_SPEECH "speech"
+#define NVS_KEY_FW_VER "fw_ver"
 
 static struct mcuboot_img_sem_ver stored_fw_ver;
 static bool fw_ver_loaded = false;
@@ -61,37 +61,44 @@ static int kws_handler_set(const char *name, size_t len,
   const char *next;
 
   if (settings_name_steq(name, NVS_KEY_RMS, &next) && !next) {
-    if (len != sizeof(rms_threshold)) return -EINVAL;
+    if (len != sizeof(rms_threshold))
+      return -EINVAL;
     read_cb(cb_arg, &rms_threshold, sizeof(rms_threshold));
     return 0;
   }
   if (settings_name_steq(name, NVS_KEY_DEBOUNCE, &next) && !next) {
-    if (len != sizeof(kws_debounce_time)) return -EINVAL;
+    if (len != sizeof(kws_debounce_time))
+      return -EINVAL;
     read_cb(cb_arg, &kws_debounce_time, sizeof(kws_debounce_time));
     return 0;
   }
   if (settings_name_steq(name, NVS_KEY_ALPHA, &next) && !next) {
-    if (len != sizeof(smoothing_alpha)) return -EINVAL;
+    if (len != sizeof(smoothing_alpha))
+      return -EINVAL;
     read_cb(cb_arg, &smoothing_alpha, sizeof(smoothing_alpha));
     return 0;
   }
   if (settings_name_steq(name, NVS_KEY_SCORE, &next) && !next) {
-    if (len != sizeof(score_threshold)) return -EINVAL;
+    if (len != sizeof(score_threshold))
+      return -EINVAL;
     read_cb(cb_arg, &score_threshold, sizeof(score_threshold));
     return 0;
   }
   if (settings_name_steq(name, NVS_KEY_CHIMING, &next) && !next) {
-    if (len != sizeof(chiming_threshold)) return -EINVAL;
+    if (len != sizeof(chiming_threshold))
+      return -EINVAL;
     read_cb(cb_arg, &chiming_threshold, sizeof(chiming_threshold));
     return 0;
   }
   if (settings_name_steq(name, NVS_KEY_SPEECH, &next) && !next) {
-    if (len != sizeof(speech_active_time_ms)) return -EINVAL;
+    if (len != sizeof(speech_active_time_ms))
+      return -EINVAL;
     read_cb(cb_arg, &speech_active_time_ms, sizeof(speech_active_time_ms));
     return 0;
   }
   if (settings_name_steq(name, NVS_KEY_FW_VER, &next) && !next) {
-    if (len != sizeof(stored_fw_ver)) return -EINVAL;
+    if (len != sizeof(stored_fw_ver))
+      return -EINVAL;
     read_cb(cb_arg, &stored_fw_ver, sizeof(stored_fw_ver));
     fw_ver_loaded = true;
     return 0;
@@ -152,9 +159,8 @@ int kws_config_init(void) {
     LOG_WRN("boot_read_bank_header failed — treating as firmware change");
   }
 
-  bool fw_changed =
-      !fw_ver_loaded ||
-      memcmp(&stored_fw_ver, &current_ver, sizeof(current_ver)) != 0;
+  bool fw_changed = !fw_ver_loaded || memcmp(&stored_fw_ver, &current_ver,
+                                             sizeof(current_ver)) != 0;
 
   if (fw_changed) {
     LOG_INF("kws_config: firmware change detected, resetting to defaults");
@@ -178,33 +184,43 @@ int kws_config_init(void) {
 }
 
 static int parse_int(const char *s, int *out) {
-  if (!s || !*s) return -1;
+  if (!s || !*s)
+    return -1;
   char *end = NULL;
   errno = 0;
   long v = strtol(s, &end, 10);
-  if (errno == ERANGE || end == s) return -1;
-  while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') end++;
-  if (*end != '\0') return -1;
+  if (errno == ERANGE || end == s)
+    return -1;
+  while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')
+    end++;
+  if (*end != '\0')
+    return -1;
   *out = (int)v;
   return 0;
 }
 
 static int parse_uint32(const char *s, uint32_t *out) {
   int v;
-  if (parse_int(s, &v) != 0) return -1;
-  if (v < 0) return -1;
+  if (parse_int(s, &v) != 0)
+    return -1;
+  if (v < 0)
+    return -1;
   *out = (uint32_t)v;
   return 0;
 }
 
 static int parse_float(const char *s, float *out) {
-  if (!s || !*s) return -1;
+  if (!s || !*s)
+    return -1;
   char *end = NULL;
   errno = 0;
   float v = strtof(s, &end);
-  if (errno == ERANGE || end == s) return -1;
-  while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') end++;
-  if (*end != '\0') return -1;
+  if (errno == ERANGE || end == s)
+    return -1;
+  while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')
+    end++;
+  if (*end != '\0')
+    return -1;
   *out = v;
   return 0;
 }
@@ -213,12 +229,14 @@ static int parse_float(const char *s, float *out) {
  * Only runs when the pipeline is actually active; during init the audio
  * thread hasn't been started yet and there is nothing to stop. */
 static void pipeline_bounce_begin(void) {
-  if (!dmic_running) return;
+  if (!dmic_running)
+    return;
   stop_dmic();
 }
 
 static void pipeline_bounce_end(void) {
-  if (!dmic_running) return;
+  if (!dmic_running)
+    return;
   reset_stale_inference_data();
   dmic_reset_dc_state();
   int rc = dmic_start();
@@ -244,27 +262,38 @@ kws_cfg_err_t kws_config_set_from_string(kws_param_id_t id,
 
   switch (id) {
   case KWS_PARAM_RMS:
-    if (parse_int(value_str, &v_i) != 0) return KWS_CFG_ERR_PARSE;
-    if (v_i < 0) return KWS_CFG_ERR_RANGE;
+    if (parse_int(value_str, &v_i) != 0)
+      return KWS_CFG_ERR_PARSE;
+    if (v_i < 0)
+      return KWS_CFG_ERR_RANGE;
     break;
   case KWS_PARAM_DEBOUNCE_MS:
-    if (parse_uint32(value_str, &v_u) != 0) return KWS_CFG_ERR_PARSE;
+    if (parse_uint32(value_str, &v_u) != 0)
+      return KWS_CFG_ERR_PARSE;
     break;
   case KWS_PARAM_SMOOTHING_ALPHA:
-    if (parse_float(value_str, &v_f) != 0) return KWS_CFG_ERR_PARSE;
-    if (v_f < 0.0f || v_f > 1.0f) return KWS_CFG_ERR_RANGE;
+    if (parse_float(value_str, &v_f) != 0)
+      return KWS_CFG_ERR_PARSE;
+    if (v_f < 0.0f || v_f > 1.0f)
+      return KWS_CFG_ERR_RANGE;
     break;
   case KWS_PARAM_SCORE_THRESHOLD:
-    if (parse_float(value_str, &v_f) != 0) return KWS_CFG_ERR_PARSE;
-    if (v_f < 0.0f || v_f > 1.0f) return KWS_CFG_ERR_RANGE;
+    if (parse_float(value_str, &v_f) != 0)
+      return KWS_CFG_ERR_PARSE;
+    if (v_f < 0.0f || v_f > 1.0f)
+      return KWS_CFG_ERR_RANGE;
     break;
   case KWS_PARAM_CHIMING:
-    if (parse_int(value_str, &v_i) != 0) return KWS_CFG_ERR_PARSE;
-    if (v_i < 1) return KWS_CFG_ERR_RANGE;
+    if (parse_int(value_str, &v_i) != 0)
+      return KWS_CFG_ERR_PARSE;
+    if (v_i < 1)
+      return KWS_CFG_ERR_RANGE;
     break;
   case KWS_PARAM_SPEECH_TIMEOUT:
-    if (parse_int(value_str, &v_i) != 0) return KWS_CFG_ERR_PARSE;
-    if (v_i < 0) return KWS_CFG_ERR_RANGE;
+    if (parse_int(value_str, &v_i) != 0)
+      return KWS_CFG_ERR_PARSE;
+    if (v_i < 0)
+      return KWS_CFG_ERR_RANGE;
     break;
   default:
     return KWS_CFG_ERR_ID;
@@ -354,7 +383,8 @@ kws_cfg_err_t kws_config_reset_to_defaults(void) {
 }
 
 int kws_config_format(kws_param_id_t id, char *out_buf, size_t out_len) {
-  if (!out_buf || out_len == 0) return -1;
+  if (!out_buf || out_len == 0)
+    return -1;
 
   int n;
   switch (id) {
@@ -379,6 +409,7 @@ int kws_config_format(kws_param_id_t id, char *out_buf, size_t out_len) {
   default:
     return -1;
   }
-  if (n < 0 || (size_t)n >= out_len) return -1;
+  if (n < 0 || (size_t)n >= out_len)
+    return -1;
   return n;
 }
