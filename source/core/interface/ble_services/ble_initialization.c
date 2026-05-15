@@ -6,6 +6,9 @@
 #include "kws_app.h"
 #include "kws_config.h"
 #include "led_init.h"
+
+#include <stdlib.h>
+
 #include <hal/nrf_ficr.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
@@ -92,7 +95,6 @@ uint16_t app_size = 128;
 
 char processor[] = "AKIDA_1500";
 char model_version[] = "v1.1.0";
-static uint16_t akd_nodes = 8;
 float pwr_con = 2.3f;
 /* Defined in kws_inputs.cpp. First 10 entries (0..9) are the trained keywords
  * advertised to the phone app; entries 10..11 are "silence"/"unknown" and
