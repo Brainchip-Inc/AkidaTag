@@ -71,6 +71,8 @@ This allows the LED logic to operate in two modes:
 | FLASH_WRITE / FLASH FULL_ERASE    | Green ON, Red ON |
 | UPDATE_SUCCESS  | Both LEDs blink 3 times, then restore runtime state based on BLE status |
 | UPDATE_FAILED   | Green OFF, Red ON |
+| EL_SPEAK_PROMPT (Spark board)  | Red LED solid ON during each "speak now" prompt window in the edge-learning 5-utterance flow; cleared as soon as speech is detected or the flow is aborted/completed. Green LED behavior preserved. |
+| INFERENCE_TRIGGER (Spark board)| Red LED flashes ~500 ms on every keyword prediction in inference mode for at-a-glance trigger confirmation. |
 
 ### PDM MIC 
 This application uses the DMIC (PDM microphone) interface with PDM_CLK on P1.9 and PDM_DIN on P1.10.
@@ -377,11 +379,44 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │         Akida_Nodes,      │                           │
      │         Power_Consumption"│                           │
      │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CONFIG:GET"       │                           │
+     │                           │                           ├───handle_config_command("GET")
+     │                           │                           │    6-frame snapshot burst, one
+     │                           │                           │    KWS param per frame
+     │                           │                           │    (MF_START, 4 × MF_MID, MF_LAST)
+     │                           │                           │
+     │◄──Receive Snapshot────────┼──────────────────────────────┤
+     │    "4:rms:550"            │                           │
+     │    "4:debounce_ms:300"    │                           │
+     │    "4:smoothing_alpha:0.70"                            │
+     │    "4:score_threshold:0.60"                            │
+     │    "4:chiming:3"          │                           │
+     │    "4:speech_timeout:1300"│                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CONFIG:<id>:<v>"  │                           │
+     │   (SET single param)      │                           ├───kws_config_set_from_string()
+     │                           │                           │    range-check → write global →
+     │                           │                           │    persist NVS → bounce DMIC
+     │                           │                           │
+     │◄──Receive ACK─────────────┼──────────────────────────────┤
+     │    "4:<id>:OK"            │                           │   on success
+     │    "4:<id>:ERR:<reason>"  │                           │   reason: ID | RANGE | PARSE | NVS
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CONFIG:RESET"     │                           │
+     │                           │                           ├───kws_config_reset_to_defaults()
+     │                           │                           │
+     │◄──Receive ACK + Snapshot──┼──────────────────────────────┤
+     │    "4:RESET:OK"           │                           │
+     │    + 6-frame snapshot     │                           │
      │                           │                           │
 	 ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_START"     │                           │
-     │                           │                           ├───Set event_flag = true
-     │                           │                           │    (KWS detection send start)
+     │                           │                           ├───kws_app_start() + event_flag=1
+     │                           │                           │    (DMIC + KWS pipeline resumed,
+     │                           │                           │     KWS detections sent to phone)
      │                           │                           │
      │◄──Receive KWS Events──────┼──────────────────────────────┤
      │    "KWS:hello"            │                           │
@@ -392,17 +427,25 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │    "CMD_STREAM_START"     │                           │
      │                           │                           ├───Set pdm_stream_flag = FLAG_ENABLE
      |                           |                           |   current_stream_flag = FLAG_DISABLE;
-     │                           │                           │    (Audio streaming active)
+     │                           │                           │    (PCM waveform stream active)
      │                           │                           │
-     │◄──Receive PDM Audio Data──┼──────────────────────────────┤
-     │    [Audio chunk 1]        │                           │
-     │    [Audio chunk 2]        │                           │
-     │    [Audio chunk 3]        │                           │
+     │◄──Binary PCM-envelope─────┼──────────────────────────────┤
+     │    notifications          │                           │   one frame per 60 ms audio block
+     │  CMD_STREAM_WAVE (0x0C)   │                           │   header: 'B', 0x0C, u16 seq LE,
+     │  ┌─ envelope mode ──────┐ │                           │           u16 n_samples LE
+     │  │ n_samples = 64       │ │                           │   envelope:    32 (min,max) pairs
+     │  │ 134 B, ~17.8 kbps    │ │                           │                = 134 B / 60 ms
+     │  └──────────────────────┘ │                           │   fallback:    every-30th-sample
+     │  ┌─ decimation fallback ┐ │                           │                = 70 B / 60 ms
+     │  │ n_samples = 32       │ │                           │   auto-fallback when MTU < 140 B or
+     │  │  70 B, ~9.3 kbps     │ │                           │   >5 retries in last 50 frames;
+     │  └──────────────────────┘ │                           │   recovers after 100 clean frames.
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_STOP"      │                           │
-     │                           │                           ├───Set event_flag = FLAG_DISABLE
-     │                           │                           │    (KWS detection sending stopped)
+     │                           │                           ├───event_flag=0 + kws_app_stop()
+     │                           │                           │    (KWS detections suppressed,
+     │                           │                           │     DMIC + pipeline halted)
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
      │    "DEPLOY_STOP:ACK"      │                           │
@@ -921,7 +964,12 @@ The `app` command provides runtime configuration for the KWS (Keyword Spotting) 
 | `app speech <ms>` | 1300 | Set speech active timeout (resets to idle if RMS stays low) |
 | `app metrics <0\|1>` | 0 | Enable/disable detailed metrics output (confidence %, timing) |
 | `app show` | — | Print all current parameters with usage |
+| `app start` | — | Resume the KWS pipeline (idempotent: starts the DMIC and re-arms the learning gate) |
+| `app stop` | — | Halt the KWS pipeline (idempotent: stops the DMIC and clears the learning gate) |
+| `app reset` | — | Restore all KWS params to compile-time defaults and persist to NVS |
 | `app el <n>` | — | Edge learning commands (mode transitions) |
+
+All numeric `app <param> <val>` setters above are routed through `kws_config_set_from_string()` — values are range-checked, written into NVS-backed settings, and the DMIC is briefly bounced (~120 ms) so the new value takes effect on the next inference frame. Persisted values are reloaded on boot; a firmware version change (tracked at NVS key `kws/fw_ver`) automatically resets every parameter back to its compile-time default.
 
 #### Keyword Detection Output
 
