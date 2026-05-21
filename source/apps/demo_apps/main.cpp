@@ -59,6 +59,8 @@ extern "C" {
 #include "ble_services/file_transfer.h"
 #include "boot_manager.h"
 #include "error.h"
+#include "kws_app.h"
+#include "kws_config.h"
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 #include "imu_h/imu.h"
 #endif
@@ -470,6 +472,18 @@ static bool kws_model_present = false;
  * @param mode  - mode to be switched to.
  */
 static void switch_mode(int mode);
+
+#ifdef CONFIG_SPARK_BOARD
+/**
+ * @brief Restore LED to its default runtime state based on BLE connectivity.
+ *        Used to clear transient states like LEARN_SPEAK_NOW.
+ */
+static inline void restore_default_led_state(void) {
+  led_set_state(is_ble_connected() ? LED_STATE_BLE_CONNECTED
+                                   : LED_STATE_NORMAL_APP);
+}
+#endif
+
 float mfcc_fs = 123.56967163085938f;
 
 // KWS class definitions
@@ -614,6 +628,46 @@ static int start_dmic_audio_proc(void) {
 
   return 0;
 }
+
+/* kws_app: runtime start/stop of the inference pipeline. The heavy init
+ * (DMIC configure, MFCC init, thread create) runs once from
+ * start_dmic_audio_proc() at boot; these just trigger/untrigger DMIC capture
+ * and flip the state gate so BLE DEPLOY_START/STOP and UART "app start/stop"
+ * are cheap and quick. */
+extern "C" void reset_stale_inference_data(void);
+static bool kws_app_running = false;
+
+extern "C" int kws_app_start(void) {
+  if (kws_app_running) {
+    return 0;
+  }
+  int rc = dmic_start();
+  if (rc < 0) {
+    printk("kws_app_start: dmic_start failed %d\n\r", rc);
+    return rc;
+  }
+  reset_stale_inference_data();
+  dmic_reset_dc_state();
+  cur_kws_edge_state = STATE_INFERENCE;
+  kws_app_running = true;
+  kws_config_notify_dmic_started();
+  printk("kws_app: started\n\r");
+  return 0;
+}
+
+extern "C" int kws_app_stop(void) {
+  if (!kws_app_running) {
+    return 0;
+  }
+  kws_config_notify_dmic_stopped();
+  cur_kws_edge_state = STATE_STOPPED;
+  stop_dmic();
+  kws_app_running = false;
+  printk("kws_app: stopped\n\r");
+  return 0;
+}
+
+extern "C" bool kws_app_is_running(void) { return kws_app_running; }
 #if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
 static int initialize_spi_camera_interface(void) {
 
@@ -685,6 +739,9 @@ static void switch_learning_delayed(struct k_work *work) {
     learn_state.augmentations_per_utterance = 2 * g_num_neurons_per_class;
     learn_state.waiting_since_ts = time_ms();
     learn_rng_state = (uint32_t)k_uptime_get();
+#ifdef CONFIG_SPARK_BOARD
+    led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+#endif
 
     /* Use shorter VAD timeout during learning for tighter capture */
     saved_speech_active_time_ms = speech_active_time_ms;
@@ -870,6 +927,8 @@ static int initiate_kws_inference(uint8_t is_el_model_l) {
    * time at during the initialization to suppress any noise from dmic */
   last_trigger_time_ms = time_ms() + 1200ULL;
   start_dmic_audio_proc();
+  kws_config_notify_dmic_started();
+  kws_app_running = true;
   return SUCCESS;
 }
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
@@ -1118,6 +1177,7 @@ int main(void) {
   printk("Akida TAG Application\n");
   confirm_image_if_needed();
   init_setting_sub_system();
+  kws_config_init();
   shared_buf_init();
   file_transfer_init();
   ble_init();
@@ -1405,6 +1465,10 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
                  confidence * 100.0f);
     }
     last_trigger_time_ms = time_ms();
+#ifdef CONFIG_SPARK_BOARD
+    led_set_state(LED_STATE_KEYWORD_TRIGGERED);
+    k_sem_give(&led_sem);
+#endif
     reset_stale_inference_data();
   }
   return;
@@ -1775,7 +1839,8 @@ static void akd_learn_fetch_handler(struct k_work *work) {
 
 /**
  * @brief Complete the structured learning process: save weights and return
- *        to inference mode.
+ *        to learn-select mode. The user must explicitly issue `el 0`
+ *        (long-press button 0) to leave learn-select and resume inference.
  */
 static void complete_structured_learning(void) {
   printk("\nlearn: COMPLETE - %d utterances, %d total fit() calls\n\r",
@@ -1800,7 +1865,10 @@ static void complete_structured_learning(void) {
   }
   akida_learn_mode(false);
 
-  switch_mode(STATE_INFERENCE);
+  switch_mode(STATE_LEARN_SELECT);
+#ifdef CONFIG_SPARK_BOARD
+  restore_default_led_state();
+#endif
 }
 
 /**
@@ -1821,6 +1889,9 @@ static void learn_utterance_complete(void) {
     printk("\nlearn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
            LEARN_NUM_UTTERANCES);
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
+#ifdef CONFIG_SPARK_BOARD
+    led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+#endif
   }
 }
 
@@ -1906,6 +1977,9 @@ static void learn_process_handler(struct k_work *work) {
     printk("learn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
            LEARN_NUM_UTTERANCES);
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
+#ifdef CONFIG_SPARK_BOARD
+    led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+#endif
     return;
   }
 
@@ -2019,6 +2093,9 @@ static void learning_on_spectrogram(int spectrogram_index) {
     learn_state.last_callback_ts = time_ms();
     printk("learn: speech detected, capturing utterance %d/%d...\n\r",
            learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
+#ifdef CONFIG_SPARK_BOARD
+    restore_default_led_state();
+#endif
     /* Fall through to capture the first batch of frames */
     /* fallthrough */
 
@@ -2080,6 +2157,9 @@ static void learning_on_user_input(int input_type) {
     }
 
     akida_learn_mode(false);
+#ifdef CONFIG_SPARK_BOARD
+    restore_default_led_state();
+#endif
 
     break;
   case USER_INPUT_SP(0):
@@ -2107,6 +2187,9 @@ static void learning_on_user_input(int input_type) {
     mesh_mem = (k_cycle_get_32() - cur_ts);
     duration_us = k_cyc_to_us_floor64(mesh_mem);
     printk("mesh_mem = %" PRIu64 " us\n", duration_us);
+#ifdef CONFIG_SPARK_BOARD
+    restore_default_led_state();
+#endif
 
     break;
   default:
@@ -2306,8 +2389,9 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
       verbose_on = atoi(argv[2]);
       printk("verbose_on = %d\n\r", verbose_on);
     } else if (!strcmp(argv[1], "stop")) {
-      cur_kws_edge_state = STATE_STOPPED;
-      audio_processor_stop();
+      kws_app_stop();
+    } else if (!strcmp(argv[1], "start")) {
+      kws_app_start();
     } else if (!strcmp(argv[1], "el")) {
       if (argc > 2) {
         printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
@@ -2324,11 +2408,18 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
         kws_edge_state[cur_kws_edge_state].on_user_input(atoi(argv[2]));
       }
     } else if (argc > 2 && !strcmp(argv[1], "rms")) {
-      rms_threshold = atoi(argv[2]);
-      printk("rms_threshold = %d\n\r", rms_threshold);
+      kws_cfg_err_t e = kws_config_set_from_string(KWS_PARAM_RMS, argv[2]);
+      if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
+        printk("rms_threshold = %d\n\r", rms_threshold);
+      else
+        printk("rms set failed (err %d)\n\r", (int)e);
     } else if (argc > 2 && !strcmp(argv[1], "debounce")) {
-      kws_debounce_time = atoi(argv[2]);
-      printk("kws_debounce_time = %u ms\n\r", kws_debounce_time);
+      kws_cfg_err_t e =
+          kws_config_set_from_string(KWS_PARAM_DEBOUNCE_MS, argv[2]);
+      if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
+        printk("kws_debounce_time = %u ms\n\r", kws_debounce_time);
+      else
+        printk("debounce set failed (err %d)\n\r", (int)e);
     } else if (argc > 2 && !strcmp(argv[1], "alpha")) {
       smoothing_alpha = atof(argv[2]);
       if (smoothing_alpha < 0.0f)
@@ -2337,10 +2428,11 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
         smoothing_alpha = 1.0f;
       LOG_INF("smoothing_alpha = %.2f", smoothing_alpha);
     } else if (argc > 2 && !strcmp(argv[1], "chiming")) {
-      chiming_threshold = atoi(argv[2]);
-      if (chiming_threshold < 1)
-        chiming_threshold = 1;
-      printk("chiming_threshold = %d\n\r", chiming_threshold);
+      kws_cfg_err_t e = kws_config_set_from_string(KWS_PARAM_CHIMING, argv[2]);
+      if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
+        printk("chiming_threshold = %d\n\r", chiming_threshold);
+      else
+        printk("chiming set failed (err %d)\n\r", (int)e);
     } else if (argc > 2 && !strcmp(argv[1], "score")) {
       score_threshold = atof(argv[2]);
       if (score_threshold < 0.0f)
@@ -2349,8 +2441,22 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
         score_threshold = 1.0f;
       LOG_INF("score_threshold = %.2f", score_threshold);
     } else if (argc > 2 && !strcmp(argv[1], "speech")) {
-      speech_active_time_ms = atoi(argv[2]);
-      printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
+      kws_cfg_err_t e =
+          kws_config_set_from_string(KWS_PARAM_SPEECH_TIMEOUT, argv[2]);
+      if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
+        printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
+      else
+        printk("speech set failed (err %d)\n\r", (int)e);
+    } else if (!strcmp(argv[1], "reset")) {
+      kws_cfg_err_t e = kws_config_reset_to_defaults();
+      printk("app reset: defaults restored%s\n\r",
+             e == KWS_CFG_ERR_NVS ? " (NVS save warned)" : "");
+      printk("  rms_threshold    = %d\n\r", rms_threshold);
+      printk("  debounce_time    = %u ms\n\r", kws_debounce_time);
+      printk("  smoothing_alpha  = %.2f\n\r", smoothing_alpha);
+      printk("  score_threshold  = %.2f\n\r", score_threshold);
+      printk("  chiming_threshold= %d\n\r", chiming_threshold);
+      printk("  speech_timeout   = %d ms\n\r", speech_active_time_ms);
     } else if (argc > 2 && !strcmp(argv[1], "metrics")) {
       metrics_on = atoi(argv[2]);
       printk("metrics_on = %d\n\r", metrics_on);
@@ -2382,9 +2488,12 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
       printk("  app score <0.0-1.0>\n\r");
       printk("  app chiming <n>\n\r");
       printk("  app speech <ms>\n\r");
+      printk("  app reset                (restore all KWS params to "
+             "defaults)\n\r");
       printk("  app metrics <0|1>\n\r");
       printk("  app show\n\r");
-      printk("  app stop\n\r");
+      printk("  app start                (resume KWS pipeline)\n\r");
+      printk("  app stop                 (halt KWS pipeline)\n\r");
       printk("  app el <n>\n\r");
     }
   }

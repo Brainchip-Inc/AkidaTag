@@ -67,6 +67,7 @@ target_sources(app PRIVATE
 	core/io_objects.cpp
 	core/boot_manager.c
 	core/littlefs_storage.c
+	core/common/kws_config.c
 )
 if(CONFIG_CAMERA_ENABLE_THREAD)
     target_sources(app PRIVATE
