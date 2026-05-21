@@ -46,7 +46,7 @@ void battery_service_send(command_type_t cmd) {
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_SINGLE, 0, data_len,
            data_part);
 
-  int err = ble_send_frame(frame);
+  int err = send_frame(frame);
   if (err) {
     LOG_ERR("battery send failed (%d)", err);
   } else {

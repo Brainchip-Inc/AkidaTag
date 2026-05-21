@@ -11,6 +11,6 @@
  * @return 0 on success, -ENOTCONN if no active connection, -EBUSY on timeout,
  *         or a negative errno propagated from bt_nus_send
  */
-int ble_send_frame(const char *frame);
+int send_frame(const char *frame);
 
 #endif

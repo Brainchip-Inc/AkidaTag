@@ -51,6 +51,9 @@ typedef enum {
   LED_STATE_FLASH_WRITE,     /**< Flash write in progress */
   LED_STATE_UPDATE_SUCCESS,  /**< Update completed successfully */
   LED_STATE_UPDATE_FAILED,   /**< Update failed */
+  LED_STATE_LEARN_SPEAK_NOW, /**< Learning: prompting user to speak (Red ON) */
+  LED_STATE_KEYWORD_TRIGGERED, /**< Inference: keyword detected (Red short
+                                  flash) */
 } led_state_t;
 
 /**
