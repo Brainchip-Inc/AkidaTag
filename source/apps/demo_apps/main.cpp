@@ -54,7 +54,6 @@
 extern "C" {
 #endif
 #include "audio_processor.h"
-#include "current_ic/current_ic.h"
 #include "ble_services/ble_initialization.h"
 #include "ble_services/edge_learning.h"
 #include "ble_services/file_transfer.h"
@@ -69,6 +68,7 @@ extern "C" {
 #include "battery/battery.h"
 #include "ble_services/battery_service.h"
 #include "button/user_button.h"
+#include "current_ic/current_ic.h"
 #include "gpio/gpio.h"
 #endif
 #include "led_init.h"
@@ -1063,7 +1063,9 @@ static void akd_async_thread(void *a, void *b, void *c) {
     if (-EFAILURE !=
         akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
 
+#ifdef CONFIG_SPARK_BOARD
       inference_current_dump();
+#endif
       uint64_t fetch_end_ts = time_ms();
       uint32_t fetch_time = (uint32_t)(fetch_end_ts - fetch_start_ts);
       if (verbose_on) {
@@ -1502,7 +1504,9 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
     do {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akida_get_clock_counter();
+#ifdef CONFIG_SPARK_BOARD
       inference_current_start();
+#endif
       ret = akida_enqueue(input, input_shape, NULL);
       uint32_t enq_time = (uint32_t)(time_ms() - inference_start_ts);
       if (verbose_on) {
@@ -1805,7 +1809,9 @@ static void akd_learn_fetch_handler(struct k_work *work) {
            learn_state.current_aug_idx);
     return;
   }
+#ifdef CONFIG_SPARK_BOARD
   inference_current_dump();
+#endif
 
   learn_state.total_fit_calls++;
   int idx = ++learn_state.current_aug_idx;
