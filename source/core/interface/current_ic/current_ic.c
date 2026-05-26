@@ -102,27 +102,27 @@ static struct adc_sequence sequences[ARRAY_SIZE(adc_channels)];
  *     present in the inference phase only.
  * ============================================================================
  */
-static uint16_t            inf_raw_buf;       /* SAADC raw read target */
-static struct adc_sequence inf_seq;           /* sequence bound to AIN1 (CH1) */
-static bool                inf_seq_inited;    /* lazy-init guard for inf_seq */
+static uint16_t inf_raw_buf;        /* SAADC raw read target */
+static struct adc_sequence inf_seq; /* sequence bound to AIN1 (CH1) */
+static bool inf_seq_inited;         /* lazy-init guard for inf_seq */
 
 /* Full-window running accumulators. Reset in inference_current_start(). */
-static float    inf_sum;        /* sum of all mA samples; /count -> mean */
-static float    inf_min;        /* lowest sample seen; init +1e9 sentinel */
-static float    inf_max;        /* highest sample seen; init -1e9 sentinel */
-static uint32_t inf_max_idx;    /* sample index where inf_max was recorded */
-static uint32_t inf_count;      /* number of samples taken so far */
-static atomic_t inf_active = ATOMIC_INIT(0);  /* 1 while sampling armed */
+static float inf_sum;        /* sum of all mA samples; /count -> mean */
+static float inf_min;        /* lowest sample seen; init +1e9 sentinel */
+static float inf_max;        /* highest sample seen; init -1e9 sentinel */
+static uint32_t inf_max_idx; /* sample index where inf_max was recorded */
+static uint32_t inf_count;   /* number of samples taken so far */
+static atomic_t inf_active = ATOMIC_INIT(0); /* 1 while sampling armed */
 
 /* Tail ring: overwrites oldest. After >= INF_TAIL_LEN samples, contents are
  * always the most-recent INF_TAIL_LEN values (slot order does not matter
  * because tail stats are order-independent sum/max). */
-static float    inf_tail[INF_TAIL_LEN];
-static uint8_t  inf_tail_head;  /* next write index, 0..INF_TAIL_LEN-1 */
+static float inf_tail[INF_TAIL_LEN];
+static uint8_t inf_tail_head; /* next write index, 0..INF_TAIL_LEN-1 */
 
-static struct k_timer inf_period_timer;   /* periodic, INF_SAMPLE_PERIOD_US */
-static struct k_timer inf_timeout_timer;  /* one-shot, INF_SAMPLE_TIMEOUT_US */
-static struct k_work  inf_sample_work;    /* runs ADC read in thread ctx */
+static struct k_timer inf_period_timer;  /* periodic, INF_SAMPLE_PERIOD_US */
+static struct k_timer inf_timeout_timer; /* one-shot, INF_SAMPLE_TIMEOUT_US */
+static struct k_work inf_sample_work;    /* runs ADC read in thread ctx */
 
 /* Runs in workqueue thread context, submitted by inf_period_expiry every
  * INF_SAMPLE_PERIOD_US. Performs one SAADC conversion (10 us ACQ + ~2 us
@@ -141,10 +141,14 @@ static void inf_sample_work_handler(struct k_work *work) {
   float val_mv = (float)(int32_t)inf_raw_buf * adc_scale;
   float mA = val_mv / SHUNT_RESISTOR_GAIN_0V8;
   inf_sum += mA;
-  if (mA < inf_min) inf_min = mA;
+  if (mA < inf_min)
+    inf_min = mA;
   /* inf_max_idx captured BEFORE inf_count++ so it stays 0-based: first
    * sample is index 0, elapsed-us = inf_max_idx * INF_SAMPLE_PERIOD_US. */
-  if (mA > inf_max) { inf_max = mA; inf_max_idx = inf_count; }
+  if (mA > inf_max) {
+    inf_max = mA;
+    inf_max_idx = inf_count;
+  }
   inf_tail[inf_tail_head] = mA;
   inf_tail_head = (inf_tail_head + 1U) % INF_TAIL_LEN;
   inf_count++;
@@ -187,7 +191,7 @@ void inference_current_start(void) {
 
   if (!inf_seq_inited) {
     inf_seq = (struct adc_sequence){
-        .buffer      = &inf_raw_buf,
+        .buffer = &inf_raw_buf,
         .buffer_size = sizeof(inf_raw_buf),
     };
     int err = adc_sequence_init_dt(&adc_channels[ADC_CH_1], &inf_seq);
@@ -198,20 +202,18 @@ void inference_current_start(void) {
     inf_seq_inited = true;
   }
 
-  inf_sum       = 0.0f;
-  inf_min       = 1e9f;   /* sentinel: any real sample is smaller */
-  inf_max       = -1e9f;  /* sentinel: any real sample is larger */
-  inf_max_idx   = 0;
-  inf_tail_head = 0;      /* inf_tail[] contents become valid as samples land;
-                             at dump we only read min(inf_count, INF_TAIL_LEN) slots */
-  inf_count     = 0;
+  inf_sum = 0.0f;
+  inf_min = 1e9f;  /* sentinel: any real sample is smaller */
+  inf_max = -1e9f; /* sentinel: any real sample is larger */
+  inf_max_idx = 0;
+  inf_tail_head =
+      0; /* inf_tail[] contents become valid as samples land;
+            at dump we only read min(inf_count, INF_TAIL_LEN) slots */
+  inf_count = 0;
   atomic_set(&inf_active, 1);
-  k_timer_start(&inf_period_timer,
-                K_USEC(INF_SAMPLE_PERIOD_US),
+  k_timer_start(&inf_period_timer, K_USEC(INF_SAMPLE_PERIOD_US),
                 K_USEC(INF_SAMPLE_PERIOD_US));
-  k_timer_start(&inf_timeout_timer,
-                K_USEC(INF_SAMPLE_TIMEOUT_US),
-                K_NO_WAIT);
+  k_timer_start(&inf_timeout_timer, K_USEC(INF_SAMPLE_TIMEOUT_US), K_NO_WAIT);
 }
 
 /**
@@ -239,9 +241,10 @@ void inference_current_stop(void) {
  * glance:
  *
  *   spike=0, tail_spike=0  -- no excursion in either window
- *   spike=1, tail_spike=0  -- excursion during SPI transfer (use 'at' to confirm)
- *   spike=0, tail_spike=1  -- excursion during inference compute only
- *   spike=1, tail_spike=1  -- excursion in both, or one large event near transition
+ *   spike=1, tail_spike=0  -- excursion during SPI transfer (use 'at' to
+ * confirm) spike=0, tail_spike=1  -- excursion during inference compute only
+ *   spike=1, tail_spike=1  -- excursion in both, or one large event near
+ * transition
  *
  * Tail stats iterate inf_tail[] in slot order (not chronological); this is
  * safe because sum and max are order-independent.
@@ -254,64 +257,63 @@ void inference_current_dump(void) {
   }
 
   /* Full-window derived metrics. */
-  float    avg    = inf_sum / (float)n;
-  int      spike  = (inf_max > avg + INF_SPIKE_THRESH_MA) ? 1 : 0;
+  float avg = inf_sum / (float)n;
+  int spike = (inf_max > avg + INF_SPIKE_THRESH_MA) ? 1 : 0;
   uint32_t dur_us = n * INF_SAMPLE_PERIOD_US;
   uint32_t max_us = inf_max_idx * INF_SAMPLE_PERIOD_US;
 
   /* Tail-window stats: average + max over the last min(n, INF_TAIL_LEN)
    * samples — these land in the ~240 us ending at done-IRQ, i.e. mostly
    * the Akida compute phase, not the SPI transfer. */
-  uint8_t tail_n = (inf_count < INF_TAIL_LEN) ? (uint8_t)inf_count : (uint8_t)INF_TAIL_LEN;
-  float   tail_sum = 0.0f;
-  float   tail_max = -1e9f;
+  uint8_t tail_n =
+      (inf_count < INF_TAIL_LEN) ? (uint8_t)inf_count : (uint8_t)INF_TAIL_LEN;
+  float tail_sum = 0.0f;
+  float tail_max = -1e9f;
   for (uint8_t i = 0; i < tail_n; i++) {
     tail_sum += inf_tail[i];
-    if (inf_tail[i] > tail_max) tail_max = inf_tail[i];
+    if (inf_tail[i] > tail_max)
+      tail_max = inf_tail[i];
   }
-  float tail_avg   = tail_sum / (float)tail_n;
-  int   tail_spike = (tail_max > tail_avg + INF_SPIKE_THRESH_MA) ? 1 : 0;
+  float tail_avg = tail_sum / (float)tail_n;
+  int tail_spike = (tail_max > tail_avg + INF_SPIKE_THRESH_MA) ? 1 : 0;
 
   /* Manual sign + integer + 2-decimal fraction extraction below, repeated
    * for each mA field. printk in this build does not support %f, so floats
    * are split into "sign string" + "%d.%02d" by hand. */
-  int   a_sign  = (avg < 0.0f) ? -1 : 1;
-  float a_abs   = avg * a_sign;
-  int   a_int   = (int)a_abs;
-  int   a_frac  = (int)((a_abs - a_int) * 100.0f);
+  int a_sign = (avg < 0.0f) ? -1 : 1;
+  float a_abs = avg * a_sign;
+  int a_int = (int)a_abs;
+  int a_frac = (int)((a_abs - a_int) * 100.0f);
 
-  int   mn_sign = (inf_min < 0.0f) ? -1 : 1;
-  float mn_abs  = inf_min * mn_sign;
-  int   mn_int  = (int)mn_abs;
-  int   mn_frac = (int)((mn_abs - mn_int) * 100.0f);
+  int mn_sign = (inf_min < 0.0f) ? -1 : 1;
+  float mn_abs = inf_min * mn_sign;
+  int mn_int = (int)mn_abs;
+  int mn_frac = (int)((mn_abs - mn_int) * 100.0f);
 
-  int   mx_sign = (inf_max < 0.0f) ? -1 : 1;
-  float mx_abs  = inf_max * mx_sign;
-  int   mx_int  = (int)mx_abs;
-  int   mx_frac = (int)((mx_abs - mx_int) * 100.0f);
+  int mx_sign = (inf_max < 0.0f) ? -1 : 1;
+  float mx_abs = inf_max * mx_sign;
+  int mx_int = (int)mx_abs;
+  int mx_frac = (int)((mx_abs - mx_int) * 100.0f);
 
-  int   ta_sign = (tail_avg < 0.0f) ? -1 : 1;
-  float ta_abs  = tail_avg * ta_sign;
-  int   ta_int  = (int)ta_abs;
-  int   ta_frac = (int)((ta_abs - ta_int) * 100.0f);
+  int ta_sign = (tail_avg < 0.0f) ? -1 : 1;
+  float ta_abs = tail_avg * ta_sign;
+  int ta_int = (int)ta_abs;
+  int ta_frac = (int)((ta_abs - ta_int) * 100.0f);
 
-  int   tx_sign = (tail_max < 0.0f) ? -1 : 1;
-  float tx_abs  = tail_max * tx_sign;
-  int   tx_int  = (int)tx_abs;
-  int   tx_frac = (int)((tx_abs - tx_int) * 100.0f);
+  int tx_sign = (tail_max < 0.0f) ? -1 : 1;
+  float tx_abs = tail_max * tx_sign;
+  int tx_int = (int)tx_abs;
+  int tx_frac = (int)((tx_abs - tx_int) * 100.0f);
 
-  printk("INF[0V8] N=%u dur=%u.%03u ms avg=%s%d.%02d min=%s%d.%02d max=%s%d.%02d mA at=%u.%03u ms spike=%d | tail_N=%u tail_avg=%s%d.%02d tail_max=%s%d.%02d mA tail_spike=%d\n",
-         (unsigned)n,
-         (unsigned)(dur_us / 1000U), (unsigned)(dur_us % 1000U),
-         (a_sign  < 0 ? "-" : ""), a_int,  a_frac,
-         (mn_sign < 0 ? "-" : ""), mn_int, mn_frac,
-         (mx_sign < 0 ? "-" : ""), mx_int, mx_frac,
-         (unsigned)(max_us / 1000U), (unsigned)(max_us % 1000U),
-         spike,
-         (unsigned)tail_n,
-         (ta_sign < 0 ? "-" : ""), ta_int, ta_frac,
-         (tx_sign < 0 ? "-" : ""), tx_int, tx_frac,
-         tail_spike);
+  printk("INF[0V8] N=%u dur=%u.%03u ms avg=%s%d.%02d min=%s%d.%02d "
+         "max=%s%d.%02d mA at=%u.%03u ms spike=%d | tail_N=%u "
+         "tail_avg=%s%d.%02d tail_max=%s%d.%02d mA tail_spike=%d\n",
+         (unsigned)n, (unsigned)(dur_us / 1000U), (unsigned)(dur_us % 1000U),
+         (a_sign < 0 ? "-" : ""), a_int, a_frac, (mn_sign < 0 ? "-" : ""),
+         mn_int, mn_frac, (mx_sign < 0 ? "-" : ""), mx_int, mx_frac,
+         (unsigned)(max_us / 1000U), (unsigned)(max_us % 1000U), spike,
+         (unsigned)tail_n, (ta_sign < 0 ? "-" : ""), ta_int, ta_frac,
+         (tx_sign < 0 ? "-" : ""), tx_int, tx_frac, tail_spike);
 }
 /**
  * @brief Initialize GPIO pins for battery charger status monitoring
@@ -384,9 +386,9 @@ int current_ic_init(void) {
     }
   }
 
-  k_timer_init(&inf_period_timer,  inf_period_expiry,  NULL);
+  k_timer_init(&inf_period_timer, inf_period_expiry, NULL);
   k_timer_init(&inf_timeout_timer, inf_timeout_expiry, NULL);
-  k_work_init (&inf_sample_work,   inf_sample_work_handler);
+  k_work_init(&inf_sample_work, inf_sample_work_handler);
 
   return 0;
 }
