@@ -1,6 +1,9 @@
 #ifndef CURRENT_IC_H
 #define CURRENT_IC_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #define CURRENT_STACK_SIZE 2048
 #define CURRENT_PRIORITY 5
 #define AVG_SAMPLES 20
@@ -44,7 +47,7 @@ bat_status check_bat_status(void);
 /* Sample cadence. 40 us is past the INA190A1 step-settling time (~30 us per
  * datasheet SBOS863D) and yields ~4-5 samples inside the 180 us Akida
  * compute phase. */
-#define INF_SAMPLE_PERIOD_US  40
+#define INF_SAMPLE_PERIOD_US 40
 
 /* Safety stop. The chip's done-IRQ normally ends sampling well before this
  * fires; the timeout only kicks in if that IRQ never arrives. */
@@ -53,11 +56,14 @@ bat_status check_bat_status(void);
 /* Tail-ring depth. 6 * 40 us = 240 us trailing window — covers the 180 us
  * inference compute with margin against timer-phase jitter, while keeping
  * the tail mean dominated by inference (not SPI-transfer) current. */
-#define INF_TAIL_LEN          6
+#define INF_TAIL_LEN 6
 
 /* Spike threshold: a sample is flagged as a spike when it exceeds the mean
  * by this many mA. Applied to both full-window and tail stat sets. */
-#define INF_SPIKE_THRESH_MA   50.0f
+#define INF_SPIKE_THRESH_MA 50.0f
+
+/* Default N for a CLI-driven bench run (`cmeas start` with no argument). */
+#define INF_RUN_DEFAULT_N 1000U
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,6 +83,21 @@ void inference_current_stop(void);
  * duration, full-window avg/min/max/spike, peak-occurrence time, plus
  * tail-window avg/max/spike that isolates inference-phase behavior. */
 void inference_current_dump(void);
+
+/* --- Run aggregator (CLI bench mode) ------------------------------------
+ * While a run is armed, every per-event dump folds itself into a run-wide
+ * accumulator. The aggregator finishes itself when run_count reaches
+ * target_n, or via inference_current_run_finish() on abort. */
+
+/* Arm the run aggregator. target_n is informational + the auto-finish
+ * trigger. Resets all run_* state. */
+void inference_current_run_start(uint32_t target_n);
+
+/* True if a run is currently armed and accumulating events. */
+bool inference_current_run_active(void);
+
+/* Emit the run-wide summary line and clear the aggregator. Idempotent. */
+void inference_current_run_finish(void);
 
 #ifdef __cplusplus
 }

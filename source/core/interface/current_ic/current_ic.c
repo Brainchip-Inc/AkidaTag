@@ -124,6 +124,23 @@ static struct k_timer inf_period_timer;  /* periodic, INF_SAMPLE_PERIOD_US */
 static struct k_timer inf_timeout_timer; /* one-shot, INF_SAMPLE_TIMEOUT_US */
 static struct k_work inf_sample_work;    /* runs ADC read in thread ctx */
 
+/* --- Run aggregator (CLI bench mode) -------------------------------------
+ * While run_active is true, every successful inference_current_dump() folds
+ * its per-event stats into the run_* accumulators. When run_count reaches
+ * run_target_n the aggregator auto-finishes (prints the summary, clears
+ * itself). doubles are used for the sums to keep precision over 1000+
+ * events at hundreds of mA — float accumulation drifts past ~2^24. */
+static bool run_active;
+static uint32_t run_target_n;
+static uint32_t run_count;
+static double run_avg_sum;
+static double run_tail_avg_sum;
+static float run_min;
+static float run_max;
+static float run_tail_max;
+static uint32_t run_spike_events;
+static uint32_t run_tail_spike_events;
+
 /* Runs in workqueue thread context, submitted by inf_period_expiry every
  * INF_SAMPLE_PERIOD_US. Performs one SAADC conversion (10 us ACQ + ~2 us
  * convert), folds the result into the full-window accumulators, and pushes
@@ -314,7 +331,116 @@ void inference_current_dump(void) {
          (unsigned)(max_us / 1000U), (unsigned)(max_us % 1000U), spike,
          (unsigned)tail_n, (ta_sign < 0 ? "-" : ""), ta_int, ta_frac,
          (tx_sign < 0 ? "-" : ""), tx_int, tx_frac, tail_spike);
+
+  /* Fold this event into the run aggregator if a bench run is armed. The
+   * fold reuses values already computed above — no extra arithmetic in the
+   * sampling path. Auto-finish once we reach the target count so the
+   * audio-thread side and the done-IRQ side don't race over who finishes. */
+  if (run_active) {
+    run_avg_sum += (double)avg;
+    run_tail_avg_sum += (double)tail_avg;
+    if (inf_min < run_min)
+      run_min = inf_min;
+    if (inf_max > run_max)
+      run_max = inf_max;
+    if (tail_max > run_tail_max)
+      run_tail_max = tail_max;
+    if (spike)
+      run_spike_events++;
+    if (tail_spike)
+      run_tail_spike_events++;
+    run_count++;
+    if (run_count >= run_target_n) {
+      inference_current_run_finish();
+    }
+  }
 }
+
+/**
+ * @brief Arm the run aggregator for a multi-inference bench run.
+ *
+ * After this call, each per-event inference_current_dump() folds its stats
+ * into the run_* accumulators. The aggregator auto-finishes (prints the
+ * summary, clears itself) once run_count reaches target_n.
+ */
+void inference_current_run_start(uint32_t target_n) {
+  run_active = false; /* clear before reset so dump-hook sees false */
+  run_target_n = target_n;
+  run_count = 0;
+  run_avg_sum = 0.0;
+  run_tail_avg_sum = 0.0;
+  run_min = 1e9f;
+  run_max = -1e9f;
+  run_tail_max = -1e9f;
+  run_spike_events = 0;
+  run_tail_spike_events = 0;
+  run_active = true;
+}
+
+bool inference_current_run_active(void) { return run_active; }
+
+/**
+ * @brief Emit the run-wide summary and clear the aggregator.
+ *
+ * Idempotent — second call (e.g. abort followed by natural completion) is a
+ * no-op. Uses the same manual sign + int + 2-decimal print style as the
+ * per-event dump since this build's printk lacks %f.
+ */
+void inference_current_run_finish(void) {
+  if (!run_active) {
+    return;
+  }
+  run_active = false;
+
+  if (run_count == 0U) {
+    printk("INF[0V8] RUN_DONE N=0/%u (no events captured)\n",
+           (unsigned)run_target_n);
+    return;
+  }
+
+  float r_avg = (float)(run_avg_sum / (double)run_count);
+  float r_tail_avg = (float)(run_tail_avg_sum / (double)run_count);
+
+  int ra_sign = (r_avg < 0.0f) ? -1 : 1;
+  float ra_abs = r_avg * ra_sign;
+  int ra_int = (int)ra_abs;
+  int ra_frac = (int)((ra_abs - ra_int) * 100.0f);
+
+  int rn_sign = (run_min < 0.0f) ? -1 : 1;
+  float rn_abs = run_min * rn_sign;
+  int rn_int = (int)rn_abs;
+  int rn_frac = (int)((rn_abs - rn_int) * 100.0f);
+
+  int rx_sign = (run_max < 0.0f) ? -1 : 1;
+  float rx_abs = run_max * rx_sign;
+  int rx_int = (int)rx_abs;
+  int rx_frac = (int)((rx_abs - rx_int) * 100.0f);
+
+  int rta_sign = (r_tail_avg < 0.0f) ? -1 : 1;
+  float rta_abs = r_tail_avg * rta_sign;
+  int rta_int = (int)rta_abs;
+  int rta_frac = (int)((rta_abs - rta_int) * 100.0f);
+
+  int rtx_sign = (run_tail_max < 0.0f) ? -1 : 1;
+  float rtx_abs = run_tail_max * rtx_sign;
+  int rtx_int = (int)rtx_abs;
+  int rtx_frac = (int)((rtx_abs - rtx_int) * 100.0f);
+
+  printk("INF[0V8] RUN_DONE N=%u/%u avg=%s%d.%02d min=%s%d.%02d max=%s%d.%02d "
+         "mA | tail_avg=%s%d.%02d tail_max=%s%d.%02d mA spike_events=%u "
+         "tail_spike_events=%u\n",
+         (unsigned)run_count, (unsigned)run_target_n, (ra_sign < 0 ? "-" : ""),
+         ra_int, ra_frac, (rn_sign < 0 ? "-" : ""), rn_int, rn_frac,
+         (rx_sign < 0 ? "-" : ""), rx_int, rx_frac, (rta_sign < 0 ? "-" : ""),
+         rta_int, rta_frac, (rtx_sign < 0 ? "-" : ""), rtx_int, rtx_frac,
+         (unsigned)run_spike_events, (unsigned)run_tail_spike_events);
+}
+
+/* Shell front-end for the inference bench (cmeas_start / cmeas_stop) lives
+ * in core/common/inference_bench_cli.c — that file is built unconditionally
+ * so the same CLI is available on the DK build, which delegates only the
+ * inference-burst side and skips all current measurement. */
+
 /**
  * @brief Initialize GPIO pins for battery charger status monitoring
  *
