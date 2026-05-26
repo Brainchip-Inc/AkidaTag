@@ -43,6 +43,15 @@ int get_audio_frames_cb();
 
 void audio_process_thread(void *a, void *b, void *c);
 
+#ifdef CONFIG_SPARK_BOARD
+/* Bench mode: drive one inference-callback tick without touching audio
+ * samples or MFCC state. Respects the same g_inference_period gating used
+ * by the normal audio_processor() path so the inference cadence matches
+ * real operation. Called from audio_process_thread when
+ * inference_bench_active() is true. */
+void audio_processor_bench_tick(void);
+#endif
+
 #define PROCESS_STACK_SIZE 4096
 #define PROCESS_PRIORITY 7
 #define SPECTROGRAM_COUNT 49

@@ -16,6 +16,7 @@
 #include <zephyr/sys/util.h>
 
 #include "ble_services/file_transfer.h"
+#include "current_ic/inference_bench.h"
 
 #define RMS_THRESHOLD 550
 int rms_threshold = RMS_THRESHOLD;
@@ -196,6 +197,19 @@ int audio_processor(void) {
   return SUCCESS;
 }
 
+/* Bench-mode tick: per audio block, advance ap_counter and fire the
+ * inference callback at the same g_inference_period cadence as
+ * audio_processor(), but skip MFCC + spectrogram_push entirely. The
+ * callback (do_inference in main.cpp) substitutes the stored test vector
+ * for the live spectrogram when bench mode is active. Always defined so
+ * the CLI-driven bench works on every build target. */
+void audio_processor_bench_tick(void) {
+  ap_counter++;
+  if ((ap_counter % g_inference_period) == 0 && state->inference_cb) {
+    state->inference_cb(state->spectrogram_index);
+  }
+}
+
 int audio_processor_init(int samplerate) {
   /** Initialize codec */
   _state.samplerate = samplerate;
@@ -292,6 +306,14 @@ void audio_process_thread(void *a, void *b, void *c) {
     if (k_msgq_get(&audio_msgq, &blk, K_MSEC(READ_TIMEOUT)) == 0) {
 
       samples = blk.size / sizeof(int16_t);
+
+      /* CLI-driven inference bench: bypass RMS / debounce / MFCC entirely
+       * and drive an inference tick on every audio block instead. Bench
+       * mode exits when do_inference's countdown reaches zero. */
+      if (inference_bench_active()) {
+        audio_processor_bench_tick();
+        continue;
+      }
 
 #ifdef CONFIG_AUDIO_CAPTURE_TEST
       capture_raw_samples(blk.size);

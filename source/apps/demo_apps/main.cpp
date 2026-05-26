@@ -71,6 +71,9 @@ extern "C" {
 #include "current_ic/current_ic.h"
 #include "gpio/gpio.h"
 #endif
+/* inference_bench.h is board-neutral: pure forward declarations consumed by
+ * audio_processor.c and inference_bench_cli.c on every build. */
+#include "current_ic/inference_bench.h"
 #include "led_init.h"
 #include "littlefs_storage.h"
 #include "pdm_mic.h"
@@ -533,6 +536,68 @@ static int check_model_compatibility(uint8_t is_el_model_l,
   return SUCCESS;
 }
 
+/* --- CLI-triggered inference bench ----------------------------------------
+ * `cmeas_start [N]` arms an N-inference burst that feeds the pre-existing
+ * `kws_inputs` test vector to Akida instead of the live MFCC output.
+ *
+ * The bench-mode entry points are defined unconditionally so the
+ * shell-command file (core/common/inference_bench_cli.c) can link on any
+ * build target. Board-specific behavior is selected by inner ifdefs:
+ *
+ * On Spark (CONFIG_SPARK_BOARD): the per-inference current sampler captures
+ * the same metrics it captures during normal operation, and the aggregator
+ * inside current_ic.c folds each event into a run-wide summary; the
+ * aggregator auto-finishes when its own count reaches target_n.
+ *
+ * On any non-Spark build (DK or otherwise): no current measurement runs at
+ * all. The end-of-run RUN_DONE line is printed from do_inference when the
+ * atomic counter hits zero.
+ *
+ * inf_bench_remaining is decremented in do_inference (audio thread) on
+ * every dispatched bench inference.
+ */
+static atomic_t inf_bench_remaining = ATOMIC_INIT(0);
+static uint32_t inf_bench_target_n;
+
+extern "C" int inference_bench_arm(uint32_t n) {
+  if (n == 0U) {
+    return -EINVAL;
+  }
+  if (kws_api_selection != DEFAULT_API_SELECTION_ASYNC) {
+    return -ENOTSUP;
+  }
+  if (atomic_get(&inf_bench_remaining) != 0) {
+    return -EBUSY;
+  }
+  inf_bench_target_n = n;
+#ifdef CONFIG_SPARK_BOARD
+  inference_current_run_start(n);
+#endif
+  atomic_set(&inf_bench_remaining, (atomic_val_t)n);
+#ifdef CONFIG_SPARK_BOARD
+  printk("INF[0V8] RUN_START N=%u\n", (unsigned)n);
+#else
+  printk("RUN_START N=%u\n", (unsigned)n);
+#endif
+  return 0;
+}
+
+extern "C" void inference_bench_abort(void) {
+  atomic_set(&inf_bench_remaining, 0);
+#ifdef CONFIG_SPARK_BOARD
+  if (inference_current_run_active()) {
+    printk("INF[0V8] RUN_ABORTED\n");
+    inference_current_run_finish();
+  }
+#else
+  printk("RUN_ABORTED\n");
+#endif
+}
+
+extern "C" bool inference_bench_active(void) {
+  return atomic_get(&inf_bench_remaining) > 0;
+}
+
 void do_inference(int spectrogram_index) {
   current_spectrogram_index = spectrogram_index;
 
@@ -540,6 +605,29 @@ void do_inference(int spectrogram_index) {
    * float spectrogram access (no uint8 normalization needed here). */
   if (cur_kws_edge_state == STATE_LEARNING) {
     learning_on_spectrogram(spectrogram_index);
+    return;
+  }
+
+  /* Bench-mode short-circuit: feed the stored kws_inputs test vector to
+   * Akida directly, skipping the spectrogram normalization. Decrement the
+   * remaining counter. On Spark, the run aggregator inside the dump-hook
+   * auto-finishes when it reaches target_n. On any non-Spark build, no
+   * current sampler runs, so this path prints RUN_DONE when the counter
+   * hits zero. */
+  if (atomic_get(&inf_bench_remaining) > 0) {
+    if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
+      kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)kws_inputs,
+                                                        (uint32_t *)dims);
+    }
+    atomic_val_t prev = atomic_dec(&inf_bench_remaining);
+#ifndef CONFIG_SPARK_BOARD
+    /* atomic_dec returns the prior value; prev == 1 means we just hit zero. */
+    if (prev == 1) {
+      printk("RUN_DONE N=%u\n", (unsigned)inf_bench_target_n);
+    }
+#else
+    ARG_UNUSED(prev);
+#endif
     return;
   }
 

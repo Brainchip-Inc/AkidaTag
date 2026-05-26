@@ -68,6 +68,7 @@ target_sources(app PRIVATE
 	core/boot_manager.c
 	core/littlefs_storage.c
 	core/common/kws_config.c
+	core/common/inference_bench_cli.c
 )
 if(CONFIG_CAMERA_ENABLE_THREAD)
     target_sources(app PRIVATE
