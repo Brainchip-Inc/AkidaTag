@@ -237,10 +237,19 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
   uint64_t e_tick = 0;
   uint32_t erase_time = 0;
 
-  printk("Flash erase offset %x and size = %d bytes\n", offset, size);
+  /* A whole-chip erase via 4 KB sector loop takes minutes and will trip the
+   * 8 s watchdog. Detect the full-flash range and use chip erase (0xC7), which
+   * is a single command followed by a WIP poll that yields between reads. */
+  const bool is_full_erase =
+      (offset == AKD_FLASH_OFFSET) &&
+      (size == (FLASH_MAX_16_MB_SIZE - AKD_FLASH_OFFSET));
+
+  printk("Flash erase offset %x and size = %d bytes%s\n", offset, size,
+         is_full_erase ? " (chip erase)" : "");
 
   s_tick = time_ms();
-  int ret = spi_flash_erase(spi_driver, offset, size);
+  int ret = is_full_erase ? spi_flash_chip_erase(spi_driver)
+                          : spi_flash_erase(spi_driver, offset, size);
   e_tick = time_ms();
   erase_time = e_tick - s_tick;
   printk("\n\rerase time= %u ms\n\r", erase_time);

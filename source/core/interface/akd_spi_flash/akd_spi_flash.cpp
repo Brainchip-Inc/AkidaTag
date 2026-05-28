@@ -31,6 +31,11 @@ LOG_MODULE_REGISTER(AKD_SPI_FLASH, LOG_LEVEL_DBG);
 
 #define SPI_FLASH_SECTOR_TYPE_4KB 0x0c
 
+/* Cap chip-erase WIP polling at 90 s (Winbond W25Q128JW typ 40 s, max 200 s;
+ * Micron MT25Q typ 153 s — for the in-use ~16 MB part 90 s is sufficient
+ * headroom). */
+#define CHIP_ERASE_TIMEOUT_MS (90 * 1000)
+
 static spi_flash_vendor_t g_vendor = SPI_FLASH_VENDOR_UNKNOWN;
 
 spi_flash_vendor_t spi_flash_get_vendor(void) { return g_vendor; }
@@ -338,5 +343,33 @@ int spi_flash_init_quad_mode(akida::ZephyrSpiDriver spi_flash_driver_) {
   }
   LOG_PRINTK("AKD_SPI_FLASH: QE bit enabled (SR2=0x%02x)\n",
              (unsigned)(sr2 & 0xFF));
+  return 0;
+}
+
+int spi_flash_chip_erase(akida::ZephyrSpiDriver spi_flash_driver_) {
+  spi_flash_clear_flag(spi_flash_driver_);
+
+  int ret = spi_flash_write_enable(spi_flash_driver_);
+  if (ret != 0) {
+    LOG_ERR("AKD_SPI_FLASH: write enable failed before chip erase (%d)\n", ret);
+    return ret;
+  }
+
+  uint8_t cmd = FLASH_CMD_WHOLE_FLASH_ERASE;
+  spi_flash_driver_.spiflashwrite(0, &cmd, 1);
+
+  /* WIP poll runs in chip-erase territory (tens of seconds). The internal
+   * k_sleep(10ms) lets the cli_worker thread feed the watchdog, so no extra
+   * wdt_feed is required here. */
+  ret = spi_flash_wait_until_ready(spi_flash_driver_, CHIP_ERASE_TIMEOUT_MS);
+  if (ret != 0) {
+    LOG_ERR("AKD_SPI_FLASH: chip erase timed out (%d)\n", ret);
+    return ret;
+  }
+  ret = spi_flash_read_flag_status(spi_flash_driver_);
+  if ((ret & 0x20) == 0x20) {
+    LOG_ERR("AKD_SPI_FLASH: chip erase FSR error 0x%x\n", ret);
+    return -EIO;
+  }
   return 0;
 }
