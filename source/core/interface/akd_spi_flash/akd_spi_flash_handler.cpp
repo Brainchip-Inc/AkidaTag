@@ -96,7 +96,13 @@ void akida_spiflash_init(void) {
   get_akida_device_id();
   akida_sram_test();
 
-  /* Initialize the AKD1500 SPI-Flash functionality */
+  /* Read flash JEDEC ID first (MCU drives single-line SPI directly to the
+   * flash chip — no dependence on AKD1500's flash master config). This must
+   * happen before init_akd_1500_spi_flash() so that the latter can pick the
+   * correct dummy-cycle / mode-byte settings for the detected vendor. */
+  spi_flash_read_id(spi_driver);
+
+  /* Initialize the AKD1500 SPI-Flash master (vendor-aware). */
   init_akd_1500_spi_flash();
 
   /* get akida device version */
@@ -104,7 +110,12 @@ void akida_spiflash_init(void) {
   printk("Device Version: v%u.%u\n", hw_version.major_rev,
          hw_version.minor_rev);
 
-  spi_flash_read_id(spi_driver); // read SPI-Flash id
+  /* Winbond/GigaDevice ship with QE=0 and won't honor AKD1500's Quad I/O Fast
+   * Read (0xEB) until QE in SR-2 is set. Do this while MCU is master, before
+   * any AKD-driven flash access. */
+  if (spi_flash_init_quad_mode(spi_driver) != 0) {
+    printk("AKD_SPI_FLASH: failed to enable quad mode on flash chip\n");
+  }
 }
 /* function to enable external host MCU/AKD1500 as SPI master for 16 MB flash */
 void akida_config_spi(bool is_mcu_master) {
@@ -146,18 +157,50 @@ void init_akd_1500_spi_flash() {
   akd1500.write(0xfcf20010, rw_data.ucdata, 4);
   rw_data.uint_data = 8;
   akd1500.write(0xfcf20014, rw_data.ucdata, 4); /* BAUD */
-  rw_data.uint_data = 0x08100200 | 1 << 20 | 10 << 11 | 6 << 2 | 1;
+
+  /* SPI_CTRLR0 (0xfcf200f4): 0xEB Quad I/O Fast Read timing depends on the
+   * flash vendor.
+   *   Common bits: ADDR_L=6 (24-bit), INST_L=2 (8-bit), TRANS_TYPE=1,
+   *                XIP_INST_EN=1, XIP_MBL=2 (mode field width = 8 bits = 2
+   *                quad cycles; same value as the pre-existing code).
+   *   Micron MT25Q: M7-M0 not driven, 10 dummy cycles → XIP_MD_BIT_EN=0,
+   *                 WAIT_CYCLES=10.
+   *   Winbond W25Q* / GigaDevice GD25WQ*: device requires 2 quad cycles of
+   *                 M7-M0 mode byte + 4 dummy cycles after the address. Drive
+   *                 mode=0xFF (M5:M4=11) so the chip never latches Continuous
+   *                 Read Mode. → XIP_MD_BIT_EN=1, WAIT_CYCLES=4. */
+  const spi_flash_vendor_t vendor = spi_flash_get_vendor();
+  const bool is_winbond_family = (vendor == SPI_FLASH_VENDOR_WINBOND) ||
+                                 (vendor == SPI_FLASH_VENDOR_GIGADEVICE);
+  const uint32_t common_bits = (2u << 8)    /* INST_L = 8-bit instruction */
+                               | (1u << 20) /* XIP_INST_EN */
+                               | (2u << 26) /* XIP_MBL = 8-bit mode field */
+                               | (6u << 2)  /* ADDR_L = 24 bits */
+                               | 1u;        /* TRANS_TYPE = 1 */
+  if (is_winbond_family) {
+    rw_data.uint_data = common_bits | (1u << 7) /* XIP_MD_BIT_EN */
+                        | (4u << 11);           /* WAIT_CYCLES = 4 */
+  } else {
+    rw_data.uint_data = common_bits | (10u << 11); /* WAIT_CYCLES = 10 */
+  }
   akd1500.write(0xfcf200f4, rw_data.ucdata, 4);
+
   rw_data.uint_data = 0;
   akd1500.write(0xfcf200f8, rw_data.ucdata, 4);
-  rw_data.uint_data = 0xcc;
+
+  /* XIP_MODE_BITS (0xfcf200fc): for Winbond/GD drive M7-M0 = 0xFF so M5:M4=11
+   * → no continuous-read mode. Micron path leaves the legacy 0xCC since
+   * XIP_MD_BIT_EN=0 means the value is not driven. */
+  rw_data.uint_data = is_winbond_family ? 0xFFu : 0xCCu;
   akd1500.write(0xfcf200fc, rw_data.ucdata, 4);
+
   rw_data.uint_data = 0xeb;
   akd1500.write(0xfcf20100, rw_data.ucdata, 4);
   rw_data.uint_data = 0x1;
   akd1500.write(0xfcf20008, rw_data.ucdata, 4);
   akd1500.read(0xfce00018, rw_data.ucdata, 4);
-  printk("Akida1500 SPI Flash initialized on %x %x\n", reg, rw_data.uint_data);
+  printk("Akida1500 SPI Flash initialized on %x %x (%s timing)\n", reg,
+         rw_data.uint_data, is_winbond_family ? "Winbond/GD" : "Micron");
   /* setup gpio mux for interrupts selecting pin 3*/
   rw_data.uint_data = 0x08;
   akd1500.write(0xfce00038, rw_data.ucdata, 4);

@@ -16,8 +16,14 @@ LOG_MODULE_REGISTER(AKD_SPI_FLASH, LOG_LEVEL_DBG);
 #define FLASH_CMD_RD_STAT_REG (0x5)
 #define FLASH_CMD_WHOLE_FLASH_ERASE (0xC7) // if needed
 
+/* Micron MT25Q-specific flag-status register commands */
 #define CMD_CLEAR_FLAG_STATUS_REG (0x50)
 #define CMD_READ_FLAG_STATUS_REG (0x70)
+
+/* Winbond / GigaDevice Status Register-2 (carries QE bit) */
+#define CMD_READ_STATUS_REG_2 (0x35)
+#define CMD_WRITE_STATUS_REG_2 (0x31)
+#define SR2_QE_BIT (1 << 1)
 
 #define CMD_READ_ID (0x9F)
 
@@ -25,7 +31,31 @@ LOG_MODULE_REGISTER(AKD_SPI_FLASH, LOG_LEVEL_DBG);
 
 #define SPI_FLASH_SECTOR_TYPE_4KB 0x0c
 
+static spi_flash_vendor_t g_vendor = SPI_FLASH_VENDOR_UNKNOWN;
+
+spi_flash_vendor_t spi_flash_get_vendor(void) { return g_vendor; }
+
+static spi_flash_vendor_t vendor_from_id(uint32_t device_id) {
+  /* JEDEC ID layout in the uint32 (little endian read of 3 bytes from
+   * spiflashread): byte 0 = manufacturer ID. */
+  switch (device_id & 0xFF) {
+  case 0x20:
+    return SPI_FLASH_VENDOR_MICRON;
+  case 0xEF:
+    return SPI_FLASH_VENDOR_WINBOND;
+  case 0xC8:
+    return SPI_FLASH_VENDOR_GIGADEVICE;
+  default:
+    return SPI_FLASH_VENDOR_UNKNOWN;
+  }
+}
+
 static int spi_flash_clear_flag(akida::ZephyrSpiDriver spi_flash_driver_) {
+  /* Flag Status Register is Micron-specific. On Winbond/GigaDevice opcode 0x50
+   * means "Volatile SR Write Enable" with very different semantics, so skip. */
+  if (g_vendor != SPI_FLASH_VENDOR_MICRON) {
+    return 0;
+  }
   uint8_t cmd = CMD_CLEAR_FLAG_STATUS_REG;
   spi_flash_driver_.spiflashwrite(0, &cmd, 1);
   return 0;
@@ -61,6 +91,12 @@ static int spi_flash_wait_until_ready(akida::ZephyrSpiDriver spi_flash_driver_,
 
 static uint8_t
 spi_flash_read_flag_status(akida::ZephyrSpiDriver spi_flash_driver_) {
+  /* On non-Micron parts opcode 0x70 returns SR3 (different bit layout) and the
+   * erase/program error bits this code checks for don't exist there. Return 0
+   * so the caller's bit-tests treat the operation as successful. */
+  if (g_vendor != SPI_FLASH_VENDOR_MICRON) {
+    return 0;
+  }
   uint8_t cmd = CMD_READ_FLAG_STATUS_REG;
   uint32_t status = 0;
   uint32_t tx_rx_len = ((1 << 16) | 1);
@@ -77,7 +113,23 @@ uint32_t spi_flash_read_id(akida::ZephyrSpiDriver spi_flash_driver_) {
   uint32_t tx_rx_len = ((1 << 16) | 4);
 
   spi_flash_driver_.spiflashread(0, &cmd, (uint8_t *)&device_id, tx_rx_len);
-  LOG_PRINTK("AKD_SPI_FLASH: Serial Flash Device ID 0x%x\n", device_id);
+  g_vendor = vendor_from_id(device_id);
+  const char *vendor_name = "Unknown";
+  switch (g_vendor) {
+  case SPI_FLASH_VENDOR_MICRON:
+    vendor_name = "Micron";
+    break;
+  case SPI_FLASH_VENDOR_WINBOND:
+    vendor_name = "Winbond";
+    break;
+  case SPI_FLASH_VENDOR_GIGADEVICE:
+    vendor_name = "GigaDevice";
+    break;
+  default:
+    break;
+  }
+  LOG_PRINTK("AKD_SPI_FLASH: Serial Flash Device ID 0x%x (%s)\n", device_id,
+             vendor_name);
   return device_id;
 }
 
@@ -234,5 +286,57 @@ int spi_flash_read(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address,
     offset += chunk;
   }
 
+  return 0;
+}
+
+int spi_flash_init_quad_mode(akida::ZephyrSpiDriver spi_flash_driver_) {
+  /* Required for Winbond / GigaDevice parts: AKD1500 reads model data via
+   * Quad I/O Fast Read (0xEB) and the chip will ignore quad commands unless
+   * the QE bit (Status Register-2 bit 1) is set. Factory default is 0 on these
+   * vendors. Micron parts use a different mechanism that's already configured
+   * by default, so this is a no-op there. */
+  if (g_vendor != SPI_FLASH_VENDOR_WINBOND &&
+      g_vendor != SPI_FLASH_VENDOR_GIGADEVICE) {
+    return 0;
+  }
+
+  uint8_t cmd = CMD_READ_STATUS_REG_2;
+  uint32_t sr2 = 0;
+  uint32_t tx_rx_len = ((1 << 16) | 1);
+  spi_flash_driver_.spiflashread(0, &cmd, (uint8_t *)&sr2, tx_rx_len);
+
+  if (sr2 & SR2_QE_BIT) {
+    LOG_PRINTK("AKD_SPI_FLASH: QE bit already set (SR2=0x%02x)\n",
+               (unsigned)(sr2 & 0xFF));
+    return 0;
+  }
+
+  int ret = spi_flash_write_enable(spi_flash_driver_);
+  if (ret != 0) {
+    LOG_ERR("AKD_SPI_FLASH: write enable failed before QE write (%d)\n", ret);
+    return ret;
+  }
+
+  uint8_t buf[2] = {CMD_WRITE_STATUS_REG_2,
+                    (uint8_t)((sr2 & 0xFF) | SR2_QE_BIT)};
+  spi_flash_driver_.spiflashwrite(0, buf, sizeof(buf));
+
+  /* SR write takes up to ~15 ms; reuse the standard WIP poll. */
+  ret = spi_flash_wait_until_ready(spi_flash_driver_);
+  if (ret != 0) {
+    LOG_ERR("AKD_SPI_FLASH: QE write timed out (%d)\n", ret);
+    return ret;
+  }
+
+  /* Verify */
+  sr2 = 0;
+  spi_flash_driver_.spiflashread(0, &cmd, (uint8_t *)&sr2, tx_rx_len);
+  if (!(sr2 & SR2_QE_BIT)) {
+    LOG_ERR("AKD_SPI_FLASH: QE bit not latched (SR2=0x%02x)\n",
+            (unsigned)(sr2 & 0xFF));
+    return -EIO;
+  }
+  LOG_PRINTK("AKD_SPI_FLASH: QE bit enabled (SR2=0x%02x)\n",
+             (unsigned)(sr2 & 0xFF));
   return 0;
 }
