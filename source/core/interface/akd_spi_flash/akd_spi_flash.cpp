@@ -25,6 +25,16 @@ LOG_MODULE_REGISTER(AKD_SPI_FLASH, LOG_LEVEL_DBG);
 #define CMD_WRITE_STATUS_REG_2 (0x31)
 #define SR2_QE_BIT (1 << 1)
 
+/* Cypress / Infineon S25FS-S registers.
+ * RDCR (0x35) returns Configuration Register 1 (CR1); its QUAD bit is CR1[1],
+ * the same bit position the Winbond path reads. The *write* path differs:
+ * CR1V (volatile) is written via WRAR (0x71) addressed at 0x00800002, so we can
+ * enable quad mode without touching the one-time-programmable CR1NV bit. The
+ * setting resets on power-cycle and is simply re-applied on every boot. */
+#define CMD_WRITE_ANY_REG (0x71)
+#define CYPRESS_CR1V_ADDR (0x00800002)
+#define CR1_QUAD_BIT (1 << 1)
+
 #define CMD_READ_ID (0x9F)
 
 #define PAGE_SIZE 256 // Flash page size
@@ -50,6 +60,8 @@ static spi_flash_vendor_t vendor_from_id(uint32_t device_id) {
     return SPI_FLASH_VENDOR_WINBOND;
   case 0xC8:
     return SPI_FLASH_VENDOR_GIGADEVICE;
+  case 0x01:
+    return SPI_FLASH_VENDOR_CYPRESS;
   default:
     return SPI_FLASH_VENDOR_UNKNOWN;
   }
@@ -129,6 +141,9 @@ uint32_t spi_flash_read_id(akida::ZephyrSpiDriver spi_flash_driver_) {
     break;
   case SPI_FLASH_VENDOR_GIGADEVICE:
     vendor_name = "GigaDevice";
+    break;
+  case SPI_FLASH_VENDOR_CYPRESS:
+    vendor_name = "Cypress/Infineon";
     break;
   default:
     break;
@@ -212,8 +227,69 @@ int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_,
   return 0;
 }
 
+/* Erase a single sector/block at an arbitrary address with the given opcode. */
+static int erase_one_block(akida::ZephyrSpiDriver spi_flash_driver_,
+                           uint32_t address, uint8_t cmd) {
+  int ret = spi_flash_write_enable(spi_flash_driver_);
+  if (ret != 0) {
+    return ret;
+  }
+  uint8_t cmd_buf[4] = {cmd, (uint8_t)((address >> 16) & 0xFF),
+                        (uint8_t)((address >> 8) & 0xFF),
+                        (uint8_t)(address & 0xFF)};
+  spi_flash_driver_.spiflashwrite(0, cmd_buf, 4);
+  ret = spi_flash_wait_until_ready(spi_flash_driver_);
+  if (ret != 0) {
+    LOG_ERR("AKD_SPI_FLASH: erase timed out at 0x%x (cmd 0x%02x)\n", address,
+            cmd);
+  }
+  return ret;
+}
+
+/* Cypress / Infineon S25FS-S erase (factory-default hybrid sector layout).
+ * The 4 KB Sector Erase (0x20) is only valid on the 8 parameter sectors at the
+ * bottom of the array (0x0000-0x7FFF); 0x8000-0xFFFF and every block from
+ * 0x10000 up are erased with the 64 KB Block Erase (0xD8). This keeps the chip
+ * reversible (no one-time-programmable bits written). LittleFS lives entirely
+ * at 0xf0000+ (uniform 64 KB zone) and is erased by the Zephyr spi-nor driver
+ * via 0xD8 directly; this path covers the Akida model region from
+ * AKD_FLASH_OFFSET (0x1000) upward. */
+static int spi_flash_erase_cypress(akida::ZephyrSpiDriver spi_flash_driver_,
+                                   uint32_t address, uint32_t size) {
+  const uint32_t SZ_4K = 4u * 1024;
+  const uint32_t SZ_64K = 64u * 1024;
+  const uint32_t PARAM_END = 0x8000; /* bottom 8 x 4 KB parameter sectors */
+
+  spi_flash_clear_flag(spi_flash_driver_); /* no-op on non-Micron */
+
+  uint32_t end = address + size;
+  uint32_t a = address & ~(SZ_4K - 1); /* align start down to 4 KB */
+  while (a < end) {
+    int ret;
+    if (a < PARAM_END) {
+      ret = erase_one_block(spi_flash_driver_, a, FLASH_CMD_4KB_ERASE);
+      a += SZ_4K;
+    } else if (a < SZ_64K) {
+      /* Single 0xD8 erases the 32 KB adjacent to the parameter-sector group. */
+      ret = erase_one_block(spi_flash_driver_, a, FLASH_CMD_64KB_ERASE);
+      a = SZ_64K;
+    } else {
+      uint32_t blk = a & ~(SZ_64K - 1); /* align down to 64 KB */
+      ret = erase_one_block(spi_flash_driver_, blk, FLASH_CMD_64KB_ERASE);
+      a = blk + SZ_64K;
+    }
+    if (ret != 0) {
+      return ret;
+    }
+  }
+  return 0;
+}
+
 int spi_flash_erase(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address,
                     uint32_t size) {
+  if (g_vendor == SPI_FLASH_VENDOR_CYPRESS) {
+    return spi_flash_erase_cypress(spi_flash_driver_, address, size);
+  }
   uint32_t sector_size = 1 << SPI_FLASH_SECTOR_TYPE_4KB;
   int s_sector = address / sector_size;
   int e_sector = (address + size - 1) / sector_size;
@@ -295,6 +371,56 @@ int spi_flash_read(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address,
 }
 
 int spi_flash_init_quad_mode(akida::ZephyrSpiDriver spi_flash_driver_) {
+  /* Cypress / Infineon S25FS-S: AKD1500 reads model data via Quad I/O Fast Read
+   * (0xEB), which the chip ignores unless the QUAD bit CR1[1] is set (factory
+   * default 0). We set the VOLATILE copy (CR1V) via WRAR so nothing is burned
+   * into the one-time-programmable CR1NV; it resets on power-cycle and is
+   * re-applied on the next boot. RDCR (0x35) returns CR1 with QUAD at bit 1. */
+  if (g_vendor == SPI_FLASH_VENDOR_CYPRESS) {
+    uint8_t rdcr = CMD_READ_STATUS_REG_2; /* 0x35 == RDCR on Cypress */
+    uint32_t cr1 = 0;
+    uint32_t rd_len = ((1 << 16) | 1);
+    spi_flash_driver_.spiflashread(0, &rdcr, (uint8_t *)&cr1, rd_len);
+
+    if (cr1 & CR1_QUAD_BIT) {
+      LOG_PRINTK("AKD_SPI_FLASH: QUAD bit already set (CR1=0x%02x)\n",
+                 (unsigned)(cr1 & 0xFF));
+      return 0;
+    }
+
+    int ret = spi_flash_write_enable(spi_flash_driver_);
+    if (ret != 0) {
+      LOG_ERR("AKD_SPI_FLASH: write enable failed before QUAD write (%d)\n",
+              ret);
+      return ret;
+    }
+
+    /* WRAR (0x71) + 24-bit address of CR1V (0x00800002) + data byte. */
+    uint8_t buf[5] = {CMD_WRITE_ANY_REG,
+                      (CYPRESS_CR1V_ADDR >> 16) & 0xFF,
+                      (CYPRESS_CR1V_ADDR >> 8) & 0xFF,
+                      CYPRESS_CR1V_ADDR & 0xFF,
+                      (uint8_t)((cr1 & 0xFF) | CR1_QUAD_BIT)};
+    spi_flash_driver_.spiflashwrite(0, buf, sizeof(buf));
+
+    ret = spi_flash_wait_until_ready(spi_flash_driver_);
+    if (ret != 0) {
+      LOG_ERR("AKD_SPI_FLASH: QUAD write timed out (%d)\n", ret);
+      return ret;
+    }
+
+    cr1 = 0;
+    spi_flash_driver_.spiflashread(0, &rdcr, (uint8_t *)&cr1, rd_len);
+    if (!(cr1 & CR1_QUAD_BIT)) {
+      LOG_ERR("AKD_SPI_FLASH: QUAD bit not latched (CR1=0x%02x)\n",
+              (unsigned)(cr1 & 0xFF));
+      return -EIO;
+    }
+    LOG_PRINTK("AKD_SPI_FLASH: QUAD bit enabled (CR1=0x%02x)\n",
+               (unsigned)(cr1 & 0xFF));
+    return 0;
+  }
+
   /* Required for Winbond / GigaDevice parts: AKD1500 reads model data via
    * Quad I/O Fast Read (0xEB) and the chip will ignore quad commands unless
    * the QE bit (Status Register-2 bit 1) is set. Factory default is 0 on these

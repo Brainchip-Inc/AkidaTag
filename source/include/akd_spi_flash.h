@@ -9,6 +9,7 @@ typedef enum {
   SPI_FLASH_VENDOR_MICRON,     // 0x20
   SPI_FLASH_VENDOR_WINBOND,    // 0xEF
   SPI_FLASH_VENDOR_GIGADEVICE, // 0xC8
+  SPI_FLASH_VENDOR_CYPRESS,    // 0x01 (Spansion / Cypress / Infineon S25FS-S)
 } spi_flash_vendor_t;
 
 #ifdef __cplusplus

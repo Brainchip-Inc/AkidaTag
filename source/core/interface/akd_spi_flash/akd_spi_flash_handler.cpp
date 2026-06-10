@@ -169,29 +169,38 @@ void init_akd_1500_spi_flash() {
    *                 M7-M0 mode byte + 4 dummy cycles after the address. Drive
    *                 mode=0xFF (M5:M4=11) so the chip never latches Continuous
    *                 Read Mode. → XIP_MD_BIT_EN=1, WAIT_CYCLES=4. */
+  /*   Cypress/Infineon S25FS-S: 0xEB requires 2 quad cycles of M7-M0 mode byte
+   *                 + dummy cycles equal to the read latency code (default
+   *                 LC=8). Drive mode=0xFF (M5:M4=11) so the chip never enters
+   *                 Continuous Read mode. → XIP_MD_BIT_EN=1, WAIT_CYCLES=8. */
   const spi_flash_vendor_t vendor = spi_flash_get_vendor();
   const bool is_winbond_family = (vendor == SPI_FLASH_VENDOR_WINBOND) ||
                                  (vendor == SPI_FLASH_VENDOR_GIGADEVICE);
+  const bool is_cypress = (vendor == SPI_FLASH_VENDOR_CYPRESS);
+  /* Winbond/GD and Cypress both drive the mode byte; only the dummy-cycle count
+   * differs (4 vs 8). Micron drives no mode byte and uses 10 dummy cycles. */
+  const bool drive_mode_byte = is_winbond_family || is_cypress;
+  const uint32_t wait_cycles = is_cypress ? 8u : (is_winbond_family ? 4u : 10u);
+  const char *timing_name =
+      is_cypress ? "Cypress" : (is_winbond_family ? "Winbond/GD" : "Micron");
   const uint32_t common_bits = (2u << 8)    /* INST_L = 8-bit instruction */
                                | (1u << 20) /* XIP_INST_EN */
                                | (2u << 26) /* XIP_MBL = 8-bit mode field */
                                | (6u << 2)  /* ADDR_L = 24 bits */
                                | 1u;        /* TRANS_TYPE = 1 */
-  if (is_winbond_family) {
-    rw_data.uint_data = common_bits | (1u << 7) /* XIP_MD_BIT_EN */
-                        | (4u << 11);           /* WAIT_CYCLES = 4 */
-  } else {
-    rw_data.uint_data = common_bits | (10u << 11); /* WAIT_CYCLES = 10 */
+  rw_data.uint_data = common_bits | (wait_cycles << 11);
+  if (drive_mode_byte) {
+    rw_data.uint_data |= (1u << 7); /* XIP_MD_BIT_EN */
   }
   akd1500.write(0xfcf200f4, rw_data.ucdata, 4);
 
   rw_data.uint_data = 0;
   akd1500.write(0xfcf200f8, rw_data.ucdata, 4);
 
-  /* XIP_MODE_BITS (0xfcf200fc): for Winbond/GD drive M7-M0 = 0xFF so M5:M4=11
-   * → no continuous-read mode. Micron path leaves the legacy 0xCC since
-   * XIP_MD_BIT_EN=0 means the value is not driven. */
-  rw_data.uint_data = is_winbond_family ? 0xFFu : 0xCCu;
+  /* XIP_MODE_BITS (0xfcf200fc): for Winbond/GD/Cypress drive M7-M0 = 0xFF so
+   * M5:M4=11 → no continuous-read mode. Micron path leaves the legacy 0xCC
+   * since XIP_MD_BIT_EN=0 means the value is not driven. */
+  rw_data.uint_data = drive_mode_byte ? 0xFFu : 0xCCu;
   akd1500.write(0xfcf200fc, rw_data.ucdata, 4);
 
   rw_data.uint_data = 0xeb;
@@ -200,7 +209,7 @@ void init_akd_1500_spi_flash() {
   akd1500.write(0xfcf20008, rw_data.ucdata, 4);
   akd1500.read(0xfce00018, rw_data.ucdata, 4);
   printk("Akida1500 SPI Flash initialized on %x %x (%s timing)\n", reg,
-         rw_data.uint_data, is_winbond_family ? "Winbond/GD" : "Micron");
+         rw_data.uint_data, timing_name);
   /* setup gpio mux for interrupts selecting pin 3*/
   rw_data.uint_data = 0x08;
   akd1500.write(0xfce00038, rw_data.ucdata, 4);
