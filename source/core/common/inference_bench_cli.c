@@ -38,7 +38,7 @@ static int cmd_cmeas_start(const struct shell *sh, size_t argc, char **argv) {
     return ret;
   }
   if (ret == -ENOTSUP) {
-    shell_error(sh, "bench requires async Akida mode");
+    shell_error(sh, "bench unavailable: Akida model not loaded");
     return ret;
   }
   if (ret < 0) {

@@ -1,6 +1,8 @@
+#include <errno.h>
 #include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "ble_services/ble_initialization.h"
 #include "current_ic/current_ic.h"
@@ -56,40 +58,35 @@ static struct adc_sequence sequences[ARRAY_SIZE(adc_channels)];
  *   - ~16.8 ms  SPI/DMA frame transfer to the Akida chip (dominant)
  *   - ~180 us   actual Akida compute (small, but the part of interest)
  *
- * Two parallel statistic sets are maintained at the same INF_SAMPLE_PERIOD_US
- * cadence:
- *
- *   1) Full-window running accumulators (inf_sum / inf_min / inf_max /
- *      inf_max_idx / inf_count). These cover the entire 17 ms window with
- *      O(1) RAM. The avg derived from them reflects the SPI-transfer-
- *      dominated mean and is useful as a per-event energy proxy.
- *
- *   2) Tail ring (inf_tail[INF_TAIL_LEN]) overwriting oldest on wrap. By the
- *      time the done-IRQ fires, the ring holds the most recent N samples
- *      i.e. the last ~240 us ending at done-IRQ — mostly the 180 us Akida
- *      compute phase. Tail stats expose inference-phase spikes that the
- *      full-window check misses because its avg baseline is SPI-dominated.
+ * Sampling model:
+ *   A single interval-paced buffered adc_read_async() per inference fills
+ *   inf_samples[] (raw 12-bit codes) with ~no per-sample CPU — the driver
+ *   paces samples at INF_SAMPLE_PERIOD_US and writes each into the buffer.
+ *   This replaced an earlier per-sample timer+workqueue scheme whose per-sample
+ *   overhead measurably slowed the inference. The buffer is reduced to stats in
+ *   a single batch pass at dump time:
+ *     - Full-window: sum/min/max/max_idx over all N samples -> mean (energy
+ *       proxy), dominated by the SPI-transfer current.
+ *     - Tail: the last INF_TAIL_LEN samples (chronological, ending at the
+ *       done-IRQ) -> the Akida compute phase.
  *
  * Signal chain end-to-end:
  *   I_rail -> R_shunt (0.2 ohm) -> INA190A1 (gain 25 V/V) -> AIN1 -> SAADC
  *   raw 12-bit code -> mV (adc_scale) -> mA (/ SHUNT_RESISTOR_GAIN_0V8 = 5).
  *   Resolution ~0.088 mA/code, full scale ~360 mA.
  *
- * ADC path isolation: a dedicated adc_sequence (inf_seq) and raw buffer
- * (inf_raw_buf) are used so this sampler cannot collide with the BLE-
- * streaming current_data_thread that shares the SAADC peripheral via
- * sequences[].
+ * ADC path isolation: a dedicated adc_sequence (inf_seq) + buffer (inf_samples)
+ * are used so this sampler cannot collide with the BLE-streaming
+ * current_data_thread that shares the SAADC peripheral via sequences[].
  *
  * Concurrency model:
- *   - inf_period_timer fires every INF_SAMPLE_PERIOD_US in ISR context and
- *     submits inf_sample_work to the system workqueue; the blocking ADC
- *     read runs in thread context (adc_read_dt cannot run from an ISR).
- *   - inf_active (atomic) gates both the work submit (in the timer ISR) and
- *     the work handler itself, so a handler that was queued just before
- *     stop bails out cleanly when it eventually runs.
- *   - inference_current_stop() uses atomic_cas so it is idempotent — the
- *     normal stop path (Akida done-IRQ -> akd_async_isr_handler in gpio.c)
- *     and the fallback (50 ms timeout) can both fire safely.
+ *   - inference_current_start() (bench only) kicks off a fixed-count async read
+ *     of inf_cap_n samples; the driver fills inf_samples[] and raises
+ *     inf_async_sig on completion.
+ *   - inference_current_stop() (Akida done-IRQ via gpio.c) is a no-op — the read
+ *     self-completes after inf_cap_n samples.
+ *   - inference_current_dump() waits on inf_async_sig (k_poll), trims to the
+ *     real inference window (inf_time), then batch-processes the buffer.
  *
  * Output: one summary line per inference via printk in inference_current_dump.
  * Format:
@@ -102,27 +99,27 @@ static struct adc_sequence sequences[ARRAY_SIZE(adc_channels)];
  *     present in the inference phase only.
  * ============================================================================
  */
-static uint16_t inf_raw_buf;        /* SAADC raw read target */
-static struct adc_sequence inf_seq; /* sequence bound to AIN1 (CH1) */
-static bool inf_seq_inited;         /* lazy-init guard for inf_seq */
+static struct adc_sequence inf_seq;          /* sequence bound to AIN1 (CH1) */
+static struct adc_sequence_options inf_opts; /* interval pacing (no callback) */
+static bool inf_seq_inited;                  /* lazy-init guard for inf_seq */
 
-/* Full-window running accumulators. Reset in inference_current_start(). */
-static float inf_sum;        /* sum of all mA samples; /count -> mean */
-static float inf_min;        /* lowest sample seen; init +1e9 sentinel */
-static float inf_max;        /* highest sample seen; init -1e9 sentinel */
-static uint32_t inf_max_idx; /* sample index where inf_max was recorded */
-static uint32_t inf_count;   /* number of samples taken so far */
-static atomic_t inf_active = ATOMIC_INIT(0); /* 1 while sampling armed */
+/* Raw SAADC sample buffer, filled by ONE fixed-count, interval-paced
+ * adc_read_async per inference (no per-sample timer/workqueue). The read
+ * collects inf_cap_n samples over inf_cap_n * INF_SAMPLE_PERIOD_US, then raises
+ * inf_async_sig. At dump the buffer is converted to mA + reduced to stats in a
+ * single batch pass, trimmed to the real inference window via inf_time. */
+static int16_t inf_samples[INF_MAX_SAMPLES];
+static uint16_t inf_cap_n;                 /* samples requested this capture */
+static struct k_poll_signal inf_async_sig; /* adc_read_async completion signal */
 
-/* Tail ring: overwrites oldest. After >= INF_TAIL_LEN samples, contents are
- * always the most-recent INF_TAIL_LEN values (slot order does not matter
- * because tail stats are order-independent sum/max). */
-static float inf_tail[INF_TAIL_LEN];
-static uint8_t inf_tail_head; /* next write index, 0..INF_TAIL_LEN-1 */
+/* Window timing comes from main.cpp's time_ms() enqueue->fetch measurement,
+ * passed into inference_current_dump() as inf_time (ms). The sampler no longer
+ * times the window itself. */
 
-static struct k_timer inf_period_timer;  /* periodic, INF_SAMPLE_PERIOD_US */
-static struct k_timer inf_timeout_timer; /* one-shot, INF_SAMPLE_TIMEOUT_US */
-static struct k_work inf_sample_work;    /* runs ADC read in thread ctx */
+/* Current-band thresholds (mA), runtime-adjustable via `cmeas_thresh`. Stored
+ * as float for comparison; set in whole mA from the shell. */
+static float inf_hi_thresh_ma = INF_HI_THRESH_MA;
+static float inf_lo_thresh_ma = INF_LO_THRESH_MA;
 
 /* --- Run aggregator (CLI bench mode) -------------------------------------
  * While run_active is true, every successful inference_current_dump() folds
@@ -140,76 +137,52 @@ static float run_max;
 static float run_tail_max;
 static uint32_t run_spike_events;
 static uint32_t run_tail_spike_events;
-
-/* Runs in workqueue thread context, submitted by inf_period_expiry every
- * INF_SAMPLE_PERIOD_US. Performs one SAADC conversion (10 us ACQ + ~2 us
- * convert), folds the result into the full-window accumulators, and pushes
- * the raw mA into the tail ring. The inf_active guard catches the race
- * where stop fires after the work was submitted but before it runs. */
-static void inf_sample_work_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  if (!atomic_get(&inf_active)) {
-    return;
-  }
-  int err = adc_read_dt(&adc_channels[ADC_CH_1], &inf_seq);
-  if (err < 0) {
-    return;
-  }
-  float val_mv = (float)(int32_t)inf_raw_buf * adc_scale;
-  float mA = val_mv / SHUNT_RESISTOR_GAIN_0V8;
-  inf_sum += mA;
-  if (mA < inf_min)
-    inf_min = mA;
-  /* inf_max_idx captured BEFORE inf_count++ so it stays 0-based: first
-   * sample is index 0, elapsed-us = inf_max_idx * INF_SAMPLE_PERIOD_US. */
-  if (mA > inf_max) {
-    inf_max = mA;
-    inf_max_idx = inf_count;
-  }
-  inf_tail[inf_tail_head] = mA;
-  inf_tail_head = (inf_tail_head + 1U) % INF_TAIL_LEN;
-  inf_count++;
-}
-
-/* Periodic timer ISR — kicks off a sample read via the workqueue (cannot
- * call adc_read_dt from ISR context). Guarded by inf_active so cancelled
- * sessions don't keep submitting work. */
-static void inf_period_expiry(struct k_timer *t) {
-  ARG_UNUSED(t);
-  if (atomic_get(&inf_active)) {
-    k_work_submit(&inf_sample_work);
-  }
-}
-
-/* Fallback timeout — only fires if the Akida done-IRQ never arrives. The
- * normal stop path is akd_async_isr_handler in gpio.c calling
- * inference_current_stop() when the chip signals completion. */
-static void inf_timeout_expiry(struct k_timer *t) {
-  ARG_UNUSED(t);
-  inference_current_stop();
-}
+/* Energy accumulation: run_energy_uj sums per-event energy (uJ); run_dur_us
+ * sums per-event window duration (us). Both use double for the same precision
+ * rationale as run_avg_sum — float drifts past ~2^24 over 1000+ events. The
+ * run mean power is derived as run_energy_uj / run_dur_us. */
+static double run_energy_uj;
+static double run_dur_us;
+/* Band counters summed across the run, plus total sample count for percentages. */
+static uint32_t run_hi_count;     /* total samples > inf_hi_thresh_ma */
+static uint32_t run_lo_count;     /* total samples < inf_lo_thresh_ma */
+static uint32_t run_sample_count; /* total samples across the run */
+/* Tail-min across the run, and sum of per-event Akida compute (DMA) times for
+ * the run-wide mean. */
+static float run_tail_min;        /* min tail sample across run (sentinel 1e9) */
+static double run_compute_us_sum; /* sum of per-event compute_us */
 
 /**
  * @brief Arm the per-inference 0V8 current sampler.
  *
- * Called from the inference call site just before akida_enqueue(). Cancels
- * any in-flight session, lazy-inits the dedicated ADC sequence on first
- * call, resets all accumulators + the tail ring, then starts the periodic
- * sampling timer and the safety-stop timeout.
- *
- * The +/-1e9 sentinels on inf_min / inf_max guarantee the first real sample
- * wins both comparisons unconditionally.
+ * Called from the inference call site just before akida_enqueue(). No-op
+ * unless a cmeas_start bench run is active, so live inference is never sampled
+ * (zero overhead / no perturbation). Otherwise lazy-inits the dedicated ADC
+ * sequence on first call and kicks off one fixed-count, interval-paced buffered
+ * read into inf_samples[]; the driver fills the buffer with ~no per-sample CPU
+ * and raises inf_async_sig when done. The dump reduces it to stats.
  */
 void inference_current_start(void) {
-  /* Cancel any in-flight session before resetting state. */
-  atomic_set(&inf_active, 0);
-  k_timer_stop(&inf_period_timer);
-  k_timer_stop(&inf_timeout_timer);
+  /* Only sample during a cmeas_start bench run. */
+  if (!run_active) {
+    return;
+  }
+
+  /* Number of samples for this capture: cover INF_CAP_WINDOW_US at the current
+   * cadence, capped by the buffer. */
+  uint32_t k = INF_CAP_WINDOW_US / INF_SAMPLE_PERIOD_US;
+  if (k < 1U) {
+    k = 1U;
+  }
+  if (k > INF_MAX_SAMPLES) {
+    k = INF_MAX_SAMPLES;
+  }
+  inf_cap_n = (uint16_t)k;
 
   if (!inf_seq_inited) {
     inf_seq = (struct adc_sequence){
-        .buffer = &inf_raw_buf,
-        .buffer_size = sizeof(inf_raw_buf),
+        .buffer = inf_samples,
+        .buffer_size = sizeof(inf_samples),
     };
     int err = adc_sequence_init_dt(&adc_channels[ADC_CH_1], &inf_seq);
     if (err < 0) {
@@ -219,35 +192,30 @@ void inference_current_start(void) {
     inf_seq_inited = true;
   }
 
-  inf_sum = 0.0f;
-  inf_min = 1e9f;  /* sentinel: any real sample is smaller */
-  inf_max = -1e9f; /* sentinel: any real sample is larger */
-  inf_max_idx = 0;
-  inf_tail_head =
-      0; /* inf_tail[] contents become valid as samples land;
-            at dump we only read min(inf_count, INF_TAIL_LEN) slots */
-  inf_count = 0;
-  atomic_set(&inf_active, 1);
-  k_timer_start(&inf_period_timer, K_USEC(INF_SAMPLE_PERIOD_US),
-                K_USEC(INF_SAMPLE_PERIOD_US));
-  k_timer_start(&inf_timeout_timer, K_USEC(INF_SAMPLE_TIMEOUT_US), K_NO_WAIT);
+  /* No per-sample callback: the driver collects exactly inf_cap_n samples
+   * (interval-paced) into the buffer, then raises inf_async_sig. */
+  inf_opts = (struct adc_sequence_options){
+      .interval_us = INF_SAMPLE_PERIOD_US,
+      .callback = NULL,
+      .extra_samplings = (uint16_t)(inf_cap_n - 1U),
+  };
+  inf_seq.options = &inf_opts;
+
+  k_poll_signal_reset(&inf_async_sig);
+
+  int err = adc_read_async(adc_channels[ADC_CH_1].dev, &inf_seq, &inf_async_sig);
+  if (err < 0) {
+    printk("INF[0V8]: read_async failed (%d)\n", err);
+    inf_cap_n = 0;
+  }
 }
 
 /**
- * @brief Stop the sampler. Safe to call from ISR or thread, idempotent.
- *
- * Two paths invoke this: the Akida done-IRQ via akd_async_isr_handler in
- * gpio.c (normal end-of-inference), and the safety timeout (fallback if
- * that IRQ never arrives). The atomic_cas(1, 0) ensures only the first
- * caller actually performs the timer stops; the second call is a no-op.
+ * @brief Stop hook, called from the Akida done-IRQ (gpio.c). With the
+ * fixed-count buffered read the capture self-completes after inf_cap_n samples,
+ * so there is nothing to stop here — kept as a no-op for the call site.
  */
-void inference_current_stop(void) {
-  if (!atomic_cas(&inf_active, 1, 0)) {
-    return;
-  }
-  k_timer_stop(&inf_period_timer);
-  k_timer_stop(&inf_timeout_timer);
-}
+void inference_current_stop(void) {}
 
 /**
  * @brief Emit a one-line summary of the captured inference event.
@@ -263,33 +231,90 @@ void inference_current_stop(void) {
  *   spike=1, tail_spike=1  -- excursion in both, or one large event near
  * transition
  *
- * Tail stats iterate inf_tail[] in slot order (not chronological); this is
- * safe because sum and max are order-independent.
+ * Tail stats use the last INF_TAIL_LEN samples of inf_samples[] (chronological,
+ * ending at the done-IRQ).
  */
-void inference_current_dump(void) {
-  uint32_t n = inf_count;
-  if (n == 0U) {
+void inference_current_dump(uint32_t compute_us, uint32_t inf_time) {
+  /* Only emit a line during a cmeas_start bench run; live inference and the
+   * learning path are silent. */
+  if (!run_active) {
+    return;
+  }
+  if (inf_cap_n == 0U) {
     printk("INF[0V8]: no samples\n");
     return;
   }
 
-  /* Full-window derived metrics. */
+  /* Wait for the buffered read to finish so inf_samples[] is stable. The read
+   * collects inf_cap_n samples then raises inf_async_sig. */
+  struct k_poll_event ev = K_POLL_EVENT_INITIALIZER(
+      K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY, &inf_async_sig);
+  (void)k_poll(&ev, 1, K_MSEC(200));
+
+  /* Trim to the real inference window: the capture spans INF_CAP_WINDOW_US, but
+   * the inference is only inf_time ms — process the leading samples that fall
+   * within it (the rest is post-inference idle). */
+  uint32_t win_n = (inf_time * 1000U) / INF_SAMPLE_PERIOD_US;
+  if (win_n == 0U) {
+    win_n = 1U;
+  }
+  uint32_t n = (win_n < inf_cap_n) ? win_n : inf_cap_n;
+
+  /* Batch pass: convert raw SAADC codes -> mA and reduce to full-window stats.
+   * Done once here in thread context (floats fine; nothing runs per-sample in
+   * an ISR), which is what removes the per-sample perturbation of the
+   * inference. */
+  float inf_sum = 0.0f;
+  float inf_min = 1e9f;  /* sentinel: any real sample is smaller */
+  float inf_max = -1e9f; /* sentinel: any real sample is larger */
+  uint32_t inf_max_idx = 0;
+  uint32_t inf_hi_count = 0;
+  uint32_t inf_lo_count = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    float mA =
+        ((float)(int32_t)inf_samples[i] * adc_scale) / SHUNT_RESISTOR_GAIN_0V8;
+    inf_sum += mA;
+    if (mA > inf_hi_thresh_ma)
+      inf_hi_count++;
+    if (mA < inf_lo_thresh_ma)
+      inf_lo_count++;
+    if (mA < inf_min)
+      inf_min = mA;
+    if (mA > inf_max) {
+      inf_max = mA;
+      inf_max_idx = i;
+    }
+  }
+
+  /* Window duration is the measured enqueue->fetch wall-clock time (time_ms,
+   * in ms), passed in as inf_time. Effective per-sample spacing (tsamp_us) and
+   * peak time (max_us) are derived from it assuming uniform sampling. */
   float avg = inf_sum / (float)n;
   int spike = (inf_max > avg + INF_SPIKE_THRESH_MA) ? 1 : 0;
-  uint32_t dur_us = n * INF_SAMPLE_PERIOD_US;
-  uint32_t max_us = inf_max_idx * INF_SAMPLE_PERIOD_US;
+  uint32_t inf_time_us = inf_time * 1000U;
+  uint32_t tsamp_us = inf_time_us / n;
+  uint32_t max_us = (uint32_t)((uint64_t)inf_max_idx * inf_time_us / n);
 
-  /* Tail-window stats: average + max over the last min(n, INF_TAIL_LEN)
-   * samples — these land in the ~240 us ending at done-IRQ, i.e. mostly
-   * the Akida compute phase, not the SPI transfer. */
-  uint8_t tail_n =
-      (inf_count < INF_TAIL_LEN) ? (uint8_t)inf_count : (uint8_t)INF_TAIL_LEN;
+  /* Power & energy on the 0V8 rail (rail voltage assumed constant — see
+   * RAIL_VOLTAGE_0V8). power_mw = V * avg (mean power); energy = mean power *
+   * measured inference time, mW * ms = uJ. */
+  float power_mw = RAIL_VOLTAGE_0V8 * avg;
+  float energy_uj = power_mw * (float)inf_time;
+
+  /* Tail-window stats: the last min(n, INF_TAIL_LEN) samples — chronological,
+   * ending at the done-IRQ, i.e. the Akida compute phase. */
+  uint8_t tail_n = (n < INF_TAIL_LEN) ? (uint8_t)n : (uint8_t)INF_TAIL_LEN;
   float tail_sum = 0.0f;
-  float tail_max = -1e9f;
+  float tail_min = 1e9f;  /* sentinel: any real sample is smaller */
+  float tail_max = -1e9f; /* sentinel: any real sample is larger */
   for (uint8_t i = 0; i < tail_n; i++) {
-    tail_sum += inf_tail[i];
-    if (inf_tail[i] > tail_max)
-      tail_max = inf_tail[i];
+    float mA = ((float)(int32_t)inf_samples[n - tail_n + i] * adc_scale) /
+               SHUNT_RESISTOR_GAIN_0V8;
+    tail_sum += mA;
+    if (mA > tail_max)
+      tail_max = mA;
+    if (mA < tail_min)
+      tail_min = mA;
   }
   float tail_avg = tail_sum / (float)tail_n;
   int tail_spike = (tail_max > tail_avg + INF_SPIKE_THRESH_MA) ? 1 : 0;
@@ -312,6 +337,11 @@ void inference_current_dump(void) {
   int mx_int = (int)mx_abs;
   int mx_frac = (int)((mx_abs - mx_int) * 100.0f);
 
+  int tm_sign = (tail_min < 0.0f) ? -1 : 1;
+  float tm_abs = tail_min * tm_sign;
+  int tm_int = (int)tm_abs;
+  int tm_frac = (int)((tm_abs - tm_int) * 100.0f);
+
   int ta_sign = (tail_avg < 0.0f) ? -1 : 1;
   float ta_abs = tail_avg * ta_sign;
   int ta_int = (int)ta_abs;
@@ -322,15 +352,31 @@ void inference_current_dump(void) {
   int tx_int = (int)tx_abs;
   int tx_frac = (int)((tx_abs - tx_int) * 100.0f);
 
-  printk("INF[0V8] N=%u dur=%u.%03u ms avg=%s%d.%02d min=%s%d.%02d "
+  int pw_sign = (power_mw < 0.0f) ? -1 : 1;
+  float pw_abs = power_mw * pw_sign;
+  int pw_int = (int)pw_abs;
+  int pw_frac = (int)((pw_abs - pw_int) * 100.0f);
+
+  int en_sign = (energy_uj < 0.0f) ? -1 : 1;
+  float en_abs = energy_uj * en_sign;
+  int en_int = (int)en_abs;
+  int en_frac = (int)((en_abs - en_int) * 100.0f);
+
+  printk("INF[0V8] N=%u inf_time=%u ms Tsamp=%u us avg=%s%d.%02d min=%s%d.%02d "
          "max=%s%d.%02d mA at=%u.%03u ms spike=%d | tail_N=%u "
-         "tail_avg=%s%d.%02d tail_max=%s%d.%02d mA tail_spike=%d\n",
-         (unsigned)n, (unsigned)(dur_us / 1000U), (unsigned)(dur_us % 1000U),
-         (a_sign < 0 ? "-" : ""), a_int, a_frac, (mn_sign < 0 ? "-" : ""),
+         "tail_min=%s%d.%02d tail_avg=%s%d.%02d tail_max=%s%d.%02d mA "
+         "tail_spike=%d | dma=%u us | pwr=%s%d.%02d mW E=%s%d.%02d uJ | "
+         "hi=%u lo=%u\n",
+         (unsigned)n, (unsigned)inf_time,
+         (unsigned)tsamp_us, (a_sign < 0 ? "-" : ""), a_int, a_frac,
+         (mn_sign < 0 ? "-" : ""),
          mn_int, mn_frac, (mx_sign < 0 ? "-" : ""), mx_int, mx_frac,
          (unsigned)(max_us / 1000U), (unsigned)(max_us % 1000U), spike,
-         (unsigned)tail_n, (ta_sign < 0 ? "-" : ""), ta_int, ta_frac,
-         (tx_sign < 0 ? "-" : ""), tx_int, tx_frac, tail_spike);
+         (unsigned)tail_n, (tm_sign < 0 ? "-" : ""), tm_int, tm_frac,
+         (ta_sign < 0 ? "-" : ""), ta_int, ta_frac, (tx_sign < 0 ? "-" : ""),
+         tx_int, tx_frac, tail_spike, (unsigned)compute_us,
+         (pw_sign < 0 ? "-" : ""), pw_int, pw_frac, (en_sign < 0 ? "-" : ""),
+         en_int, en_frac, (unsigned)inf_hi_count, (unsigned)inf_lo_count);
 
   /* Fold this event into the run aggregator if a bench run is armed. The
    * fold reuses values already computed above — no extra arithmetic in the
@@ -339,10 +385,18 @@ void inference_current_dump(void) {
   if (run_active) {
     run_avg_sum += (double)avg;
     run_tail_avg_sum += (double)tail_avg;
+    run_energy_uj += (double)energy_uj;
+    run_dur_us += (double)inf_time_us;
+    run_hi_count += inf_hi_count;
+    run_lo_count += inf_lo_count;
+    run_sample_count += n;
+    run_compute_us_sum += (double)compute_us;
     if (inf_min < run_min)
       run_min = inf_min;
     if (inf_max > run_max)
       run_max = inf_max;
+    if (tail_min < run_tail_min)
+      run_tail_min = tail_min;
     if (tail_max > run_tail_max)
       run_tail_max = tail_max;
     if (spike)
@@ -374,6 +428,13 @@ void inference_current_run_start(uint32_t target_n) {
   run_tail_max = -1e9f;
   run_spike_events = 0;
   run_tail_spike_events = 0;
+  run_energy_uj = 0.0;
+  run_dur_us = 0.0;
+  run_hi_count = 0;
+  run_lo_count = 0;
+  run_sample_count = 0;
+  run_tail_min = 1e9f;
+  run_compute_us_sum = 0.0;
   run_active = true;
 }
 
@@ -421,25 +482,130 @@ void inference_current_run_finish(void) {
   int rta_int = (int)rta_abs;
   int rta_frac = (int)((rta_abs - rta_int) * 100.0f);
 
+  int rtn_sign = (run_tail_min < 0.0f) ? -1 : 1;
+  float rtn_abs = run_tail_min * rtn_sign;
+  int rtn_int = (int)rtn_abs;
+  int rtn_frac = (int)((rtn_abs - rtn_int) * 100.0f);
+
   int rtx_sign = (run_tail_max < 0.0f) ? -1 : 1;
   float rtx_abs = run_tail_max * rtx_sign;
   int rtx_int = (int)rtx_abs;
   int rtx_frac = (int)((rtx_abs - rtx_int) * 100.0f);
 
+  /* Mean Akida compute (DMA) time over the run, in microseconds. */
+  uint32_t dma_avg_us = (uint32_t)(run_compute_us_sum / (double)run_count);
+
+  /* Effective per-sample period over the run = total measured window time /
+   * total samples, in microseconds. Reveals the true cadence (~30-35 us). */
+  uint32_t tsamp_avg_us =
+      run_sample_count ? (uint32_t)(run_dur_us / (double)run_sample_count) : 0U;
+
+  /* Energy/power run totals.
+   *   E_total (mJ)  = summed per-event energy / 1000
+   *   E_avg   (uJ)  = summed per-event energy / event count
+   *   Pavg    (mW)  = E_total_energy / total_window_time; uJ/us == W, so *1000
+   * for mW. run_dur_us is always > 0 here (run_count > 0 implies >=1 sample). */
+  float e_total_mj = (float)(run_energy_uj / 1000.0);
+  float e_avg_uj = (float)(run_energy_uj / (double)run_count);
+  float p_avg_mw =
+      (run_dur_us > 0.0) ? (float)(run_energy_uj / run_dur_us * 1000.0) : 0.0f;
+
+  int et_sign = (e_total_mj < 0.0f) ? -1 : 1;
+  float et_abs = e_total_mj * et_sign;
+  int et_int = (int)et_abs;
+  int et_frac = (int)((et_abs - et_int) * 100.0f);
+
+  int ea_sign = (e_avg_uj < 0.0f) ? -1 : 1;
+  float ea_abs = e_avg_uj * ea_sign;
+  int ea_int = (int)ea_abs;
+  int ea_frac = (int)((ea_abs - ea_int) * 100.0f);
+
+  int rp_sign = (p_avg_mw < 0.0f) ? -1 : 1;
+  float rp_abs = p_avg_mw * rp_sign;
+  int rp_int = (int)rp_abs;
+  int rp_frac = (int)((rp_abs - rp_int) * 100.0f);
+
+  /* Band-count percentages of all run samples, in integer basis-points to
+   * avoid %f: bp = count*10000/total → int=bp/100, frac=bp%100. */
+  uint32_t hi_bp =
+      run_sample_count
+          ? (uint32_t)((uint64_t)run_hi_count * 10000U / run_sample_count)
+          : 0U;
+  uint32_t lo_bp =
+      run_sample_count
+          ? (uint32_t)((uint64_t)run_lo_count * 10000U / run_sample_count)
+          : 0U;
+
   printk("INF[0V8] RUN_DONE N=%u/%u avg=%s%d.%02d min=%s%d.%02d max=%s%d.%02d "
-         "mA | tail_avg=%s%d.%02d tail_max=%s%d.%02d mA spike_events=%u "
-         "tail_spike_events=%u\n",
+         "mA | tail_min=%s%d.%02d tail_avg=%s%d.%02d tail_max=%s%d.%02d mA "
+         "spike_events=%u tail_spike_events=%u | dma_avg=%u us Tsamp_avg=%u us | "
+         "E_total=%s%d.%02d mJ E_avg=%s%d.%02d uJ "
+         "Pavg=%s%d.%02d mW | hi>%dmA=%u(%u.%02u%%) lo<%dmA=%u(%u.%02u%%) "
+         "of %u samples\n",
          (unsigned)run_count, (unsigned)run_target_n, (ra_sign < 0 ? "-" : ""),
          ra_int, ra_frac, (rn_sign < 0 ? "-" : ""), rn_int, rn_frac,
-         (rx_sign < 0 ? "-" : ""), rx_int, rx_frac, (rta_sign < 0 ? "-" : ""),
-         rta_int, rta_frac, (rtx_sign < 0 ? "-" : ""), rtx_int, rtx_frac,
-         (unsigned)run_spike_events, (unsigned)run_tail_spike_events);
+         (rx_sign < 0 ? "-" : ""), rx_int, rx_frac, (rtn_sign < 0 ? "-" : ""),
+         rtn_int, rtn_frac, (rta_sign < 0 ? "-" : ""), rta_int, rta_frac,
+         (rtx_sign < 0 ? "-" : ""), rtx_int, rtx_frac,
+         (unsigned)run_spike_events, (unsigned)run_tail_spike_events,
+         (unsigned)dma_avg_us, (unsigned)tsamp_avg_us,
+         (et_sign < 0 ? "-" : ""), et_int, et_frac,
+         (ea_sign < 0 ? "-" : ""), ea_int, ea_frac, (rp_sign < 0 ? "-" : ""),
+         rp_int, rp_frac, (int)inf_hi_thresh_ma, (unsigned)run_hi_count,
+         (unsigned)(hi_bp / 100U), (unsigned)(hi_bp % 100U),
+         (int)inf_lo_thresh_ma, (unsigned)run_lo_count,
+         (unsigned)(lo_bp / 100U), (unsigned)(lo_bp % 100U),
+         (unsigned)run_sample_count);
 }
 
 /* Shell front-end for the inference bench (cmeas_start / cmeas_stop) lives
  * in core/common/inference_bench_cli.c — that file is built unconditionally
  * so the same CLI is available on the DK build, which delegates only the
  * inference-burst side and skips all current measurement. */
+
+/* `cmeas_thresh` — view/set the current-band thresholds used by the per-sample
+ * hi/lo counters. Registered here (Spark-only file) because the counters are a
+ * current-measurement feature and do not exist on the DK build. Thresholds are
+ * taken in whole mA to keep the shell free of %f. */
+static int cmd_cmeas_thresh(const struct shell *sh, size_t argc, char **argv) {
+  if (argc == 1) {
+    shell_print(sh, "current thresholds: hi=%d mA lo=%d mA",
+                (int)inf_hi_thresh_ma, (int)inf_lo_thresh_ma);
+    return 0;
+  }
+  if (argc != 3) {
+    shell_error(sh, "usage: cmeas_thresh [<hi_mA> <lo_mA>]");
+    return -EINVAL;
+  }
+
+  char *hi_end;
+  char *lo_end;
+  unsigned long hi = strtoul(argv[1], &hi_end, 10);
+  unsigned long lo = strtoul(argv[2], &lo_end, 10);
+  if (*hi_end != '\0' || *lo_end != '\0') {
+    shell_error(sh, "invalid threshold(s): hi=%s lo=%s", argv[1], argv[2]);
+    return -EINVAL;
+  }
+  /* Full scale on the 0V8 rail is ~360 mA (4095 * ~0.088 mA/code). */
+  if (hi > 360UL || lo > 360UL) {
+    shell_error(sh, "threshold out of range (0..360 mA)");
+    return -EINVAL;
+  }
+  if (hi <= lo) {
+    shell_error(sh, "hi (%lu) must be greater than lo (%lu)", hi, lo);
+    return -EINVAL;
+  }
+
+  inf_hi_thresh_ma = (float)hi;
+  inf_lo_thresh_ma = (float)lo;
+  shell_print(sh, "thresholds set: hi=%lu mA lo=%lu mA", hi, lo);
+  return 0;
+}
+
+SHELL_CMD_REGISTER(cmeas_thresh, NULL,
+                   "View/set hi/lo current-band thresholds (mA): "
+                   "cmeas_thresh [<hi> <lo>]",
+                   cmd_cmeas_thresh);
 
 /**
  * @brief Initialize GPIO pins for battery charger status monitoring
@@ -512,9 +678,7 @@ int current_ic_init(void) {
     }
   }
 
-  k_timer_init(&inf_period_timer, inf_period_expiry, NULL);
-  k_timer_init(&inf_timeout_timer, inf_timeout_expiry, NULL);
-  k_work_init(&inf_sample_work, inf_sample_work_handler);
+  k_poll_signal_init(&inf_async_sig);
 
   return 0;
 }

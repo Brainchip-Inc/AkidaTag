@@ -559,11 +559,24 @@ static int check_model_compatibility(uint8_t is_el_model_l,
 static atomic_t inf_bench_remaining = ATOMIC_INIT(0);
 static uint32_t inf_bench_target_n;
 
+#ifdef CONFIG_SPARK_BOARD
+/* Serializes the async bench: do_inference() waits on this after each enqueue
+ * until akd_async_thread has fetched + dumped that inference. Keeping exactly
+ * one bench inference in flight makes the measured inf_time match the live,
+ * isolated value (no FIFO pipelining, no overlap with the per-event UART
+ * print). Only used while a cmeas_start run is active. */
+K_SEM_DEFINE(bench_inf_done_sem, 0, 1);
+#endif
+
 extern "C" int inference_bench_arm(uint32_t n) {
   if (n == 0U) {
     return -EINVAL;
   }
-  if (kws_api_selection != DEFAULT_API_SELECTION_ASYNC) {
+  /* Both SYNC and ASYNC modes are supported. ASYNC (Spark) drives the
+   * enqueue path + current sampler; SYNC (DK default) drives a raw blocking
+   * akida_forward loop in do_inference(). Only require that a model is
+   * actually loaded so the bench has something to run. */
+  if (g_num_classes == 0U || akida_output == NULL) {
     return -ENOTSUP;
   }
   if (atomic_get(&inf_bench_remaining) != 0) {
@@ -572,6 +585,7 @@ extern "C" int inference_bench_arm(uint32_t n) {
   inf_bench_target_n = n;
 #ifdef CONFIG_SPARK_BOARD
   inference_current_run_start(n);
+  k_sem_reset(&bench_inf_done_sem); /* clear any stale give from a prior run */
 #endif
   atomic_set(&inf_bench_remaining, (atomic_val_t)n);
 #ifdef CONFIG_SPARK_BOARD
@@ -615,9 +629,26 @@ void do_inference(int spectrogram_index) {
    * current sampler runs, so this path prints RUN_DONE when the counter
    * hits zero. */
   if (atomic_get(&inf_bench_remaining) > 0) {
-    if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
+    if (kws_api_selection == DEFAULT_API_SELECTION_SYNC) {
+      /* SYNC bench (DK default): raw blocking forward on the static frame.
+       * No dequantize / post-processing — keep the loop quiet so only
+       * RUN_START / RUN_DONE are printed. */
+      int ret = akida_forward((uint8_t *)kws_inputs, (uint32_t *)dims,
+                              (uint8_t *)akida_output, (int)akd_op_size);
+      if (ret != SUCCESS) {
+        printk("BENCH: akida_forward failed (%d)\n", ret);
+      }
+    } else if (kws_edge_state[cur_kws_edge_state].on_mfcc_output) {
+      /* ASYNC bench (Spark): enqueue path — arms the current sampler. */
       kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t *)kws_inputs,
                                                         (uint32_t *)dims);
+#ifdef CONFIG_SPARK_BOARD
+      /* Serialize: block until akd_async_thread has fetched + dumped this
+       * inference before enqueuing the next, so each measured inf_time is one
+       * isolated inference (≈ the live value) rather than pipelined/print-
+       * delayed timing. Timeout is a safety net above the 50 ms sampler stop. */
+      k_sem_take(&bench_inf_done_sem, K_MSEC(500));
+#endif
     }
     atomic_val_t prev = atomic_dec(&inf_bench_remaining);
 #ifndef CONFIG_SPARK_BOARD
@@ -1148,11 +1179,28 @@ static void akd_async_thread(void *a, void *b, void *c) {
     }
 
     uint64_t fetch_start_ts = time_ms();
+    uint32_t inference_time = fetch_start_ts - inference_start_ts;
+#ifdef CONFIG_SPARK_BOARD
+    /* Capture bench state BEFORE the dump, because the dump's run aggregator
+     * clears run_active on the final inference. */
+    bool bench_run = inference_current_run_active();
+#endif
     if (-EFAILURE !=
         akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
 
 #ifdef CONFIG_SPARK_BOARD
-      inference_current_dump();
+      /* Current/compute measurement runs ONLY during a cmeas_start bench run.
+       * Skipping it on the live path avoids the per-inference INF[0V8] UART
+       * print (~21 ms at 115200 baud) and the extra clock-counter read that
+       * were inflating live inference time from ~21 ms to ~60 ms. */
+      if (bench_run) {
+        /* Akida compute (DMA) time: the clock counter only advances during
+         * compute, so this delta ≈ the ~180 us inference phase. */
+        uint32_t compute_us =
+            (akida_get_clock_counter() - inference_start_dma_ts) /
+            AKIDA_FREQUENCY_MHZ;
+        inference_current_dump(compute_us, inference_time);
+      }
 #endif
       uint64_t fetch_end_ts = time_ms();
       uint32_t fetch_time = (uint32_t)(fetch_end_ts - fetch_start_ts);
@@ -1161,11 +1209,18 @@ static void akd_async_thread(void *a, void *b, void *c) {
       }
       uint32_t inference_dma_ts =
           akida_get_clock_counter() - inference_start_dma_ts;
-      uint32_t inference_time = fetch_end_ts - inference_start_ts;
       kws_post_processing(inference_dma_ts, inference_time);
     } else {
       printk("Fetch returned EFAILURE or Error\n");
     }
+#ifdef CONFIG_SPARK_BOARD
+    /* Unblock the serialized bench enqueuer once this inference is fully
+     * fetched + dumped, so the next enqueue starts clean (no pipelining or
+     * print overlap) and its inf_time matches the live, isolated value. */
+    if (bench_run) {
+      k_sem_give(&bench_inf_done_sem);
+    }
+#endif
   }
 }
 #endif
@@ -1898,7 +1953,7 @@ static void akd_learn_fetch_handler(struct k_work *work) {
     return;
   }
 #ifdef CONFIG_SPARK_BOARD
-  inference_current_dump();
+  inference_current_dump(0U, 0U); /* compute time not tracked on the learning path */
 #endif
 
   learn_state.total_fit_calls++;
