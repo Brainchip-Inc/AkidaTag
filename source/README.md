@@ -506,6 +506,30 @@ AVG_SAMPLES = 20 samples per averaging window
 Per-channel moving average calculated every 20 samples
 Total combined average printed after all channels report
 
+The SAADC is driven by **raw nrfx** (`CONFIG_NRFX_SAADC=y`, Zephyr's
+`CONFIG_ADC_NRFX_SAADC=n`) so the per-inference sampler can use the SAADC internal
+hardware timer; the BLE current-streaming and battery reads use nrfx simple
+blocking mode. Channel config (gain 1/3, internal ref, 12-bit) is set in firmware.
+
+### Per-Inference Current Measurement (`cmeas`)
+
+A CLI-driven static-frame inference burst measures the **0V8 (Akida core) rail**
+current during each inference. On the Spark board the 0V8 rail is sampled by the
+**SAADC internal hardware timer + EasyDMA** (zero CPU per sample, so it does not
+perturb the inference); the sampler runs **only** during a `cmeas_start` run, so
+live inference is never sampled. On the DK board the same static-frame burst runs
+via the blocking `akida_forward` with no current measurement.
+
+| Command | Description |
+| --- | --- |
+| `cmeas_start [N]` | Run N static-frame inferences (default 1000). Spark logs per-inference current / power / energy + peak context; DK prints only `RUN_START`/`RUN_DONE` |
+| `cmeas_stop` | Abort an in-progress run |
+| `cmeas_thresh [hi lo]` | View / set the hi & lo current-band thresholds (whole mA) |
+| `cmeas_sample [on\|off]` | DEBUG: toggle SAADC sampling during the bench (timing investigation) |
+
+Full details — sampling pipeline, output fields, power/energy, and tuning
+constants — are in [docs/CURRENT_MEASUREMENT.md](../docs/CURRENT_MEASUREMENT.md).
+
 2. Battery Charger Status Monitoring
 The battery charger status is monitored using two GPIO input pins (chgr_sts1 and chgr_sts2) connected to the charger IC. These pins provide real-time charging state and fault detection.
 

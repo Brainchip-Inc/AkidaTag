@@ -188,6 +188,14 @@ uploaded).
 
 ------------------------------------------------------------------------
 
+## Current Measurement During Inference
+
+For the CLI-driven static-frame inference burst (`cmeas_start` / `cmeas_stop`) and
+how the Spark board logs current-IC measurements during inference (DK runs the same
+burst without measurement), see [docs/CURRENT_MEASUREMENT.md](docs/CURRENT_MEASUREMENT.md).
+
+------------------------------------------------------------------------
+
 # Test Result Behavior
 
 If all executed testcases pass:

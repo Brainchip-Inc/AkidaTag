@@ -1157,6 +1157,12 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
 volatile uint32_t inference_start_dma_ts = 0;
 volatile uint64_t inference_start_ts = 0;
 #ifdef CONFIG_SPARK_BOARD
+/* DEBUG: split the bench inference time into HW (enqueue->done-IRQ) vs the
+ * fetch-thread wake delay, to locate the ~4 ms gap vs the live path. */
+volatile uint32_t inf_enq_cyc = 0;
+extern volatile uint32_t akd_done_irq_cyc;
+#endif
+#ifdef CONFIG_SPARK_BOARD
 /* Returns true when the system is actively learning (called from ISR context)
  */
 
@@ -1180,10 +1186,22 @@ static void akd_async_thread(void *a, void *b, void *c) {
 
     uint64_t fetch_start_ts = time_ms();
     uint32_t inference_time = fetch_start_ts - inference_start_ts;
+        /* Akida compute (DMA) time: the clock counter only advances during
+         * compute, so this delta ≈ the ~180 us inference phase. */
+   uint32_t compute_us =
+      (akida_get_clock_counter() - inference_start_dma_ts) /
+            AKIDA_FREQUENCY_MHZ;
 #ifdef CONFIG_SPARK_BOARD
     /* Capture bench state BEFORE the dump, because the dump's run aggregator
      * clears run_active on the final inference. */
     bool bench_run = inference_current_run_active();
+    if (bench_run) {
+      /* DEBUG: split inference_time into HW (enqueue->done-IRQ) and the
+       * done-IRQ->this-thread-wake delay, to locate the ~4 ms gap. */
+      uint32_t hw_us = k_cyc_to_us_near32(akd_done_irq_cyc - inf_enq_cyc);
+      uint32_t wake_us = k_cyc_to_us_near32(k_cycle_get_32() - akd_done_irq_cyc);
+      printk("INF[0V8] dbg hw=%u us wake=%u us\n", hw_us, wake_us);
+    }
 #endif
     if (-EFAILURE !=
         akida_fetch((uint8_t *)akida_output_dq, akd_op_size, true)) {
@@ -1194,11 +1212,7 @@ static void akd_async_thread(void *a, void *b, void *c) {
        * print (~21 ms at 115200 baud) and the extra clock-counter read that
        * were inflating live inference time from ~21 ms to ~60 ms. */
       if (bench_run) {
-        /* Akida compute (DMA) time: the clock counter only advances during
-         * compute, so this delta ≈ the ~180 us inference phase. */
-        uint32_t compute_us =
-            (akida_get_clock_counter() - inference_start_dma_ts) /
-            AKIDA_FREQUENCY_MHZ;
+
         inference_current_dump(compute_us, inference_time);
       }
 #endif
@@ -1207,9 +1221,10 @@ static void akd_async_thread(void *a, void *b, void *c) {
       if (verbose_on) {
         printk("fetch: done (cpu=%ums)\n\r", fetch_time);
       }
-      uint32_t inference_dma_ts =
-          akida_get_clock_counter() - inference_start_dma_ts;
-      kws_post_processing(inference_dma_ts, inference_time);
+      /* compute_us (above) is already the Akida compute time in microseconds
+       * (cycles / AKIDA_FREQUENCY_MHZ); pass it so the live "dma=" metric reads
+       * in real us, consistent with the bench INF[0V8] line. */
+      kws_post_processing(compute_us, inference_time);
     } else {
       printk("Fetch returned EFAILURE or Error\n");
     }
@@ -1643,12 +1658,15 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       printk("akida_predict failed\n");
     }
   } else {
+#ifdef CONFIG_SPARK_BOARD
+      inference_current_start();
+#endif
     uint64_t start_time = time_ms();
     do {
       inference_start_ts = time_ms();
       inference_start_dma_ts = akida_get_clock_counter();
 #ifdef CONFIG_SPARK_BOARD
-      inference_current_start();
+      inf_enq_cyc = k_cycle_get_32(); /* DEBUG: enqueue timestamp */
 #endif
       ret = akida_enqueue(input, input_shape, NULL);
       uint32_t enq_time = (uint32_t)(time_ms() - inference_start_ts);

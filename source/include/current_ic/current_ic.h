@@ -49,22 +49,21 @@ bat_status check_bat_status(void);
  * ---------------------------------------------------------------------------
  */
 
-/* Requested sample cadence (best-effort). NOTE: the RTC-based kernel tick runs
- * at 32768 Hz (~30.5 us) and is tickless, so a k_timer period below/near one
- * tick is NOT honored — the sampler actually fires at ~30-35 us regardless of
- * this value. The dump therefore MEASURES the real window with the hardware
- * cycle counter and reports the true effective period as Tsamp=. This macro
- * only sets the timer request and a fallback; it does not drive reported
- * timing/energy. (True 100 us spacing would require hardware-timed SAADC.) */
-#define INF_SAMPLE_PERIOD_US 100
+/* Sample period (us) for the per-inference current capture. Now driven by the
+ * SAADC's internal HARDWARE timer (16 MHz), so the period is honored exactly
+ * with zero CPU per sample. The hardware CC = 16 * period_us must be in
+ * [80, 2047], i.e. period_us in [5, 127]. 40 us -> CC = 640; ~7 samples land in
+ * the ~285 us Akida compute phase, and ~400 over a ~16 ms window (fits the
+ * INF_MAX_SAMPLES buffer). */
+#define INF_SAMPLE_PERIOD_US 40
 
 /* Safety stop. The chip's done-IRQ normally ends sampling well before this
  * fires; the timeout only kicks in if that IRQ never arrives. */
 #define INF_SAMPLE_TIMEOUT_US 50000
 
-/* Tail-ring depth. The trailing window is INF_TAIL_LEN * the real per-sample
- * period (Tsamp ~= 30-35 us, see note above), i.e. ~6 * 35 us ~= 210 us ending
- * at the done-IRQ — which roughly covers the ~180 us Akida compute phase. */
+/* Tail depth. The trailing window is INF_TAIL_LEN * INF_SAMPLE_PERIOD_US ending
+ * at the done-IRQ. At 40 us that is 6 * 40 = 240 us, which closely matches the
+ * ~285 us Akida compute phase — so the tail_* stats characterize compute. */
 #define INF_TAIL_LEN 6
 
 /* Spike threshold: a sample is flagged as a spike when it exceeds the mean

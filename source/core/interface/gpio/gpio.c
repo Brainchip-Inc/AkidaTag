@@ -4,8 +4,13 @@
 #include <stdio.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/kernel.h>
 
 static bool irq_enabled = false;
+
+/* DEBUG: cycle timestamp captured the instant the Akida done-IRQ fires, used to
+ * split the measured inference time into HW time vs fetch-thread wake delay. */
+volatile uint32_t akd_done_irq_cyc;
 
 /* Semaphore signaled by ISR when Akida asserts its done interrupt */
 K_SEM_DEFINE(akd_async_sem, 0, 1);
@@ -71,6 +76,7 @@ int akd_async_sem_take(k_timeout_t timeout) {
 
 static void akd_async_isr_handler(const struct device *dev,
                                   struct gpio_callback *cb, uint32_t pins) {
+  akd_done_irq_cyc = k_cycle_get_32(); /* DEBUG: done-IRQ timestamp */
   inference_current_stop();
   if (akd_in_learning()) {
     schedule_akd_learning_wq();
