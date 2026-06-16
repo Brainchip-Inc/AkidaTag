@@ -15,7 +15,7 @@ LOG_MODULE_REGISTER(NRF_SPI, LOG_LEVEL_DBG);
 /* SPI configuration for the camera */
 
 static struct spi_config spi_cfg_akida = {
-    .frequency = 1400000U, // match Python default for stability
+    .frequency = 7000000U, // match Python default for stability
     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
     .slave = 0,
     .cs =
@@ -26,7 +26,7 @@ static struct spi_config spi_cfg_akida = {
 };
 
 static struct spi_config spi_cfg_akida_flash = {
-    .frequency = 1400000U, // match Python default for stability
+    .frequency = 7000000U, // match Python default for stability
     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) | SPI_TRANSFER_MSB,
     .slave = 1,
     .cs =
