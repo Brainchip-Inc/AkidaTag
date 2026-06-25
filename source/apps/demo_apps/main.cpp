@@ -992,6 +992,10 @@ static int start_current_proc(void) {
   return 0;
 }
 #endif
+/* Defined later in this file; forward-declared so update_model_params() can
+ * apply the inference mode carried in the model metadata. */
+void akida_init(int mode);
+
 static int update_model_params(model_meta_t kws_meta) {
   g_input_size = kws_meta.input_shape[0] * kws_meta.input_shape[1] *
                  kws_meta.input_shape[2];
@@ -1057,6 +1061,23 @@ static int update_model_params(model_meta_t kws_meta) {
 
   g_silence_class = (int)kws_meta.silence_class;
   g_unknown_class = (int)kws_meta.unknown_class;
+
+  /* Apply the inference mode carried in the model metadata (info.yaml).
+   * akida_init() sets kws_api_selection and manages the async thread/IRQ, so
+   * the inference path and `kws_mode_get` stay consistent. A manual
+   * `kws_mode sync|async` still overrides this at runtime. */
+  uint32_t requested_mode = kws_meta.inference_mode; /* 0=sync, 1=async */
+#ifndef CONFIG_SPARK_BOARD
+  if (requested_mode == DEFAULT_API_SELECTION_ASYNC) {
+    LOG_WRN("info.yaml requests ASYNC but this board only supports SYNC; "
+            "falling back to SYNC");
+    requested_mode = DEFAULT_API_SELECTION_SYNC;
+  }
+#endif
+  akida_init((int)requested_mode);
+  LOG_INF("Inference mode from metadata: %s",
+          requested_mode == DEFAULT_API_SELECTION_ASYNC ? "ASYNC" : "SYNC");
+
   return SUCCESS;
 }
 
