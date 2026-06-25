@@ -72,20 +72,20 @@ How to use script - Examples runs:
   $SCRIPT_INVOCATION --fetch_model http://server/akida_model.fbz --model_name kws \
       --output_dir source/external/model_files/kws --map_mode 1 --neurons_per_class 1
 
-  # Generate the demo_apps info.yaml for a previously-converted model (no Akida SDK needed)
-  $SCRIPT_INVOCATION --generate_info --model_name kws \
+  # Generate the app-specific info.yaml for a previously-converted model (no Akida SDK needed)
+  $SCRIPT_INVOCATION --generate_info --app demo_apps --model_name kws \
       --output_dir source/external/model_files/kws \
       --model_flash_addr 0x101000 --neurons_per_class 1 --num_el_classes 0 \
       --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
 
   # Fetch + convert + generate info.yaml in one go inside Docker (akida SDK lives in the container)
-  $SCRIPT_INVOCATION -d --fetch_model http://server/akida_model.fbz --generate_info --model_name kws \
+  $SCRIPT_INVOCATION -d --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps --model_name kws \
       --output_dir source/external/model_files/kws \
       --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 1 --num_el_classes 0 \
       --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
 
   # Edge-learning kws model into its own dir (15 neurons/class, 3 novel classes)
-  $SCRIPT_INVOCATION -d --fetch_model http://server/akida_model.fbz --generate_info --model_name kws \
+  $SCRIPT_INVOCATION -d --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps --model_name kws \
       --output_dir source/external/model_files/kws_edge_learning \
       --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 15 --num_el_classes 3 \
       --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11

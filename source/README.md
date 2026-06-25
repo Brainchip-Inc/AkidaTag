@@ -812,9 +812,10 @@ cd spark
 ```
 
 ```bash
-# Step 2: Generate the info.yaml for the converted model
+# Step 2: Generate the app-specific info.yaml for the converted model
+# (--app selects the profile; defaults to demo_apps if omitted)
 ./scripts/run.sh \
-    --generate_info \
+    --generate_info --app demo_apps \
     --model_name kws \
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 \
@@ -826,7 +827,7 @@ Both steps can also be combined in a single invocation (fetch runs first, then `
 
 ```bash
 ./scripts/run.sh \
-    --fetch_model http://server/akida_model.fbz --generate_info \
+    --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps \
     --model_name kws \
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 --map_mode 1 \
@@ -868,7 +869,7 @@ cd spark
 
 # Step 1+2: Fetch, convert, and generate info.yaml for an edge-learning model inside Docker
 ./scripts/run.sh -d \
-    --fetch_model http://server/akida_model.fbz --generate_info \
+    --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps \
     --model_name kws \
     --output_dir source/external/model_files/kws_edge_learning \
     --model_flash_addr 0x101000 --map_mode 1 \
@@ -877,7 +878,7 @@ cd spark
 
 # Step 1+2: Same for a regular (non-edge-learning) model
 ./scripts/run.sh -d \
-    --fetch_model http://server/akida_model.fbz --generate_info \
+    --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps \
     --model_name kws \
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 --map_mode 1 \
