@@ -274,12 +274,18 @@ if __name__ == "__main__":
                         help="Akida MapMode value passed to model.map() (default: 1)")
     parser.add_argument("--num_el_classes", type=int, default=0,
                         help="Number of edge learning classes")
-    parser.add_argument("--mfcc_fs", type=float, default=0.0,
-                        help="MFCC normalisation scalar written to info.yaml (default: 0.0)")
-    parser.add_argument("--silence_class", type=int, default=0,
-                        help="Output index of the silence class (default: 0)")
-    parser.add_argument("--unknown_class", type=int, default=0,
-                        help="Output index of the unknown/garbage class (default: 0)")
+    # Required model-inference metadata: these are written to info.yaml and the
+    # firmware reads them at upload time. mfcc_fs divides every input feature, so
+    # it must be a real value (the firmware rejects a model without it); the
+    # class indices must match the model's output layout. No defaults — make the
+    # caller supply them so info.yaml always carries them.
+    parser.add_argument("--mfcc_fs", type=float, required=True,
+                        help="MFCC normalisation scalar written to info.yaml "
+                             "(required; divides every input feature)")
+    parser.add_argument("--silence_class", type=int, required=True,
+                        help="Output index of the silence class (required)")
+    parser.add_argument("--unknown_class", type=int, required=True,
+                        help="Output index of the unknown/garbage class (required)")
 
     args = parser.parse_args()
     fetch_and_convert(args)

@@ -35,6 +35,7 @@
 #include "sample_input/kws/kws_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <cmath>
+#include <new>
 #include <hardware_device_impl.h>
 #include <infra/system.h>
 #include <stdio.h>
@@ -483,16 +484,19 @@ static inline void restore_default_led_state(void) {
 }
 #endif
 
-float mfcc_fs = 123.56967163085938f;
+// MFCC normalisation scalar — no built-in default. It divides every input
+// feature, so it must come from the model metadata (info.yaml). A KWS model
+// without a valid mfcc_fs is rejected in update_model_params().
+float mfcc_fs = 0.0f;
 
-// KWS class definitions — defaults overridden from model metadata at runtime
-static int g_silence_class = 10;
-static int g_unknown_class = 11;
+// KWS class indices — supplied by model metadata (info.yaml), not hardcoded.
+// -1 means "not yet configured"; update_model_params() sets them at load time.
+static int g_silence_class = -1;
+static int g_unknown_class = -1;
 
 // Softmax EMA smoothing and chiming trigger parameters
 #define SMOOTHING_ALPHA 0.7f
 #define SCORE_THRESHOLD 0.5f
-#define EDGE_CLASS_SCORE_THRESHOLD 0.4f
 #define CHIMING_THRESHOLD 3
 
 float smoothing_alpha =
@@ -988,7 +992,7 @@ static int start_current_proc(void) {
   return 0;
 }
 #endif
-static void update_model_params(model_meta_t kws_meta) {
+static int update_model_params(model_meta_t kws_meta) {
   g_input_size = kws_meta.input_shape[0] * kws_meta.input_shape[1] *
                  kws_meta.input_shape[2];
   g_num_classes = kws_meta.output_shape[0] * kws_meta.output_shape[1] *
@@ -1019,23 +1023,41 @@ static void update_model_params(model_meta_t kws_meta) {
           g_num_edge_learn_classes);
 
   delete[] akida_output;
-  akida_output = new int32_t[g_num_classes * g_num_neurons_per_class];
+  akida_output =
+      new (std::nothrow) int32_t[g_num_classes * g_num_neurons_per_class];
   delete[] akida_output_dq;
-  akida_output_dq = new float[g_num_classes * g_num_neurons_per_class];
+  akida_output_dq =
+      new (std::nothrow) float[g_num_classes * g_num_neurons_per_class];
   akd_op_size = sizeof(int32_t) * g_num_classes * g_num_neurons_per_class;
 
   delete[] smoothed_scores;
-  smoothed_scores = new float[g_num_classes]();
+  smoothed_scores = new (std::nothrow) float[g_num_classes]();
   delete[] chiming_counters;
-  chiming_counters = new int[g_num_classes]();
+  chiming_counters = new (std::nothrow) int[g_num_classes]();
   delete[] softmax_scores;
-  softmax_scores = new float[g_num_classes]();
+  softmax_scores = new (std::nothrow) float[g_num_classes]();
 
-  if (kws_meta.mfcc_fs_bits != 0) {
-    memcpy(&mfcc_fs, &kws_meta.mfcc_fs_bits, sizeof(float));
+  if (akida_output == nullptr || akida_output_dq == nullptr ||
+      smoothed_scores == nullptr || chiming_counters == nullptr ||
+      softmax_scores == nullptr) {
+    LOG_ERR("update_model_params: buffer allocation failed for %u classes",
+            g_num_classes);
+    return -EFAILURE;
   }
+
+  /* mfcc_fs is mandatory: it divides every input feature, so a missing/zero
+   * value (model uploaded without mfcc_fs in info.yaml) would produce garbage
+   * inference. Reject such a model instead of guessing a default. */
+  if (kws_meta.mfcc_fs_bits == 0) {
+    LOG_ERR("KWS model metadata missing mfcc_fs — refusing to run. "
+            "Regenerate the model with mfcc_fs in info.yaml.");
+    return -EFAILURE;
+  }
+  memcpy(&mfcc_fs, &kws_meta.mfcc_fs_bits, sizeof(float));
+
   g_silence_class = (int)kws_meta.silence_class;
   g_unknown_class = (int)kws_meta.unknown_class;
+  return SUCCESS;
 }
 
 static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
@@ -1302,7 +1324,10 @@ int main(void) {
 
   akida_batch_size(1, true);
   kws_model_present = true;
-  update_model_params(kws_meta);
+  if (update_model_params(kws_meta) != SUCCESS) {
+    kws_model_present = false;
+    return -1;
+  }
 
   if (check_model_compatibility(is_el_model, kws_meta) != SUCCESS) {
     return -1;
@@ -1417,11 +1442,9 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
     if (c == g_silence_class || c == g_unknown_class) {
       continue;
     }
-    float thr =
-        (c >= KWS_EDGE_NOVEL_CLASS_BASE_ID && c <= KWS_EDGE_MAX_NOVEL_CLASS_ID)
-            ? EDGE_CLASS_SCORE_THRESHOLD
-            : score_threshold;
-    if (smoothed_scores[c] >= thr) {
+    /* Uniform detection threshold for all classes (base and edge-learned),
+     * runtime-tunable via `app score`. */
+    if (smoothed_scores[c] >= score_threshold) {
       chiming_counters[c]++;
     } else {
       chiming_counters[c] = 0;
@@ -2253,7 +2276,9 @@ extern "C" int infer(int app_index_l) {
     LOG_ERR("Metadata reload failed (err %d)", meta_ret);
     return -1;
   }
-  update_model_params(infer_meta);
+  if (update_model_params(infer_meta) != SUCCESS) {
+    return -1;
+  }
 
   /* Step 6: program Akida */
   akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
@@ -2461,7 +2486,7 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
       LOG_INF("  smoothing_alpha  = %.2f", smoothing_alpha);
       LOG_INF("  score_threshold  = %.2f", score_threshold);
       LOG_INF("  chiming_threshold= %d", chiming_threshold);
-      LOG_WRN("  speech_timeout   = %d ms", speech_active_time_ms);
+      LOG_INF("  speech_timeout   = %d ms", speech_active_time_ms);
     } else if (argc > 2 && !strcmp(argv[1], "metrics")) {
       metrics_on = atoi(argv[2]);
       LOG_INF("metrics_on = %d", metrics_on);
@@ -2479,7 +2504,7 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
               score_threshold);
       LOG_INF("  chiming_threshold= %d          [app chiming <n>]",
               chiming_threshold);
-      LOG_WRN("  speech_timeout   = %d ms       [app speech <ms>]",
+      LOG_INF("  speech_timeout   = %d ms       [app speech <ms>]",
               speech_active_time_ms);
       LOG_INF("  metrics          = %d          [app metrics <0|1>]",
               metrics_on);
