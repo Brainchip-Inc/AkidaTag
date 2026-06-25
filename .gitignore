@@ -21,3 +21,8 @@ source/external/*
 
 # all local
 *local*
+
+# local-only working files
+.plans/
+.userguide/
+scripts/sync.sh
