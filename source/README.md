@@ -663,6 +663,7 @@ output_shape: [1, 1, 225]
 mfcc_fs: 123.56967163085938
 silence_class: 10
 unknown_class: 11
+inference_mode: async
 edge_learning:
   enabled: true
   num_classes: 15
@@ -679,6 +680,7 @@ edge_learning:
 | `mfcc_fs` | MFCC normalisation scalar — divides every input feature. **Required for kws**: the firmware rejects a kws model whose `mfcc_fs` is missing/zero |
 | `silence_class` | Output index of the silence class (skipped during keyword detection). **Required for kws** |
 | `unknown_class` | Output index of the unknown/garbage class (skipped during keyword detection). **Required for kws** |
+| `inference_mode` | `sync` or `async` — the Akida API mode the firmware applies for this model at load. On a DK board `async` falls back to `sync` with a warning. **Required for kws** |
 | `edge_learning.enabled` | `true` when the model uses on-device edge learning |
 | `edge_learning.num_classes` | Total number of classes in the base model |
 | `edge_learning.num_el_classes` | Number of novel edge-learning classes to learn on-device (packed into lower 16 bits of the `num_edge_classes` metadata field sent over BLE) |
@@ -686,6 +688,12 @@ edge_learning:
 
 > **Edge learning packing:** `num_edge_classes` (32-bit) = `(num_neurons << 16) | num_el_classes`.
 > The firmware unpacks this into `g_num_neurons_per_class` (bits [31:16]) and `g_num_edge_learn_classes` (bits [15:0]).
+
+> ⚠️ **Metadata format / reflash note:** the model metadata struct (`model_meta_t`) and its
+> CRC layout are versioned together by the firmware and `send_model_via_ble.py`. When fields
+> are added (e.g. `inference_mode`), you must **rebuild + reflash the firmware and re-upload the
+> model with the matching `send_model_via_ble.py`**. A model already in flash from an older
+> format will fail the boot CRC check and won't load until re-uploaded.
 
 ---
 
@@ -741,13 +749,15 @@ cd spark
 python source/utils/generate_info.py --app demo_apps \
     --output_dir source/external/model_files/kws --prefix kws \
     --flash_address 0x101000 --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 
 # Edge-learning KWS model (15 neurons/class, 3 novel classes)
 python source/utils/generate_info.py --app demo_apps \
     --output_dir source/external/model_files/kws_edge_learning --prefix kws \
     --flash_address 0x101000 --neurons_per_class 15 --num_el_classes 3 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 ```
 
 > `--mfcc_fs` is the model's normalisation scalar (the value above is for the bundled
@@ -767,6 +777,7 @@ python source/utils/generate_info.py --app demo_apps \
 | `--mfcc_fs` | MFCC normalisation scalar (divides every input feature) |
 | `--silence_class` | Output index of the silence class |
 | `--unknown_class` | Output index of the unknown/garbage class |
+| `--inference_mode` | `sync` or `async` — Akida API mode the firmware applies for this model (DK falls back to sync) |
 
 **Output:** `info.yaml` in `--output_dir`.
 
@@ -820,7 +831,8 @@ cd spark
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 \
     --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 ```
 
 Both steps can also be combined in a single invocation (fetch runs first, then `info.yaml`):
@@ -832,7 +844,8 @@ Both steps can also be combined in a single invocation (fetch runs first, then `
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 --map_mode 1 \
     --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 ```
 
 **Flags for the `run.sh` model workflow:**
@@ -852,6 +865,7 @@ Both steps can also be combined in a single invocation (fetch runs first, then `
 | `--mfcc_fs <float>` | — | **Required for `--generate_info`.** MFCC normalisation scalar written to `info.yaml` |
 | `--silence_class <int>` | — | **Required for `--generate_info`.** Output index of the silence class |
 | `--unknown_class <int>` | — | **Required for `--generate_info`.** Output index of the unknown/garbage class |
+| `--inference_mode <sync\|async>` | — | **Required for `--generate_info`.** Akida API mode the firmware applies (DK falls back to sync) |
 | `--info <path>` | — | Path to `_program_info.bin` (use with `--send_ble`) |
 | `--bin <path>` | — | Path to `_program_data.bin` (use with `--send_ble`) |
 | `--yaml <path>` | — | Path to `info.yaml` (use with `--send_ble`) |
@@ -874,7 +888,8 @@ cd spark
     --output_dir source/external/model_files/kws_edge_learning \
     --model_flash_addr 0x101000 --map_mode 1 \
     --neurons_per_class 15 --num_el_classes 3 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 
 # Step 1+2: Same for a regular (non-edge-learning) model
 ./scripts/run.sh -d \
@@ -883,7 +898,8 @@ cd spark
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 --map_mode 1 \
     --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 
 # Step 3: Send pre-generated files via BLE on the host (no Docker)
 ./scripts/run.sh --send_ble \
