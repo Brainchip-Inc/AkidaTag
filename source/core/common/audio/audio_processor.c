@@ -190,7 +190,7 @@ int audio_processor(void) {
   ap_counter++;
   if ((ap_counter % g_inference_period) == 0) {
     if (verbose_on) {
-      LOG_ERR("inference: starting (spec_idx=%d)", state->spectrogram_index);
+      LOG_INF("inference: starting (spec_idx=%d)", state->spectrogram_index);
     }
     state->inference_cb(state->spectrogram_index);
   }
@@ -245,7 +245,7 @@ int audio_processor_stop() {
 static inline void uart_send_pcm(const int16_t *pcm, size_t samples) {
 
   for (size_t i = 0; i < samples; i++) {
-    LOG_INF("%d,", pcm[i]);
+    LOG_PRINTK("%d,", pcm[i]);
     if (i % 20 == 0)
       k_sleep(K_MSEC(10));
   }
@@ -303,7 +303,7 @@ void audio_process_thread(void *a, void *b, void *c) {
         /* Debounce cooldown active: skip all processing */
         speech_state = SPEECH_IDLE;
         if (verbose_on && !was_in_debounce) {
-          LOG_ERR("debounce: %ums cooldown active", kws_debounce_time);
+          LOG_INF("debounce: %ums cooldown active", kws_debounce_time);
         }
         was_in_debounce = true;
       }
@@ -311,7 +311,7 @@ void audio_process_thread(void *a, void *b, void *c) {
       /* remove DC offset and compute RMS based on compute_rms, flag */
       else {
         if (was_in_debounce && verbose_on) {
-          LOG_ERR("debounce: cooldown complete");
+          LOG_INF("debounce: cooldown complete");
         }
         was_in_debounce = false;
         if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
@@ -338,7 +338,7 @@ void audio_process_thread(void *a, void *b, void *c) {
              * command was detected. Therefore, the system transitions back to
              * the IDLE state and clears any stale inference data */
             if (verbose_on) {
-              LOG_ERR("speech: IDLE (rms=%.0f, timeout %dms)", (double)rms_val,
+              LOG_INF("speech: IDLE (rms=%.0f, timeout %dms)", (double)rms_val,
                       speech_active_time_ms);
             }
             speech_state = SPEECH_IDLE;

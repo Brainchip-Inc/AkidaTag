@@ -56,7 +56,7 @@ int akida_program_flash(uint8_t *program_info, int len, uint32_t flash_address,
       program_info, len, flash_address + FLASH_BASE_ADDRESS);
   if (info.is_valid()) {
     auto inputsz = info.input_dims();
-    LOG_ERR("input size: (%d, %d, %d)", inputsz[0], inputsz[1], inputsz[2]);
+    LOG_INF("input size: (%d, %d, %d)", inputsz[0], inputsz[1], inputsz[2]);
     (void)inputsz;
 
     if (info.can_learn())
@@ -173,7 +173,7 @@ int akida_fetch(uint8_t *output, int output_size, bool dequantize) {
       memcpy(output, bytes_out, output_size);
     }
   } else {
-    LOG_INF("Fetch returned NULL pointer");
+    LOG_ERR("Fetch returned NULL pointer");
     return -EFAILURE;
   }
   return SUCCESS;

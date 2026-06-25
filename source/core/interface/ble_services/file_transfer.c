@@ -533,7 +533,7 @@ static ssize_t get_mfcc_fs(struct bt_conn *conn,
     return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
   }
   memcpy(&meta_mfcc_fs_bits, buf, 4);
-  LOG_INF("MFCC fs bits: 0x%08X\n", meta_mfcc_fs_bits);
+  LOG_INF("MFCC fs bits: 0x%08X", meta_mfcc_fs_bits);
   return len;
 }
 
@@ -545,7 +545,7 @@ static ssize_t get_silence_class(struct bt_conn *conn,
     return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
   }
   memcpy(&meta_silence_class, buf, 4);
-  LOG_INF("Silence class index: %u\n", meta_silence_class);
+  LOG_INF("Silence class index: %u", meta_silence_class);
   return len;
 }
 
@@ -557,7 +557,7 @@ static ssize_t get_unknown_class(struct bt_conn *conn,
     return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
   }
   memcpy(&meta_unknown_class, buf, 4);
-  LOG_INF("Unknown class index: %u\n", meta_unknown_class);
+  LOG_INF("Unknown class index: %u", meta_unknown_class);
   return len;
 }
 
