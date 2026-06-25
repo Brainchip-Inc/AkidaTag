@@ -798,38 +798,39 @@ python source/utils/send_model_via_ble.py \
 
 ### Using run.sh (build + flash + model workflow)
 
-`run.sh` wraps the steps above: `--fetch_model` runs Step 1 (fetch + convert) and `--generate_info` runs Step 2 (write `info.yaml`). Pass both to do them in one invocation. `--send_ble` (Step 3) is a separate step.
+`run.sh` wraps the steps above: `--fetch_model` runs Step 1 (fetch + convert) and `--generate_info` runs Step 2 (write `info.yaml`). They are separate commands; `--send_ble` (Step 3) is separate too. Add `-d` to any of them to run inside Docker.
 
 ```bash
 cd spark
 
-# Fetch + convert + generate info.yaml in one go (no BLE send)
+# Step 1: Fetch + convert only (bins/cpp, no info.yaml)
+./scripts/run.sh \
+    --fetch_model http://server/akida_model.fbz \
+    --model_name kws \
+    --output_dir source/external/model_files/kws \
+    --map_mode 1 --neurons_per_class 1
+```
+
+```bash
+# Step 2: Generate the info.yaml for the converted model
+./scripts/run.sh \
+    --generate_info \
+    --model_name kws \
+    --output_dir source/external/model_files/kws \
+    --model_flash_addr 0x101000 \
+    --neurons_per_class 1 --num_el_classes 0 \
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+```
+
+Both steps can also be combined in a single invocation (fetch runs first, then `info.yaml`):
+
+```bash
 ./scripts/run.sh \
     --fetch_model http://server/akida_model.fbz --generate_info \
     --model_name kws \
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 --map_mode 1 \
     --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
-
-# Same inside Docker (akida SDK in the container)
-./scripts/run.sh -d \
-    --fetch_model http://server/akida_model.fbz --generate_info \
-    --model_name kws \
-    --output_dir source/external/model_files/kws \
-    --model_flash_addr 0x101000 --map_mode 1 \
-    --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
-
-# Convert only (no info.yaml)
-./scripts/run.sh --fetch_model http://server/akida_model.fbz \
-    --model_name kws --output_dir source/external/model_files/kws \
-    --map_mode 1 --neurons_per_class 1
-
-# Generate info.yaml only, for an already-converted model
-./scripts/run.sh --generate_info \
-    --model_name kws --output_dir source/external/model_files/kws \
-    --model_flash_addr 0x101000 --neurons_per_class 1 --num_el_classes 0 \
     --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
 ```
 
