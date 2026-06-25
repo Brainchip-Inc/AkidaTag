@@ -17,11 +17,17 @@ Options:
   --info             | (str)  | Path to program_info .bin file (use with --send_ble)
   --bin              | (str)  | Path to program_data .bin file (use with --send_ble)
   --yaml             | (str)  | Path to info.yaml metadata file (use with --send_ble)
-  --model_transfer   | (str)  | URL or local path to .fbz – fetch and convert (generate bins + info.yaml)
-  --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (cannot be used with --model_transfer)
-  --model_name       | (str)  | Model name for --model_transfer (default: kws)
-  --model_flash_addr | (str)  | Flash address for --model_transfer (default: 0x1000)
-  --map_mode         | (int)  | Akida MapMode value for --model_transfer (default: 1)
+  --fetch_model      | (str)  | URL or local path to .fbz – fetch and convert (generate bins + info.yaml)
+  --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (separate step; cannot be combined with --fetch_model)
+  --model_name       | (str)  | Model name for --fetch_model (default: kws)
+  --output_dir       | (str)  | Output dir for --fetch_model bins + info.yaml (required for kws; e.g. source/external/model_files/kws or .../kws_edge_learning)
+  --model_flash_addr | (str)  | Flash address for --fetch_model (kws uses 0x101000; required for kws)
+  --map_mode         | (int)  | Akida MapMode value for --fetch_model (default: 1)
+  --neurons_per_class| (int)  | Neurons per class for --fetch_model (kws regular: 1, edge-learning: 15; required for kws)
+  --num_el_classes   | (int)  | Edge-learning class count for --fetch_model (kws regular: 0, edge-learning: 3; required for kws)
+  --mfcc_fs          | (float)| MFCC normalisation scalar written to info.yaml (required for kws; divides every input feature)
+  --silence_class    | (int)  | Output index of the silence class (required for kws)
+  --unknown_class    | (int)  | Output index of the unknown/garbage class (required for kws)
   -d, --docker       | (str)  | Run build/flash using Docker
                      |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
   -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
@@ -61,19 +67,25 @@ How to use script - Examples runs:
   # Flash using Jlink inside Docker
   $SCRIPT_INVOCATION -d -f -jl --app demo_apps
 
-  # Fetch .fbz locally → generate bins + info.yaml only (no BLE send)
-  $SCRIPT_INVOCATION --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1
+  # Fetch + convert a regular kws model on the host → bins + info.yaml (no BLE send)
+  $SCRIPT_INVOCATION --fetch_model http://server/akida_model.fbz --model_name kws \
+      --output_dir source/external/model_files/kws \
+      --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 1 --num_el_classes 0 \
+      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
 
-  # Fetch .fbz inside Docker (akida SDK) → generate bins + info.yaml only (no BLE send)
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1
+  # Same fetch inside Docker (akida SDK lives in the container)
+  $SCRIPT_INVOCATION -d --fetch_model source/external/model_files/kws/akida_model.fbz --model_name kws \
+      --output_dir source/external/model_files/kws \
+      --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 1 --num_el_classes 0 \
+      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
 
-  # Fetch inside Docker + send via BLE (outside of docker) on the host (add --send_ble to enable BLE step)
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1 --send_ble
+  # Fetch an edge-learning kws model into its own dir (15 neurons/class, 3 novel classes)
+  $SCRIPT_INVOCATION -d --fetch_model http://server/akida_model.fbz --model_name kws \
+      --output_dir source/external/model_files/kws_edge_learning \
+      --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 15 --num_el_classes 3 \
+      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
 
-  # Fetch inside Docker + send via BLE (outside of docker) on the host (add --send_ble to enable BLE step) with neurons per class
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 15 --send_ble
-
-  # Send pre-generated model files via BLE using info.yaml (no Docker needed)
+  # Send pre-generated model files via BLE using info.yaml (separate step; no Docker needed)
   $SCRIPT_INVOCATION --send_ble \
       --info source/external/model_files/kws/kws_program_info.bin \
       --bin source/external/model_files/kws/kws_program_data.bin \
@@ -136,15 +148,21 @@ DO_JLINK_FLASH=false
 MODEL_BIN=""
 MODEL_INFO=""
 MODEL_YAML=""
-MODEL_TRANSFER_PATH=""
-MODEL_TRANSFER_NAME="kws"
-MODEL_TRANSFER_FLASH_ADDR="0x1000"
-MODEL_TRANSFER_MAP_MODE=1
+# Fetch-model params. No silent defaults for the kws-critical ones (empty = "not
+# provided") so the validation below can require them. --map_mode keeps its default.
+FETCH_MODEL_PATH=""
+FETCH_MODEL_NAME="kws"
+FETCH_MODEL_OUTPUT_DIR=""
+FETCH_MODEL_FLASH_ADDR=""
+FETCH_MODEL_MAP_MODE=1
+FETCH_MODEL_NEURONS_PER_CLASS=""
+FETCH_MODEL_NUM_EL_CLASSES=""
+FETCH_MODEL_MFCC_FS=""
+FETCH_MODEL_SILENCE_CLASS=""
+FETCH_MODEL_UNKNOWN_CLASS=""
 SEND_BLE=false
 CLI_TEST_CMD=""
 DK_OVERLAY=false
-MODEL_TRANSFER_NEURONS_PER_CLASS=1
-MODEL_TRANSFER_NUM_EL_CLASSES=0
 DO_INFER_TEST=false
 
 DOCKER=false
@@ -209,13 +227,17 @@ while [[ $# -gt 0 ]]; do
         --bin) MODEL_BIN="${2:-}"; shift 2;;
         --info) MODEL_INFO="${2:-}"; shift 2;;
         --yaml) MODEL_YAML="${2:-}"; shift 2;;
-        --model_transfer) MODEL_TRANSFER_PATH="${2:-}"; shift 2;;
+        --fetch_model) FETCH_MODEL_PATH="${2:-}"; shift 2;;
         --send_ble) SEND_BLE=true; shift;;
-        --model_name) MODEL_TRANSFER_NAME="${2:-kws}"; shift 2;;
-        --model_flash_addr) MODEL_TRANSFER_FLASH_ADDR="${2:-0x1000}"; shift 2;;
-        --map_mode) MODEL_TRANSFER_MAP_MODE="${2:-1}"; shift 2;;
-	--neurons_per_class) MODEL_TRANSFER_NEURONS_PER_CLASS="${2:-1}"; shift 2;;
-	--num_el_classes) MODEL_TRANSFER_NUM_EL_CLASSES="${2:-0}"; shift 2;;
+        --model_name) FETCH_MODEL_NAME="${2:-kws}"; shift 2;;
+        --output_dir) FETCH_MODEL_OUTPUT_DIR="${2:-}"; shift 2;;
+        --model_flash_addr) FETCH_MODEL_FLASH_ADDR="${2:-}"; shift 2;;
+        --map_mode) FETCH_MODEL_MAP_MODE="${2:-1}"; shift 2;;
+        --mfcc_fs) FETCH_MODEL_MFCC_FS="${2:-}"; shift 2;;
+        --silence_class) FETCH_MODEL_SILENCE_CLASS="${2:-}"; shift 2;;
+        --unknown_class) FETCH_MODEL_UNKNOWN_CLASS="${2:-}"; shift 2;;
+	--neurons_per_class) FETCH_MODEL_NEURONS_PER_CLASS="${2:-}"; shift 2;;
+	--num_el_classes) FETCH_MODEL_NUM_EL_CLASSES="${2:-}"; shift 2;;
         -d|--docker)
             DOCKER=true
             # Optional image name
@@ -279,12 +301,12 @@ if $DO_SHELL && ! $DOCKER; then
 fi
 
 # If not shell/minicom, require at least one action: build/flash/send_ble/model_transfer
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && [[ -z "$MODEL_TRANSFER_PATH" ]] && ! $DO_CLI_TEST; then
-    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --model_transfer, and/or --key or use --shell / --minicom"
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && [[ -z "$FETCH_MODEL_PATH" ]] && ! $DO_CLI_TEST; then
+    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --fetch_model, and/or --key or use --shell / --minicom"
     exit 1
 fi
 
-# Require --app when doing build/flash (not needed for --info/--bin/--yaml or --model_transfer)
+# Require --app when doing build/flash (not needed for --info/--bin/--yaml or --fetch_model)
 _needs_app=false
 if $DO_BUILD || $DO_FLASH; then
     _needs_app=true
@@ -315,10 +337,31 @@ if [[ -n "$MODEL_YAML" && ! -f "$MODEL_YAML" ]]; then
     exit 1
 fi
 
-# --send_ble cannot be used with --model_transfer
-if $SEND_BLE && [[ -n "$MODEL_TRANSFER_PATH" ]]; then
-    echo "Error: --send_ble cannot be used with --model_transfer"
+# --send_ble cannot be used with --fetch_model (fetch and send are separate steps)
+if $SEND_BLE && [[ -n "$FETCH_MODEL_PATH" ]]; then
+    echo "Error: --send_ble cannot be used with --fetch_model"
     exit 1
+fi
+
+# --fetch_model for the kws usecase requires the full model-parameter set so a model is
+# never generated with silently-wrong values. Applies the same on the host or in Docker.
+if [[ -n "$FETCH_MODEL_PATH" && "$FETCH_MODEL_NAME" == "kws" ]]; then
+    _missing=()
+    [[ -z "$FETCH_MODEL_OUTPUT_DIR"        ]] && _missing+=("--output_dir")
+    [[ -z "$FETCH_MODEL_FLASH_ADDR"        ]] && _missing+=("--model_flash_addr")
+    [[ -z "$FETCH_MODEL_NEURONS_PER_CLASS" ]] && _missing+=("--neurons_per_class")
+    [[ -z "$FETCH_MODEL_NUM_EL_CLASSES"    ]] && _missing+=("--num_el_classes")
+    [[ -z "$FETCH_MODEL_MFCC_FS"           ]] && _missing+=("--mfcc_fs")
+    [[ -z "$FETCH_MODEL_SILENCE_CLASS"     ]] && _missing+=("--silence_class")
+    [[ -z "$FETCH_MODEL_UNKNOWN_CLASS"     ]] && _missing+=("--unknown_class")
+    if (( ${#_missing[@]} > 0 )); then
+        echo "Error: --fetch_model for model_name=kws requires: ${_missing[*]}"
+        echo "Example (regular kws): $SCRIPT_INVOCATION --fetch_model <fbz> --model_name kws \\"
+        echo "    --output_dir source/external/model_files/kws \\"
+        echo "    --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 1 --num_el_classes 0 \\"
+        echo "    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11"
+        exit 1
+    fi
 fi
 
 # --info/--bin/--yaml require --send_ble
@@ -342,8 +385,8 @@ BLE_NEEDED=false
 if $SEND_BLE || $DO_SHELL; then
     BLE_NEEDED=true
 fi
-# Note: --model_transfer BLE send (send_model_via_ble.py) always runs on the host,
-# so dbus is NOT needed inside Docker for that path.
+# Note: the BLE send (send_model_via_ble.py) always runs on the host, so dbus is
+# NOT needed inside Docker for the --fetch_model path.
 
 # -----------------------------------------------------------------------------
 # Docker run base (IMPORTANT: image name is NOT included here)
@@ -562,21 +605,24 @@ if $SEND_BLE; then
 --yaml \"${MODEL_YAML}\""
 fi
 
-# --model_transfer: fetch + convert only (no BLE send)
+# --fetch_model: fetch + convert only (no BLE send)
 FETCH_MODEL_CMD=""
-if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
-  MT_PREFIX="$MODEL_TRANSFER_NAME"
-  MT_OUTPUT_DIR="source/external/model_files/${MT_PREFIX}"
+if [[ -n "$FETCH_MODEL_PATH" ]]; then
+  FM_PREFIX="$FETCH_MODEL_NAME"
+  FM_OUTPUT_DIR="$FETCH_MODEL_OUTPUT_DIR"
 
   FETCH_MODEL_CMD="python source/utils/fetch_model.py \
---model \"${MODEL_TRANSFER_NAME}\" \
---prefix \"${MT_PREFIX}\" \
---output_dir \"${MT_OUTPUT_DIR}\" \
---model_path \"${MODEL_TRANSFER_PATH}\" \
---flash_address \"${MODEL_TRANSFER_FLASH_ADDR}\" \
---map_mode \"${MODEL_TRANSFER_MAP_MODE}\" \
---neurons_per_class \"${MODEL_TRANSFER_NEURONS_PER_CLASS}\" \
---num_el_classes \"${MODEL_TRANSFER_NUM_EL_CLASSES}\""
+--model \"${FETCH_MODEL_NAME}\" \
+--prefix \"${FM_PREFIX}\" \
+--output_dir \"${FM_OUTPUT_DIR}\" \
+--model_path \"${FETCH_MODEL_PATH}\" \
+--flash_address \"${FETCH_MODEL_FLASH_ADDR}\" \
+--map_mode \"${FETCH_MODEL_MAP_MODE}\" \
+--neurons_per_class \"${FETCH_MODEL_NEURONS_PER_CLASS}\" \
+--num_el_classes \"${FETCH_MODEL_NUM_EL_CLASSES}\" \
+--mfcc_fs \"${FETCH_MODEL_MFCC_FS}\" \
+--silence_class \"${FETCH_MODEL_SILENCE_CLASS}\" \
+--unknown_class \"${FETCH_MODEL_UNKNOWN_CLASS}\""
 
 fi
 
