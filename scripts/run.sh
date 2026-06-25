@@ -29,6 +29,7 @@ Options:
   --mfcc_fs          | (float)| MFCC normalisation scalar written to info.yaml by --generate_info (required; divides every input feature)
   --silence_class    | (int)  | Output index of the silence class for --generate_info (required)
   --unknown_class    | (int)  | Output index of the unknown/garbage class for --generate_info (required)
+  --inference_mode   | (str)  | Inference mode for --generate_info: sync or async (required; DK falls back to sync)
   -d, --docker       | (str)  | Run build/flash using Docker
                      |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
   -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
@@ -76,19 +77,19 @@ How to use script - Examples runs:
   $SCRIPT_INVOCATION --generate_info --app demo_apps --model_name kws \
       --output_dir source/external/model_files/kws \
       --model_flash_addr 0x101000 --neurons_per_class 1 --num_el_classes 0 \
-      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 --inference_mode async
 
   # Fetch + convert + generate info.yaml in one go inside Docker (akida SDK lives in the container)
   $SCRIPT_INVOCATION -d --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps --model_name kws \
       --output_dir source/external/model_files/kws \
       --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 1 --num_el_classes 0 \
-      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 --inference_mode async
 
   # Edge-learning kws model into its own dir (15 neurons/class, 3 novel classes)
   $SCRIPT_INVOCATION -d --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps --model_name kws \
       --output_dir source/external/model_files/kws_edge_learning \
       --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 15 --num_el_classes 3 \
-      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+      --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 --inference_mode async
 
   # Send pre-generated model files via BLE using info.yaml (separate step; no Docker needed)
   $SCRIPT_INVOCATION --send_ble \
@@ -165,6 +166,7 @@ FETCH_MODEL_NUM_EL_CLASSES=""
 FETCH_MODEL_MFCC_FS=""
 FETCH_MODEL_SILENCE_CLASS=""
 FETCH_MODEL_UNKNOWN_CLASS=""
+FETCH_MODEL_INFERENCE_MODE=""
 DO_GENERATE_INFO=false
 SEND_BLE=false
 CLI_TEST_CMD=""
@@ -243,6 +245,7 @@ while [[ $# -gt 0 ]]; do
         --mfcc_fs) FETCH_MODEL_MFCC_FS="${2:-}"; shift 2;;
         --silence_class) FETCH_MODEL_SILENCE_CLASS="${2:-}"; shift 2;;
         --unknown_class) FETCH_MODEL_UNKNOWN_CLASS="${2:-}"; shift 2;;
+        --inference_mode) FETCH_MODEL_INFERENCE_MODE="${2:-}"; shift 2;;
 	--neurons_per_class) FETCH_MODEL_NEURONS_PER_CLASS="${2:-}"; shift 2;;
 	--num_el_classes) FETCH_MODEL_NUM_EL_CLASSES="${2:-}"; shift 2;;
         -d|--docker)
@@ -376,12 +379,14 @@ if $DO_GENERATE_INFO && [[ "${APP:-demo_apps}" == "demo_apps" ]]; then
     [[ -z "$FETCH_MODEL_MFCC_FS"           ]] && _missing+=("--mfcc_fs")
     [[ -z "$FETCH_MODEL_SILENCE_CLASS"     ]] && _missing+=("--silence_class")
     [[ -z "$FETCH_MODEL_UNKNOWN_CLASS"     ]] && _missing+=("--unknown_class")
+    [[ -z "$FETCH_MODEL_INFERENCE_MODE"    ]] && _missing+=("--inference_mode")
     if (( ${#_missing[@]} > 0 )); then
         echo "Error: --generate_info for app=demo_apps requires: ${_missing[*]}"
         echo "Example: $SCRIPT_INVOCATION --generate_info --model_name kws \\"
         echo "    --output_dir source/external/model_files/kws \\"
         echo "    --model_flash_addr 0x101000 --neurons_per_class 1 --num_el_classes 0 \\"
-        echo "    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11"
+        echo "    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \\"
+        echo "    --inference_mode async"
         exit 1
     fi
 fi
@@ -656,7 +661,8 @@ if $DO_GENERATE_INFO; then
 --num_el_classes \"${FETCH_MODEL_NUM_EL_CLASSES}\" \
 --mfcc_fs \"${FETCH_MODEL_MFCC_FS}\" \
 --silence_class \"${FETCH_MODEL_SILENCE_CLASS}\" \
---unknown_class \"${FETCH_MODEL_UNKNOWN_CLASS}\""
+--unknown_class \"${FETCH_MODEL_UNKNOWN_CLASS}\" \
+--inference_mode \"${FETCH_MODEL_INFERENCE_MODE}\""
 fi
 
 # -----------------------------------------------------------------------------
