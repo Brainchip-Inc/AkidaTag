@@ -46,6 +46,7 @@ def _build_demo_apps(args, input_shape, output_shape, is_el):
         "mfcc_fs":       float(args.mfcc_fs),
         "silence_class": int(args.silence_class),
         "unknown_class": int(args.unknown_class),
+        "inference_mode": args.inference_mode,
         "edge_learning": {
             "enabled":        is_el,
             "num_classes":    num_classes,
@@ -62,7 +63,7 @@ def _build_demo_apps(args, input_shape, output_shape, is_el):
 APP_PROFILES = {
     "demo_apps": {
         "required": ["flash_address", "neurons_per_class", "num_el_classes",
-                     "mfcc_fs", "silence_class", "unknown_class"],
+                     "mfcc_fs", "silence_class", "unknown_class", "inference_mode"],
         "builder": _build_demo_apps,
     },
 }
@@ -119,6 +120,9 @@ if __name__ == "__main__":
                         help="Output index of the silence class")
     parser.add_argument("--unknown_class", type=int, default=None,
                         help="Output index of the unknown/garbage class")
+    parser.add_argument("--inference_mode", choices=["sync", "async"], default=None,
+                        help="Inference mode the firmware should use for this model "
+                             "(sync or async). On a DK board async falls back to sync.")
 
     args = parser.parse_args()
     generate_info(args)
