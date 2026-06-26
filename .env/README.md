@@ -6,6 +6,8 @@ such as MCUboot / imgtool signing keys.
 ## What belongs here
 - `signing_key.pem` – PRIVATE key used to sign images during development/testing
 - `models.conf` – Model download URLs for the build system (see below)
+- `<app>/<model>.yaml` – Per-(app, model) build configs for `fetch_model.py` /
+  `generate_info.py` (see "Model build configs" below)
 
 ## What must NOT be committed
 - Any private key material (`*.pem`, `*.key`, etc.)
@@ -30,6 +32,51 @@ MODEL_MNIST_URL=http://salesdata.brainchipinc.local/spark/ml/artifacts/.../akida
 The variable name format is `MODEL_<NAME>_URL` where `<NAME>` matches the
 `--model` argument passed to `fetch_model.py` (uppercased, hyphens become
 underscores).
+
+## Model build configs (`.env/<app>/<model>.yaml`)
+
+`fetch_model.py` (model conversion) and `generate_info.py` (info.yaml generation) take **only**
+`--config` — every parameter comes from a per-(app, model) YAML file. This keeps model URLs and
+tuning values out of git and lets CI run the same flow as local dev. The file is laid out as
+`.env/<app>/<model>.yaml`, e.g. `.env/demo_apps/kws.yaml` and
+`.env/demo_apps/kws_edge_learning.yaml`.
+
+One self-contained file holds both the conversion fields (used by `fetch_model.py`) and the
+info.yaml fields (used by `generate_info.py`):
+
+```yaml
+# .env/demo_apps/kws.yaml
+app: demo_apps                                   # generate_info profile (selects which fields info.yaml carries)
+model_name: kws                                  # file prefix for the generated bins/cpp/.h + shapes sidecar
+output_dir: source/external/model_files/kws      # where converted artifacts + info.yaml are written
+model_url: http://<internal-host>/path/to/akida_model.fbz   # .fbz to download (VPN required)
+map_mode: 2                                      # Akida MapMode (optional, default 1)
+neurons_per_class: 1                             # regular kws: 1, edge-learning: e.g. 10
+num_el_classes: 0                                # edge-learning novel classes (regular: 0)
+flash_address: "0x101000"                        # quote so info.yaml keeps the hex form
+mfcc_fs: 123.56967163085938                      # MFCC normalisation scalar
+silence_class: 10
+unknown_class: 11
+inference_mode: async                            # sync | async (DK board falls back to sync)
+```
+
+Required keys: `app`, `model_name`, `output_dir` (plus everything the chosen `app` profile
+requires — for `demo_apps`: `flash_address`, `neurons_per_class`, `num_el_classes`, `mfcc_fs`,
+`silence_class`, `unknown_class`, `inference_mode`). The scripts report any missing keys by name.
+
+Usage (via `run.sh`; the akida SDK lives in the Docker image so use `-d` for the fetch step):
+
+```
+# fetch + convert, then generate info.yaml in one go
+./scripts/run.sh -d --config .env/demo_apps/kws.yaml --fetch_model --generate_info
+```
+
+**Reused models:** when several apps use the same model, point each app's file at the same
+`output_dir` (the bins are produced once); only the info.yaml fields differ. Apps that hardcode
+their values simply have no file here.
+
+**CI:** the HIL workflow reads `.env/demo_apps/kws.yaml`, so that file must exist on the
+self-hosted runner (local-only, like the signing key).
 
 ## How to generate a dev signing key
 From the repo root:
