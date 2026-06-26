@@ -34,8 +34,8 @@ jobs:
         timeout-minutes: 4
         run: |
           ./scripts/run.sh -d \
-          --config "${MODEL_CONFIG}" \
-          --fetch_model --generate_info
+          --fetch_model "${MODEL_CONFIG}" \
+          --generate_info "${MODEL_CONFIG}"
 
       - name: Build and Flash
         timeout-minutes: 4
