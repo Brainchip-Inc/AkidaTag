@@ -77,8 +77,16 @@ Usage (via `run.sh`; the akida SDK lives in the Docker image so use `-d` for the
 `output_dir` (the bins are produced once); only the info.yaml fields differ. Apps that hardcode
 their values simply have no file here.
 
-**CI:** the HIL workflow reads `.env/demo_apps/kws.yaml`, so that file must exist on the
-self-hosted runner (local-only, like the signing key).
+**CI:** the HIL workflow needs `.env/demo_apps/kws.yaml`, but `actions/checkout` wipes
+git-ignored files (`git clean -ffdx`) on every run, so it can't just live on the runner. Instead
+the workflow writes it from a **repo secret** before the fetch step:
+
+- Secret name: `MODEL_CONFIG_DEMO_APPS_KWS`
+- Secret value: the full contents of `.env/demo_apps/kws.yaml` (paste the YAML)
+
+Set it under **Settings → Secrets and variables → Actions → New repository secret**. To change a CI
+model parameter, edit that secret. Add a new secret per (app, model) config you want CI to use.
+(Repo secrets are not exposed to PRs from forks — fine for this internal repo.)
 
 ## How to generate a dev signing key
 From the repo root:
