@@ -10,6 +10,8 @@ from cnn2snn import set_akida_version, AkidaVersion
 from akida.generate.array_to_cpp import array_to_cpp
 from dotenv import load_dotenv
 
+from model_config import load_model_config, require_keys, resolve_args
+
 
 def _shapes_json_path(output_dir, prefix):
     return os.path.join(output_dir, f"{prefix}_shapes.json")
@@ -152,52 +154,33 @@ def fetch_and_convert(args):
 
     # Persist shapes so generate_info.py can build info.yaml without the Akida SDK
     _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el)
-    _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
 
 
-def _write_vars_file(args, output_dir, prefix, input_shape, output_shape):
-    """Write a bash-sourceable vars file so the caller can read shapes and bin paths."""
-    vars_file = getattr(args, "vars_file", None)
-    if not vars_file:
-        return
-    info_bin  = os.path.abspath(os.path.join(output_dir, f"{prefix}_program_info.bin"))
-    data_bin  = os.path.abspath(os.path.join(output_dir, f"{prefix}_program_data.bin"))
-    input_csv  = ",".join(str(d) for d in input_shape)  if input_shape  else ""
-    output_csv = ",".join(str(d) for d in output_shape) if output_shape else ""
-    with open(vars_file, "w") as f:
-        f.write(f'INFO_BIN="{info_bin}"\n')
-        f.write(f'DATA_BIN="{data_bin}"\n')
-        f.write(f'INPUT_SHAPE="{input_csv}"\n')
-        f.write(f'OUTPUT_SHAPE="{output_csv}"\n')
-    print(f"Vars written to {vars_file}")
+# Maps the args namespace fetch_and_convert() reads to config keys + defaults.
+# model and prefix both come from the model_name; model_path comes from model_url
+# (optional — falls back to .env/models.conf when absent).
+_CONFIG_SCHEMA = {
+    "model":             ("model_name",        None),
+    "prefix":            ("model_name",        None),
+    "output_dir":        ("output_dir",        None),
+    "model_path":        ("model_url",         None),
+    "map_mode":          ("map_mode",          1),
+    "neurons_per_class": ("neurons_per_class", 1),
+    "akida_version":     ("akida_version",     "v1"),
+}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Fetch an Akida .fbz model and convert it into program_info/"
                     "program_data bin + C++ files (info.yaml is generated separately "
-                    "by generate_info.py)"
+                    "by generate_info.py). All parameters come from --config; see "
+                    ".env/<app>/<model>.yaml (schema in source/README.md)."
     )
-    parser.add_argument("--model", required=True,
-                        help="Model name (used to look up MODEL_<NAME>_URL in .env/models.conf "
-                             "when --model_path is not provided)")
-    parser.add_argument("--prefix", required=True,
-                        help="Output file prefix (e.g. kws, kws_el, mnist)")
-    parser.add_argument("--output_dir", required=True,
-                        help="Directory for generated files")
-    parser.add_argument("--model_path", default=None,
-                        help="Direct URL or local path to .fbz file "
-                             "(overrides models.conf lookup)")
-    parser.add_argument("--vars_file", default=None,
-                        help="Path to write a bash-sourceable vars file with "
-                             "INFO_BIN, DATA_BIN, INPUT_SHAPE, OUTPUT_SHAPE")
-    parser.add_argument("--neurons_per_class", type=int, default=1,
-                        help="Neurons per class (triggers KWS macro injection into "
-                             "<prefix>_program_info.h for edge-learning models)")
-    parser.add_argument("--akida_version", default="v1", choices=["v1", "v2"],
-                        help="Akida version (default: v1)")
-    parser.add_argument("--map_mode", type=int, default=1,
-                        help="Akida MapMode value passed to model.map() (default: 1)")
-
+    parser.add_argument("--config", required=True,
+                        help="Path to the model config YAML (.env/<app>/<model>.yaml)")
     args = parser.parse_args()
-    fetch_and_convert(args)
+
+    cfg = load_model_config(args.config)
+    require_keys(cfg, args.config, ["model_name", "output_dir"])
+    fetch_and_convert(resolve_args(cfg, _CONFIG_SCHEMA))

@@ -5,6 +5,8 @@ import sys
 
 import yaml
 
+from model_config import load_model_config, require_keys, resolve_args
+
 
 def _load_shapes(output_dir, prefix):
     """Read the shapes sidecar written by fetch_model.py.
@@ -30,6 +32,9 @@ def _load_shapes(output_dir, prefix):
 def _build_demo_apps(args, input_shape, output_shape, is_el):
     """Build the demo_apps info.yaml metadata dict (consumed by send_model_via_ble.py
     and the firmware at upload time)."""
+    if str(args.inference_mode).lower() not in ("sync", "async"):
+        sys.exit(f"Error: inference_mode must be 'sync' or 'async', got "
+                 f"'{args.inference_mode}'")
     npc = int(args.neurons_per_class) if args.neurons_per_class else 1
     num_classes = 0
     if output_shape:
@@ -92,37 +97,34 @@ def generate_info(args):
     return yaml_path
 
 
+# Maps the args namespace generate_info() reads to config keys. All default to
+# None so the per-profile `required` validation reports any missing config keys.
+# The profile is selected by the config's `app` key.
+_CONFIG_SCHEMA = {
+    "app":               ("app",               None),
+    "output_dir":        ("output_dir",        None),
+    "prefix":            ("model_name",        None),
+    "flash_address":     ("flash_address",     None),
+    "neurons_per_class": ("neurons_per_class", None),
+    "num_el_classes":    ("num_el_classes",    None),
+    "mfcc_fs":           ("mfcc_fs",           None),
+    "silence_class":     ("silence_class",     None),
+    "unknown_class":     ("unknown_class",     None),
+    "inference_mode":    ("inference_mode",    None),
+}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate an app-specific info.yaml from a converted model's "
-                    "shapes sidecar (produced by fetch_model.py). No Akida SDK required."
+                    "shapes sidecar (produced by fetch_model.py). No Akida SDK required. "
+                    "All parameters (including the app profile) come from --config; "
+                    "see .env/<app>/<model>.yaml (schema in source/README.md)."
     )
-    parser.add_argument("--app", default="demo_apps",
-                        help="Target app profile (default: demo_apps). Decides which "
-                             "fields info.yaml carries and which args are required.")
-    parser.add_argument("--output_dir", required=True,
-                        help="Model directory holding <prefix>_shapes.json; "
-                             "info.yaml is written here")
-    parser.add_argument("--prefix", required=True,
-                        help="Model file prefix (e.g. kws) used to locate <prefix>_shapes.json")
-    # Metadata args are optional at parse time; each app profile validates the
-    # ones it requires so requiredness lives with the app, not globally.
-    parser.add_argument("--flash_address", default=None,
-                        help="Target flash address embedded in info.yaml (e.g. 0x101000)")
-    parser.add_argument("--neurons_per_class", type=int, default=None,
-                        help="Neurons per class (kws regular: 1, edge-learning: 15)")
-    parser.add_argument("--num_el_classes", type=int, default=None,
-                        help="Number of edge-learning classes (kws regular: 0, edge-learning: 3)")
-    parser.add_argument("--mfcc_fs", type=float, default=None,
-                        help="MFCC normalisation scalar written to info.yaml "
-                             "(divides every input feature)")
-    parser.add_argument("--silence_class", type=int, default=None,
-                        help="Output index of the silence class")
-    parser.add_argument("--unknown_class", type=int, default=None,
-                        help="Output index of the unknown/garbage class")
-    parser.add_argument("--inference_mode", choices=["sync", "async"], default=None,
-                        help="Inference mode the firmware should use for this model "
-                             "(sync or async). On a DK board async falls back to sync.")
-
+    parser.add_argument("--config", required=True,
+                        help="Path to the model config YAML (.env/<app>/<model>.yaml)")
     args = parser.parse_args()
-    generate_info(args)
+
+    cfg = load_model_config(args.config)
+    require_keys(cfg, args.config, ["app", "model_name", "output_dir"])
+    generate_info(resolve_args(cfg, _CONFIG_SCHEMA))
