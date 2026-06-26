@@ -17,9 +17,8 @@ Options:
   --info             | (str)  | Path to program_info .bin file (use with --send_ble)
   --bin              | (str)  | Path to program_data .bin file (use with --send_ble)
   --yaml             | (str)  | Path to info.yaml metadata file (use with --send_ble)
-  --config           | (str)  | Model config YAML (.env/<app>/<model>.yaml); required for --fetch_model/--generate_info
-  --fetch_model      | (flag) | Fetch + convert the model from --config (bins/cpp/.h, no info.yaml)
-  --generate_info    | (flag) | Generate app-specific info.yaml from --config + the converted shapes sidecar
+  --fetch_model      | (str)  | Fetch + convert the model from the given config YAML (.env/<app>/<model>.yaml); bins/cpp/.h, no info.yaml
+  --generate_info    | (str)  | Generate app-specific info.yaml from the given config YAML + the converted shapes sidecar
   --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (separate step; cannot be combined with --fetch_model)
   -d, --docker       | (str)  | Run build/flash using Docker
                      |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
@@ -61,16 +60,16 @@ How to use script - Examples runs:
   $SCRIPT_INVOCATION -d -f -jl --app demo_apps
 
   # Fetch + convert only, on the host → bins/cpp (no info.yaml). All params from the config.
-  $SCRIPT_INVOCATION --config .env/demo_apps/kws.yaml --fetch_model
+  $SCRIPT_INVOCATION --fetch_model .env/demo_apps/kws.yaml
 
   # Generate the app-specific info.yaml for a previously-converted model (no Akida SDK needed)
-  $SCRIPT_INVOCATION --config .env/demo_apps/kws.yaml --generate_info
+  $SCRIPT_INVOCATION --generate_info .env/demo_apps/kws.yaml
 
   # Fetch + convert + generate info.yaml in one go inside Docker (akida SDK lives in the container)
-  $SCRIPT_INVOCATION -d --config .env/demo_apps/kws.yaml --fetch_model --generate_info
+  $SCRIPT_INVOCATION -d --fetch_model .env/demo_apps/kws.yaml --generate_info .env/demo_apps/kws.yaml
 
   # Edge-learning kws model (its config points at .../kws_edge_learning, 10 neurons/class, 3 novel classes)
-  $SCRIPT_INVOCATION -d --config .env/demo_apps/kws_edge_learning.yaml --fetch_model --generate_info
+  $SCRIPT_INVOCATION -d --fetch_model .env/demo_apps/kws_edge_learning.yaml --generate_info .env/demo_apps/kws_edge_learning.yaml
 
   # Send pre-generated model files via BLE using info.yaml (separate step; no Docker needed)
   $SCRIPT_INVOCATION --send_ble \
@@ -135,12 +134,13 @@ DO_JLINK_FLASH=false
 MODEL_BIN=""
 MODEL_INFO=""
 MODEL_YAML=""
-# Fetch + generate are config-driven: all model/info.yaml params live in the
-# --config file (.env/<app>/<model>.yaml). run.sh only needs to know whether to
-# run each step and which config to pass.
+# Fetch + generate are config-driven: each step takes a per-(app,model) config
+# (.env/<app>/<model>.yaml) as its argument, e.g. --fetch_model <config>. The
+# combined case names the config on both flags.
 DO_FETCH_MODEL=false
 DO_GENERATE_INFO=false
-CONFIG_FILE=""
+FETCH_CONFIG=""
+GENERATE_CONFIG=""
 SEND_BLE=false
 CLI_TEST_CMD=""
 DK_OVERLAY=false
@@ -208,10 +208,15 @@ while [[ $# -gt 0 ]]; do
         --bin) MODEL_BIN="${2:-}"; shift 2;;
         --info) MODEL_INFO="${2:-}"; shift 2;;
         --yaml) MODEL_YAML="${2:-}"; shift 2;;
-        --fetch_model) DO_FETCH_MODEL=true; shift;;
-        --generate_info) DO_GENERATE_INFO=true; shift;;
+        --fetch_model)
+            DO_FETCH_MODEL=true
+            if [[ -n "${2:-}" && "${2:-}" != -* ]]; then FETCH_CONFIG="$2"; shift 2; else shift; fi
+            ;;
+        --generate_info)
+            DO_GENERATE_INFO=true
+            if [[ -n "${2:-}" && "${2:-}" != -* ]]; then GENERATE_CONFIG="$2"; shift 2; else shift; fi
+            ;;
         --send_ble) SEND_BLE=true; shift;;
-        --config) CONFIG_FILE="${2:-}"; shift 2;;
         -d|--docker)
             DOCKER=true
             # Optional image name
@@ -317,18 +322,21 @@ if $SEND_BLE && $DO_FETCH_MODEL; then
     exit 1
 fi
 
-# --fetch_model / --generate_info are config-driven: all params live in the YAML
-# config file. The Python scripts validate the file contents; run.sh only needs
-# to ensure a --config was supplied.
-if { $DO_FETCH_MODEL || $DO_GENERATE_INFO; } && [[ -z "$CONFIG_FILE" ]]; then
-    echo "Error: --fetch_model/--generate_info require --config <path>"
-    echo "Example: $SCRIPT_INVOCATION -d --config .env/demo_apps/kws.yaml --fetch_model --generate_info"
+# --fetch_model / --generate_info are config-driven: each takes a YAML config path
+# as its argument. The Python scripts validate the file contents; run.sh only
+# ensures a config path was supplied to each requested step and that it exists.
+if $DO_FETCH_MODEL && [[ -z "$FETCH_CONFIG" ]]; then
+    echo "Error: --fetch_model requires a config path"
+    echo "Example: $SCRIPT_INVOCATION -d --fetch_model .env/demo_apps/kws.yaml"
     exit 1
 fi
-if [[ -n "$CONFIG_FILE" && ! -f "$CONFIG_FILE" ]]; then
-    echo "Error: --config file not found: $CONFIG_FILE"
+if $DO_GENERATE_INFO && [[ -z "$GENERATE_CONFIG" ]]; then
+    echo "Error: --generate_info requires a config path"
+    echo "Example: $SCRIPT_INVOCATION --generate_info .env/demo_apps/kws.yaml"
     exit 1
 fi
+[[ -n "$FETCH_CONFIG"    && ! -f "$FETCH_CONFIG"    ]] && die "--fetch_model config not found: $FETCH_CONFIG"
+[[ -n "$GENERATE_CONFIG" && ! -f "$GENERATE_CONFIG" ]] && die "--generate_info config not found: $GENERATE_CONFIG"
 
 # --info/--bin/--yaml require --send_ble
 if [[ -n "$MODEL_INFO" || -n "$MODEL_BIN" || -n "$MODEL_YAML" ]] && ! $SEND_BLE; then
@@ -572,17 +580,17 @@ if $SEND_BLE; then
 fi
 
 # --fetch_model: fetch + convert only (bins/cpp/.h + shapes sidecar, no info.yaml).
-# All conversion params come from the --config YAML.
+# All conversion params come from the config YAML passed as its argument.
 FETCH_MODEL_CMD=""
 if $DO_FETCH_MODEL; then
-  FETCH_MODEL_CMD="python source/utils/fetch_model.py --config \"${CONFIG_FILE}\""
+  FETCH_MODEL_CMD="python source/utils/fetch_model.py --config \"${FETCH_CONFIG}\""
 fi
 
 # --generate_info: write the app-specific info.yaml from the shapes sidecar (no Akida SDK).
-# Profile and all info.yaml params come from the --config YAML.
+# Profile and all info.yaml params come from the config YAML passed as its argument.
 GENERATE_INFO_CMD=""
 if $DO_GENERATE_INFO; then
-  GENERATE_INFO_CMD="python source/utils/generate_info.py --config \"${CONFIG_FILE}\""
+  GENERATE_INFO_CMD="python source/utils/generate_info.py --config \"${GENERATE_CONFIG}\""
 fi
 
 # -----------------------------------------------------------------------------
