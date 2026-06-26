@@ -64,7 +64,7 @@ jobs:
       - name: Upload Model
         timeout-minutes: 4
         run: |
-          /home/demo/.conda/envs/spark/bin/python source/utils/send_model_via_ble.py \
+          "${HOME}/.conda/envs/spark/bin/python" source/utils/send_model_via_ble.py \
           --info "${MODEL_DIR}/${MODEL_NAME}_program_info.bin" \
           --bin "${MODEL_DIR}/${MODEL_NAME}_program_data.bin" \
           --yaml "${MODEL_DIR}/info.yaml"
