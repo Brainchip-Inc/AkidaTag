@@ -14,11 +14,12 @@
 #include <zephyr/audio/dmic.h>
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
-#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys_clock.h>
 
 #include "ble_services/ble_initialization.h"
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(pdm_mic, LOG_LEVEL_INF);
 atomic_t is_dmic_start;
 
 K_MEM_SLAB_DEFINE(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 32);
@@ -80,7 +81,7 @@ static int dc_block_process(dc_block_t *s, int16_t *x, int N, float *rms) {
   int64_t sum_sq = 0;          // for RMS
 
   if (N <= 0) {
-    printk("no of samples passed is incorrect %d\n", N);
+    LOG_ERR("no of samples passed is incorrect %d", N);
     return -EFAILURE;
   }
   for (int i = 0; i < N; i++) {
@@ -137,7 +138,7 @@ int dmic_start(void) {
 
 int dmic_init(void) {
   if (!device_is_ready(dmic_dev)) {
-    printk("DMIC not ready\n");
+    LOG_ERR("DMIC not ready");
     return -ENODEV;
   }
 
@@ -171,12 +172,12 @@ int dmic_init(void) {
 
   int ret = dmic_configure(dmic_dev, &cfg);
   if (ret < 0) {
-    printk("dmic_configure failed: %d\n", ret);
+    LOG_ERR("dmic_configure failed: %d", ret);
     return -EFAILURE;
   }
   dc_block_init(&dc_state);
   if (dmic_start() < 0) {
-    printk("DMIC start failed\n");
+    LOG_ERR("DMIC start failed");
     return -EFAILURE;
   }
 
@@ -200,7 +201,7 @@ void dmic_capture_thread(void *a, void *b, void *c) {
   wdt_enable_thread(DMIC_CAPTURE);
 #endif
   struct audio_block blk;
-  printk("dmic_capture_thread: \n\r");
+  LOG_INF("dmic_capture_thread: ");
   uint32_t dmic_capture_thread_cntr = 0;
 
   while (1) {
@@ -209,7 +210,7 @@ void dmic_capture_thread(void *a, void *b, void *c) {
       /* Push buffer pointer to processing thread */
       if (k_msgq_put(&audio_msgq, &blk, K_NO_WAIT) != 0) {
         /* Queue full → drop buffer safely */
-        printk("audio_msgq is full");
+        LOG_WRN("audio_msgq is full");
       }
 
       memcpy((void *)orig_buf, blk.data, blk.size);
@@ -223,7 +224,7 @@ void dmic_capture_thread(void *a, void *b, void *c) {
         k_sem_give(&led_sem);
       }
       dmic_capture_thread_cntr++;
-      // printk ("dmic %d\n", dmic_capture_thread_cntr);
+      // LOG_INF("dmic %d", dmic_capture_thread_cntr);
     }
 /* Feed WDT regardless of dmic_read() result to avoid trigger when DMIC is
  * stopped */
@@ -242,14 +243,14 @@ void stop_dmic(void) {
   while (dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT) == 0) {
     k_mem_slab_free(&mem_slab, blk.data);
   }
-  printk("dmic_stop done ");
+  LOG_INF("dmic_stop done ");
 }
 
 void dmic_reset_dc_state(void) { dc_block_init(&dc_state); }
 
 static int cmd_dmic_stop(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
-    printk("invalid command ");
+    LOG_ERR("invalid command ");
     return -EINVAL;
   }
   atomic_set(&is_dmic_start, 0);
@@ -260,21 +261,21 @@ static int cmd_dmic_stop(const struct shell *shell, size_t argc, char **argv) {
 static int cmd_dmic_start(const struct shell *shell, size_t argc, char **argv) {
 
   if (argc > 1) {
-    printk("invalid command ");
+    LOG_ERR("invalid command ");
     return -EINVAL;
   }
 
   if (dmic_init() < 0) {
-    printk("DMIC init failed\n");
+    LOG_ERR("DMIC init failed");
     return -1;
   }
   /* -------- MIC PDM Start -------- */
   if (dmic_start() < 0) {
-    printk("DMIC start failed\n");
+    LOG_ERR("DMIC start failed");
     return -1;
   }
   atomic_set(&is_dmic_start, 1);
-  printk("dmic_start done ");
+  LOG_INF("dmic_start done ");
   return 0;
 }
 
@@ -307,21 +308,21 @@ static int cmd_dmic_start(const struct shell *shell, size_t argc, char **argv) {
  */
 static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
   if (argc > 1) {
-    printk("Invalid command\n");
+    LOG_ERR("Invalid command");
     return -EINVAL;
   }
 
   if (dmic_init() < 0) {
-    printk("DMIC init failed\n");
+    LOG_ERR("DMIC init failed");
     return -1;
   }
 
   if (dmic_start() < 0) {
-    printk("DMIC start failed\n");
+    LOG_ERR("DMIC start failed");
     return -1;
   }
 
-  printk("DMIC started\n");
+  LOG_INF("DMIC started");
 
   struct audio_block blk;
   int valid_cycles = 0;
@@ -333,7 +334,7 @@ static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
 
     /* Global timeout check (5 seconds) */
     if (k_uptime_get() - test_start > 5000) {
-      printk("DMIC TEST TIMEOUT\n");
+      shell_print(shell, "DMIC TEST TIMEOUT");
       break;
     }
     int ret = dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT);
@@ -344,12 +345,12 @@ static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
       int64_t diff = now - prev_time;
       prev_time = now;
 
-      printk("DMIC data received: %lld ms\n", diff);
+      LOG_DBG("DMIC data received: %lld ms", diff);
       // Check if the interval between consecutive DMIC data blocks is within
       // the expected 50–70 ms range
       if (diff >= 50 && diff <= 70) {
         valid_cycles++;
-        printk("Cycle %d OK\n", valid_cycles);
+        LOG_DBG("Cycle %d OK", valid_cycles);
       } else {
         valid_cycles = 0;
       }
@@ -358,11 +359,11 @@ static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
       k_mem_slab_free(&mem_slab, blk.data);
 
       if (valid_cycles >= 5) {
-        printk("DMIC TEST PASS\n");
+        shell_print(shell, "DMIC TEST PASS");
         break;
       }
     } else if (ret == -EAGAIN) {
-      printk("DMIC timeout\n");
+      shell_print(shell, "DMIC timeout");
       break;
     }
   }

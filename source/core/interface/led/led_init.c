@@ -1,5 +1,7 @@
 #include "led/led_init.h"
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
+LOG_MODULE_REGISTER(led, LOG_LEVEL_DBG);
 
 #ifdef CONFIG_DK_BOARD
 #define RUN_STATUS_LED DK_LED1
@@ -87,28 +89,28 @@ int32_t led_init(void) {
   int ret;
 
   if (!gpio_is_ready_dt(&red_led)) {
-    printk(" RED LED GPIO not ready (port=%s, pin=%d)\n", red_led.port->name,
-           red_led.pin);
+    LOG_ERR(" RED LED GPIO not ready (port=%s, pin=%d)", red_led.port->name,
+            red_led.pin);
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&green_led)) {
-    printk(" GREEN LED GPIO not ready (port=%s, pin=%d)\n",
-           green_led.port->name, green_led.pin);
+    LOG_ERR(" GREEN LED GPIO not ready (port=%s, pin=%d)", green_led.port->name,
+            green_led.pin);
     return -ENODEV;
   }
 
   ret = gpio_pin_configure_dt(&red_led, GPIO_OUTPUT_INACTIVE);
   if (ret < 0) {
-    printk("   Configuration failed (err=%d)\n", ret);
+    LOG_ERR("   Configuration failed (err=%d)", ret);
     return ret;
   }
   ret = gpio_pin_configure_dt(&green_led, GPIO_OUTPUT_INACTIVE);
   if (ret < 0) {
-    printk("   Configuration failed (err=%d)\n", ret);
+    LOG_ERR("   Configuration failed (err=%d)", ret);
     return ret;
   }
 
-  printk("   INITIALIZATION SUCCESS\n");
+  LOG_INF("   INITIALIZATION SUCCESS");
 
   return 0;
 }
@@ -149,7 +151,7 @@ int32_t led_init(void) {
 
 void led_ind_thread(void *a, void *b, void *c) {
   if (led_init() < 0) {
-    printk("LED init failed\n");
+    LOG_ERR("LED init failed");
     return;
   }
 

@@ -2,8 +2,8 @@
 #include "current_ic/current_ic.h"
 #include "fuel_gauge/fuel_gauge.h"
 #include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h>
-
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(battery, LOG_LEVEL_DBG);
 #define BATTERY_POLL_INTERVAL_MS 1000
 #define BATTERY_THREAD_STACK 1024
 #define BATTERY_THREAD_PRIO 10
@@ -31,13 +31,13 @@ int battery_init(void) {
 
   err = bat_sts_gpio_init();
   if (err) {
-    printk("[battery] charger GPIO init failed (%d)\n", err);
+    LOG_ERR("[battery] charger GPIO init failed (%d)", err);
     return err;
   }
 
   err = current_ic_init();
   if (err) {
-    printk("[battery] current IC init failed (%d)\n", err);
+    LOG_ERR("[battery] current IC init failed (%d)", err);
     return err;
   }
 
@@ -73,12 +73,11 @@ static void battery_thread_fn(void *a, void *b, void *c) {
    * Running here instead of main() keeps boot non-blocking. */
   err = fuel_gauge_init();
   if (err) {
-    printk("[battery] fuel gauge init failed (%d); running charger-only\n",
-           err);
+    LOG_ERR("[battery] fuel gauge init failed (%d); running charger-only", err);
   } else {
     err = fuel_gauge_isr_init();
     if (err) {
-      printk("[battery] fuel gauge ISR init failed (%d)\n", err);
+      LOG_ERR("[battery] fuel gauge ISR init failed (%d)", err);
     } else {
       fg_ready = true;
     }

@@ -4,8 +4,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h>
-
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(fuel_gauge, LOG_LEVEL_DBG);
 /* ========== I2C ========== */
 static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
 /* ========== Interrupt GPIO ========== */
@@ -97,7 +97,7 @@ static int fg_control(uint16_t subcmd, uint16_t *result) {
   };
   int ret = i2c_write(i2c_dev, buf, sizeof(buf), BQ27427_I2C_ADDR);
   if (ret) {
-    printk("[BQ27427] Control command 0x%04X write failed (%d)\n", subcmd, ret);
+    LOG_ERR("[BQ27427] Control command 0x%04X write failed (%d)", subcmd, ret);
     return ret;
   };
   if (result) {
@@ -136,7 +136,7 @@ static int fg_enter_config_update(void) {
   int ret;
   ret = fg_control(BQ27427_CTRL_SET_CFGUPDATE, BQ27427_CMD_NULL);
   if (ret) {
-    printk("[BQ27427] SET_CFGUPDATE command failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] SET_CFGUPDATE command failed (%d)", ret);
     return ret;
   }
   /*
@@ -153,16 +153,16 @@ static int fg_enter_config_update(void) {
     uint16_t flags = 0;
     ret = fg_read_word(BQ27427_CMD_FLAGS, &flags);
     if (ret) {
-      printk("[BQ27427] FLAGS read error (%d)\n", ret);
+      LOG_ERR("[BQ27427] FLAGS read error (%d)", ret);
       return ret;
     }
     if (flags & BQ27427_FLAG_CFGUPMODE) {
-      printk("[BQ27427] CONFIG UPDATE entered\n");
+      LOG_INF("[BQ27427] CONFIG UPDATE entered");
       return 0;
     }
     k_msleep(50);
   }
-  printk("[BQ27427] CFGUPMODE not set\n");
+  LOG_INF("[BQ27427] CFGUPMODE not set");
   return -ETIMEDOUT;
 }
 
@@ -179,35 +179,35 @@ static int fg_unseal(void) {
   uint16_t csts = 0;
   ret = fg_control(BQ27427_CTRL_STATUS, &csts);
   if (ret) {
-    printk("[BQ27427] STATUS read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] STATUS read failed (%d)", ret);
     return ret;
   }
   if (!(csts & BQ27427_CSTS_SS)) {
-    printk("[BQ27427] Already UNSEALED\n");
+    LOG_INF("[BQ27427] Already UNSEALED");
     return 0;
   }
   ret = fg_control(BQ27427_CTRL_UNSEAL, BQ27427_CMD_NULL);
   if (ret) {
-    printk("[BQ27427] CTRL_UNSEAL read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] CTRL_UNSEAL read failed (%d)", ret);
     return ret;
   }
   k_msleep(1); /* Allow gauge to unseal */
   ret = fg_control(BQ27427_CTRL_UNSEAL, BQ27427_CMD_NULL);
   if (ret) {
-    printk("[BQ27427] CTRL_UNSEAL read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] CTRL_UNSEAL read failed (%d)", ret);
     return ret;
   }
   k_msleep(1); /* Allow gauge to unseal */
   ret = fg_control(BQ27427_CTRL_STATUS, &csts);
   if (ret) {
-    printk("[BQ27427] CTRL_STATUS read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] CTRL_STATUS read failed (%d)", ret);
     return ret;
   }
   if (csts & BQ27427_CSTS_SS) {
-    printk("[BQ27427] UNSEAL failed\n");
+    LOG_ERR("[BQ27427] UNSEAL failed");
     return -EIO;
   }
-  printk("[BQ27427] UNSEALED\n");
+  LOG_INF("[BQ27427] UNSEALED");
   return 0;
 }
 /**
@@ -223,7 +223,7 @@ static int fg_exit_config_update(void) {
   int ret;
   ret = fg_control(BQ27427_CTRL_SOFT_RESET, BQ27427_CMD_NULL);
   if (ret) {
-    printk("[BQ27427] SOFT_RESET command failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] SOFT_RESET command failed (%d)", ret);
     return ret;
   }
   /*
@@ -237,16 +237,16 @@ static int fg_exit_config_update(void) {
     uint16_t flags = 0;
     ret = fg_read_word(BQ27427_CMD_FLAGS, &flags);
     if (ret) {
-      printk("[BQ27427] FLAGS read error (%d)\n", ret);
+      LOG_ERR("[BQ27427] FLAGS read error (%d)", ret);
       return ret;
     }
     if (!(flags & BQ27427_FLAG_CFGUPMODE)) {
-      printk("[BQ27427] CONFIG UPDATE exited\n");
+      LOG_INF("[BQ27427] CONFIG UPDATE exited");
       return 0;
     }
     k_msleep(100);
   }
-  printk("[BQ27427] CONFIG UPDATE exit timeout\n");
+  LOG_ERR("[BQ27427] CONFIG UPDATE exit timeout");
   return -ETIMEDOUT;
 }
 
@@ -265,25 +265,25 @@ static int fg_set_chem_id_1202(void) {
 
   ret = fg_control(BQ27427_CTRL_CHEM_ID, &chem_id);
   if (ret) {
-    printk("[BQ27427] CHEM_ID read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] CHEM_ID read failed (%d)", ret);
     return ret;
   }
-  printk("[BQ27427] Chem ID: 0x%04X\n", chem_id);
+  LOG_INF("[BQ27427] Chem ID: 0x%04X", chem_id);
 
   if (chem_id == BQ27427_CHEM_ID_1202) {
-    printk("[BQ27427] Chem ID already 1202 — skipping\n");
+    LOG_INF("[BQ27427] Chem ID already 1202 — skipping");
     return 0;
   }
 
   ret = fg_enter_config_update();
   if (ret) {
-    printk("[BQ27427] config_update failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] config_update failed (%d)", ret);
     return ret;
   }
 
   ret = fg_control(BQ27427_CTRL_CHEM_B, BQ27427_CMD_NULL);
   if (ret) {
-    printk("[BQ27427] CHEM_B command failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] CHEM_B command failed (%d)", ret);
     return ret;
   }
   /* 1000ms delay after CHEM_B command:
@@ -296,7 +296,7 @@ static int fg_set_chem_id_1202(void) {
 
   ret = fg_exit_config_update();
   if (ret) {
-    printk("[BQ27427] config_update failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] config_update failed (%d)", ret);
     return ret;
   }
   /* Wait for gauge to settle after SOFT_RESET before verification */
@@ -304,12 +304,12 @@ static int fg_set_chem_id_1202(void) {
 
   ret = fg_control(BQ27427_CTRL_CHEM_ID, &chem_id);
   if (ret) {
-    printk("[BQ27427] CHEM_ID re-read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] CHEM_ID re-read failed (%d)", ret);
     return ret;
   }
 
-  printk("[BQ27427] Chem ID set: 0x%04X %s\n", chem_id,
-         chem_id == BQ27427_CHEM_ID_1202 ? "(OK)" : "(unexpected)");
+  LOG_INF("[BQ27427] Chem ID set: 0x%04X %s", chem_id,
+          chem_id == BQ27427_CHEM_ID_1202 ? "(OK)" : "(unexpected)");
 
   return (chem_id == BQ27427_CHEM_ID_1202) ? 0 : -EINVAL;
 }
@@ -328,21 +328,21 @@ static int fg_write_battery_params(void) {
   /* Select subclass and block */
   ret = fg_write_byte(BQ27427_EXT_BLOCK_DATA_CTRL, BQ27427_STATE_BLOCK);
   if (ret) {
-    printk("[BQ27427] Block data control write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Block data control write failed (%d)", ret);
     return ret;
   }
   k_msleep(1); /* Allow gauge to enable block access mode */
 
   ret = fg_write_byte(BQ27427_EXT_DATA_CLASS, BQ27427_SUBCLASS_STATE);
   if (ret) {
-    printk("[BQ27427] Data class write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Data class write failed (%d)", ret);
     return ret;
   }
   k_msleep(1); /* Allow gauge to load subclass into internal buffer */
 
   ret = fg_write_byte(BQ27427_EXT_DATA_BLOCK, BQ27427_STATE_BLOCK);
   if (ret) {
-    printk("[BQ27427] Data block write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Data block write failed (%d)", ret);
     return ret;
   }
   k_msleep(1); /* Allow gauge to populate block data buffer */
@@ -353,7 +353,7 @@ static int fg_write_battery_params(void) {
   ret = i2c_write_read(i2c_dev, BQ27427_I2C_ADDR, &reg, 1, block,
                        FG_DATA_MEMORY_BLOCK_SIZE);
   if (ret) {
-    printk("[BQ27427] Battery params block read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Battery params block read failed (%d)", ret);
     return ret;
   }
 
@@ -375,7 +375,7 @@ static int fg_write_battery_params(void) {
   ret = i2c_write(i2c_dev, wbuf, FG_DATA_MEMORY_WRITE_BUFFER_SIZE,
                   BQ27427_I2C_ADDR);
   if (ret) {
-    printk("[BQ27427] Battery params block write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Battery params block write failed (%d)", ret);
     return ret;
   }
   k_msleep(5); /* Allow gauge to commit block data to internal memory */
@@ -384,15 +384,15 @@ static int fg_write_battery_params(void) {
   uint8_t csum = fg_checksum(block, FG_DATA_MEMORY_BLOCK_SIZE);
   ret = fg_write_byte(BQ27427_EXT_CHECKSUM, csum);
   if (ret) {
-    printk("[BQ27427] Checksum write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Checksum write failed (%d)", ret);
     return ret;
   }
   k_msleep(5); /* Allow gauge to verify and store checksum before readback */
 
-  printk("[BQ27427] Battery params written OK "
-         "(Cap=%dmAh, Energy=%dmWh, TermV=%dmV, Taper=%d)\n",
-         BATTERY_DESIGN_CAPACITY, BATTERY_DESIGN_ENERGY,
-         BATTERY_TERMINATE_VOLTAGE, BATTERY_TAPER_RATE);
+  LOG_INF("[BQ27427] Battery params written OK (Cap=%dmAh, Energy=%dmWh, "
+          "TermV=%dmV, Taper=%d)",
+          BATTERY_DESIGN_CAPACITY, BATTERY_DESIGN_ENERGY,
+          BATTERY_TERMINATE_VOLTAGE, BATTERY_TAPER_RATE);
   return 0;
 }
 
@@ -415,17 +415,17 @@ static int fg_signal_bat_insert(void) {
    */
   ret = fg_control(BQ27427_CTRL_BAT_REMOVE, BQ27427_CMD_NULL);
   if (ret) {
-    printk("[BQ27427] BAT_REMOVE command failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] BAT_REMOVE command failed (%d)", ret);
     return ret;
   }
   k_msleep(5); /* Allow gauge to process BAT_REMOVE before BAT_INSERT */
 
   ret = fg_control(BQ27427_CTRL_BAT_INSERT, BQ27427_CMD_NULL);
   if (ret) {
-    printk("[BQ27427] BAT_INSERT command failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] BAT_INSERT command failed (%d)", ret);
     return ret;
   }
-  printk("[BQ27427] BAT_INSERT sent — polling BAT_DET...\n");
+  LOG_INF("[BQ27427] BAT_INSERT sent — polling BAT_DET...");
   /*
    * Poll BAT_DET flag for up to 1 second (SAMPLES_COUNT = 10 iterations)
    * Each iteration: read FLAGS register + 100ms delay
@@ -435,16 +435,16 @@ static int fg_signal_bat_insert(void) {
     uint16_t flags = 0;
     ret = fg_read_word(BQ27427_CMD_FLAGS, &flags);
     if (ret) {
-      printk("[BQ27427] FLAGS read error (%d)\n", ret);
+      LOG_ERR("[BQ27427] FLAGS read error (%d)", ret);
       return ret;
     }
     if (flags & BQ27427_FLAG_BAT_DET) {
-      printk("[BQ27427] BAT_DET=1 — NORMAL mode\n");
+      LOG_INF("[BQ27427] BAT_DET=1 — NORMAL mode");
       return 0;
     }
     k_msleep(50);
   }
-  printk("[BQ27427] WARNING: BAT_DET still 0 after 1 s\n");
+  LOG_WRN("[BQ27427] WARNING: BAT_DET still 0 after 1 s");
   return -ETIMEDOUT;
 }
 
@@ -461,21 +461,21 @@ static int fg_fix_ccgain_tracked(void) {
 
   ret = fg_write_byte(BQ27427_EXT_BLOCK_DATA_CTRL, BQ27427_CCGAIN_BLOCK);
   if (ret) {
-    printk("[BQ27427] Block data control write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Block data control write failed (%d)", ret);
     return ret;
   }
   k_msleep(1); /* Allow gauge to enable block access mode */
 
   ret = fg_write_byte(BQ27427_EXT_DATA_CLASS, BQ27427_SUBCLASS_CCGAIN);
   if (ret) {
-    printk("[BQ27427] Data class write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Data class write failed (%d)", ret);
     return ret;
   }
   k_msleep(1); /* Allow gauge to load subclass into internal buffer */
 
   ret = fg_write_byte(BQ27427_EXT_DATA_BLOCK, BQ27427_CCGAIN_BLOCK);
   if (ret) {
-    printk("[BQ27427] Data block write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Data block write failed (%d)", ret);
     return ret;
   }
   k_msleep(1); /* Allow gauge to populate block data buffer after selecting
@@ -486,15 +486,15 @@ static int fg_fix_ccgain_tracked(void) {
   ret = i2c_write_read(i2c_dev, BQ27427_I2C_ADDR, &reg, 1, block,
                        FG_DATA_MEMORY_BLOCK_SIZE);
   if (ret) {
-    printk("[BQ27427] CCGain block read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] CCGain block read failed (%d)", ret);
     return ret;
   }
 
-  printk("[BQ27427] CCGain byte[5] = 0x%02X\n", block[BQ27427_CCGAIN_OFFSET]);
+  LOG_INF("[BQ27427] CCGain byte[5] = 0x%02X", block[BQ27427_CCGAIN_OFFSET]);
 
   /* Already correct — nothing to do */
   if (!(block[BQ27427_CCGAIN_OFFSET] & BQ27427_CCGAIN_SIGN_BIT)) {
-    printk("[BQ27427] CCGain correct — no fix needed\n");
+    LOG_INF("[BQ27427] CCGain correct — no fix needed");
     return 0;
   }
 
@@ -502,7 +502,7 @@ static int fg_fix_ccgain_tracked(void) {
   uint8_t old_csum = 0;
   ret = fg_read_byte(BQ27427_EXT_CHECKSUM, &old_csum);
   if (ret) {
-    printk("[BQ27427] Old checksum read failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Old checksum read failed (%d)", ret);
     return ret;
   }
 
@@ -510,8 +510,8 @@ static int fg_fix_ccgain_tracked(void) {
 
   /* Clear sign bit */
   block[BQ27427_CCGAIN_OFFSET] &= ~BQ27427_CCGAIN_SIGN_BIT;
-  printk("[BQ27427] CCGain fix: 0x%02X → 0x%02X\n", old_byte,
-         block[BQ27427_CCGAIN_OFFSET]);
+  LOG_INF("[BQ27427] CCGain fix: 0x%02X → 0x%02X", old_byte,
+          block[BQ27427_CCGAIN_OFFSET]);
 
   /* Write modified block */
   uint8_t wbuf[FG_DATA_MEMORY_WRITE_BUFFER_SIZE];
@@ -520,7 +520,7 @@ static int fg_fix_ccgain_tracked(void) {
   ret = i2c_write(i2c_dev, wbuf, FG_DATA_MEMORY_WRITE_BUFFER_SIZE,
                   BQ27427_I2C_ADDR);
   if (ret) {
-    printk("[BQ27427] CCGain block write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] CCGain block write failed (%d)", ret);
     return ret;
   }
 
@@ -531,11 +531,11 @@ static int fg_fix_ccgain_tracked(void) {
 
   ret = fg_write_byte(BQ27427_EXT_CHECKSUM, new_csum);
   if (ret) {
-    printk("[BQ27427] Checksum write failed (%d)\n", ret);
+    LOG_ERR("[BQ27427] Checksum write failed (%d)", ret);
     return ret;
   }
 
-  printk("[BQ27427] CCGain fixed OK\n");
+  LOG_INF("[BQ27427] CCGain fixed OK");
   return 0;
 }
 
@@ -568,88 +568,88 @@ int fuel_gauge_init(void) {
   int ret = 0;
 
   if (!device_is_ready(i2c_dev)) {
-    printk("I2C device not ready\n");
+    LOG_ERR("I2C device not ready");
     return -ENODEV;
   }
   /* STEP 1: Verify device */
   ret = fg_control(BQ27427_CTRL_DEVICE_TYPE, &device_type);
   if (ret) {
-    printk("[BQ27427] I2C failed\n");
+    LOG_ERR("[BQ27427] I2C failed");
     return ret;
   }
   if (device_type != BQ27427_DEVICE_TYPE) {
-    printk("[BQ27427] Wrong Device type\n");
+    LOG_WRN("[BQ27427] Wrong Device type");
     return -ENODEV;
   }
   ret = fg_control(BQ27427_CTRL_FW_VERSION, &fw_version);
   if (ret) {
-    printk("[BQ27427] CTRL_FW_VERSION failed\n");
+    LOG_ERR("[BQ27427] CTRL_FW_VERSION failed");
     return ret;
   }
-  printk("[BQ27427] Device=0x%04X  FW=0x%04X\n", device_type, fw_version);
+  LOG_INF("[BQ27427] Device=0x%04X  FW=0x%04X", device_type, fw_version);
 
   /* STEP 2: Unseal */
   ret = fg_unseal();
   if (ret) {
-    printk("[BQ27427] Unseal failed\n");
+    LOG_ERR("[BQ27427] Unseal failed");
     return ret;
   }
 
   /* STEP 3: Read ITPOR */
   ret = fg_read_word(BQ27427_CMD_FLAGS, &flags);
   if (ret) {
-    printk("[BQ27427] FLAGS read failed\n");
+    LOG_ERR("[BQ27427] FLAGS read failed");
     return ret;
   }
   bool itpor = (flags & BQ27427_FLAG_ITPOR) != 0;
-  printk("[BQ27427] FLAGS=0x%04X  ITPOR=%d\n", flags, itpor ? 1 : 0);
+  LOG_INF("[BQ27427] FLAGS=0x%04X  ITPOR=%d", flags, itpor ? 1 : 0);
 
   /* STEP 4: Fix chem ID if wrong */
   ret = fg_set_chem_id_1202();
   if (ret)
-    printk("[BQ27427] Chem ID fix failed (continuing)\n");
+    LOG_ERR("[BQ27427] Chem ID fix failed (continuing)");
 
   if (itpor) {
-    printk("[BQ27427] writing full config\n");
+    LOG_WRN("[BQ27427] writing full config");
 
     ret = fg_enter_config_update();
     if (ret) {
-      printk("[BQ27427] config_update read failed\n");
+      LOG_ERR("[BQ27427] config_update read failed");
       return ret;
     }
 
     /* Write battery params — log failure but continue */
     ret = fg_write_battery_params();
     if (ret) {
-      printk("[BQ27427] Battery params failed — continuing to CCGain\n");
+      LOG_ERR("[BQ27427] Battery params failed — continuing to CCGain");
     }
 
     /* Fix CCGain — attempt even if params failed (ITPOR=1)*/
     ret = fg_fix_ccgain_tracked();
     if (ret)
-      printk("[BQ27427] CCGain fix failed\n");
+      LOG_ERR("[BQ27427] CCGain fix failed");
 
     /* exit CONFIG UPDATE */
     ret = fg_exit_config_update();
     if (ret) {
-      printk("[BQ27427] config_update failed\n");
+      LOG_ERR("[BQ27427] config_update failed");
       return ret;
     }
 
     ret = fg_signal_bat_insert();
     if (ret)
-      printk("[BQ27427] BAT_INSERT timeout\n");
+      LOG_ERR("[BQ27427] BAT_INSERT timeout");
     /*Allow gauge to stabilize after BAT_INSERT
      *(BAT_DET typically sets within 100-200ms)
      */
     k_msleep(100);
     ret = fg_control(BQ27427_CTRL_SMOOTH_SYNC, BQ27427_CMD_NULL);
     if (ret) {
-      printk("[BQ27427] SMOOTH_SYNC failed %d\n", ret);
+      LOG_ERR("[BQ27427] SMOOTH_SYNC failed %d", ret);
     }
-    printk("[BQ27427] SMOOTH_SYNC sent\n");
+    LOG_INF("[BQ27427] SMOOTH_SYNC sent");
   } else {
-    printk("[BQ27427] Already Initialized\n");
+    LOG_INF("[BQ27427] Already Initialized");
   }
   return 0;
 }
@@ -669,7 +669,7 @@ int fuel_gauge_get_soc(void) {
   ret |= fg_read_word(BQ27427_CMD_SOC, &soc_pct);
 
   if (ret) {
-    printk("[BQ27427] Read error (%d)\n", ret);
+    LOG_ERR("[BQ27427] Read error (%d)", ret);
     return -1;
   }
   return soc_pct;
@@ -687,19 +687,19 @@ int fuel_gauge_isr_init(void) {
   int ret;
 
   if (!device_is_ready(fg_int.port)) {
-    printk("Interrupt GPIO not ready\n");
+    LOG_ERR("Interrupt GPIO not ready");
     return -ENODEV;
   }
 
   ret = gpio_pin_configure_dt(&fg_int, GPIO_INPUT);
   if (ret) {
-    printk("Failed to configure FG interrupt GPIO (%d)\n", ret);
+    LOG_ERR("Failed to configure FG interrupt GPIO (%d)", ret);
     return ret;
   }
 
   ret = gpio_pin_interrupt_configure_dt(&fg_int, GPIO_INT_EDGE_TO_ACTIVE);
   if (ret) {
-    printk("Failed to configure FG interrupt (%d)\n", ret);
+    LOG_ERR("Failed to configure FG interrupt (%d)", ret);
     return ret;
   }
 
@@ -707,10 +707,10 @@ int fuel_gauge_isr_init(void) {
 
   ret = gpio_add_callback(fg_int.port, &fg_int_cb);
   if (ret) {
-    printk("Failed to add FG interrupt callback (%d)\n", ret);
+    LOG_ERR("Failed to add FG interrupt callback (%d)", ret);
     return ret;
   }
 
-  printk("Fuel gauge interrupt initialized\n");
+  LOG_INF("Fuel gauge interrupt initialized");
   return 0;
 }
