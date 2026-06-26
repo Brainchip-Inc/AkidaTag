@@ -784,28 +784,29 @@ python source/utils/send_model_via_ble.py \
 
 ### Using run.sh (build + flash + model workflow)
 
-`run.sh` wraps the steps above: `--fetch_model` runs Step 1 (fetch + convert) and `--generate_info` runs Step 2 (write `info.yaml`). Both read all parameters from `--config`. They are separate flags but can be combined; `--send_ble` (Step 3) is separate. Add `-d` to run the fetch step inside Docker (where the Akida SDK lives).
+`run.sh` wraps the steps above: `--fetch_model <config>` runs Step 1 (fetch + convert) and `--generate_info <config>` runs Step 2 (write `info.yaml`). Each takes its per-(app, model) YAML config (`.env/<app>/<model>.yaml`) as its argument. They are separate flags but can be combined (name the config on each); `--send_ble` (Step 3) is separate. Add `-d` to run the fetch step inside Docker (where the Akida SDK lives).
 
 ```bash
 cd spark
 
 # Step 1: Fetch + convert only (bins/cpp, no info.yaml)
-./scripts/run.sh -d --config .env/demo_apps/kws.yaml --fetch_model
+./scripts/run.sh -d --fetch_model .env/demo_apps/kws.yaml
 
 # Step 2: Generate the app-specific info.yaml for the converted model
-./scripts/run.sh --config .env/demo_apps/kws.yaml --generate_info
+./scripts/run.sh --generate_info .env/demo_apps/kws.yaml
 
 # Both steps in one invocation (fetch runs first, then info.yaml)
-./scripts/run.sh -d --config .env/demo_apps/kws.yaml --fetch_model --generate_info
+./scripts/run.sh -d \
+    --fetch_model .env/demo_apps/kws.yaml \
+    --generate_info .env/demo_apps/kws.yaml
 ```
 
 **Flags for the `run.sh` model workflow:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--config <path>` | — | **Required for fetch/generate.** Per-(app, model) YAML (`.env/<app>/<model>.yaml`); supplies every parameter |
-| `--fetch_model` | off | Step 1: fetch `.fbz` + convert to bins/cpp (no `info.yaml`) |
-| `--generate_info` | off | Step 2: write the app-specific `info.yaml` from the shapes sidecar |
+| `--fetch_model <config>` | off | Step 1: fetch `.fbz` + convert to bins/cpp (no `info.yaml`). Arg is the per-(app, model) YAML (`.env/<app>/<model>.yaml`) |
+| `--generate_info <config>` | off | Step 2: write the app-specific `info.yaml` from the shapes sidecar. Arg is the same YAML config |
 | `--send_ble` | off | Step 3: send model via BLE; requires `--info`, `--bin`, and `--yaml` (separate step; cannot be combined with `--fetch_model`) |
 | `--app <name>` | `demo_apps` | Build/flash app (the `info.yaml` profile now comes from the config's `app:` key) |
 | `--info <path>` | — | Path to `_program_info.bin` (use with `--send_ble`) |
@@ -824,10 +825,14 @@ Run the steps as independent commands — useful when the Akida SDK is only avai
 cd spark
 
 # Step 1+2: Fetch, convert, and generate info.yaml for an edge-learning model inside Docker
-./scripts/run.sh -d --config .env/demo_apps/kws_edge_learning.yaml --fetch_model --generate_info
+./scripts/run.sh -d \
+    --fetch_model .env/demo_apps/kws_edge_learning.yaml \
+    --generate_info .env/demo_apps/kws_edge_learning.yaml
 
 # Step 1+2: Same for a regular (non-edge-learning) model
-./scripts/run.sh -d --config .env/demo_apps/kws.yaml --fetch_model --generate_info
+./scripts/run.sh -d \
+    --fetch_model .env/demo_apps/kws.yaml \
+    --generate_info .env/demo_apps/kws.yaml
 
 # Step 3: Send pre-generated files via BLE on the host (no Docker)
 ./scripts/run.sh --send_ble \

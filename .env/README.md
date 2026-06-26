@@ -67,8 +67,10 @@ requires — for `demo_apps`: `flash_address`, `neurons_per_class`, `num_el_clas
 Usage (via `run.sh`; the akida SDK lives in the Docker image so use `-d` for the fetch step):
 
 ```
-# fetch + convert, then generate info.yaml in one go
-./scripts/run.sh -d --config .env/demo_apps/kws.yaml --fetch_model --generate_info
+# fetch + convert, then generate info.yaml in one go (config named on each step)
+./scripts/run.sh -d \
+    --fetch_model .env/demo_apps/kws.yaml \
+    --generate_info .env/demo_apps/kws.yaml
 ```
 
 **Reused models:** when several apps use the same model, point each app's file at the same
