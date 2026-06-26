@@ -49,7 +49,7 @@ extern struct k_event sram_buf_event;
  *   bits[15:0]  = num_classes_to_learn
  *
  * All uint32_t fields are little-endian (native on Cortex-M).
- * Total size: 60 bytes (uint32 fields) + 64 bytes (model_name) = 124 bytes.
+ * Total size: 64 bytes (uint32 fields) + 64 bytes (model_name) = 128 bytes.
  */
 typedef struct {
   uint32_t model_info_hdr_crc32; /**< CRC32(hdr[total_length..model_name] ||
@@ -64,6 +64,7 @@ typedef struct {
   uint32_t mfcc_fs_bits;     /**< IEEE-754 bits of MFCC normalisation scalar */
   uint32_t silence_class;    /**< Output index of silence class           */
   uint32_t unknown_class;    /**< Output index of unknown/garbage class   */
+  uint32_t inference_mode;   /**< 0 = sync, 1 = async (from info.yaml)    */
   char model_name[MAX_FS_NAME_LEN]; /**< Model name, e.g. "kws"        */
 } model_meta_t;
 

@@ -653,16 +653,17 @@ pip install -r scripts/requirements.txt
 
 ### info.yaml – Model Metadata File
 
-`fetch_model.py` generates an `info.yaml` alongside the binary files. It is the single source of truth for model metadata consumed by `send_model_via_ble.py`.
+`generate_info.py` writes an app-specific `info.yaml` from the converted model's shapes sidecar. It is the single source of truth for model metadata consumed by `send_model_via_ble.py`.
 
 ```yaml
-model_name: kws
+app: kws
 flash_address: "0x101000"
 input_shape: [49, 10, 1]
 output_shape: [1, 1, 225]
 mfcc_fs: 123.56967163085938
 silence_class: 10
 unknown_class: 11
+inference_mode: async
 edge_learning:
   enabled: true
   num_classes: 15
@@ -672,13 +673,14 @@ edge_learning:
 
 | Field | Description |
 |-------|-------------|
-| `model_name` | Model identifier string (e.g. `kws`, `mnist`) |
+| `app` | Model identifier / output-file prefix (e.g. `kws`, `mnist`) |
 | `flash_address` | Target SPI flash address for the model data segment |
 | `input_shape` | Model input dimensions read from the Akida model |
 | `output_shape` | Model output dimensions read from the Akida model |
 | `mfcc_fs` | MFCC normalisation scalar — divides every input feature. **Required for kws**: the firmware rejects a kws model whose `mfcc_fs` is missing/zero |
 | `silence_class` | Output index of the silence class (skipped during keyword detection). **Required for kws** |
 | `unknown_class` | Output index of the unknown/garbage class (skipped during keyword detection). **Required for kws** |
+| `inference_mode` | `sync` or `async` — the Akida API mode the firmware applies for this model at load. On a DK board `async` falls back to `sync` with a warning. **Required for kws** |
 | `edge_learning.enabled` | `true` when the model uses on-device edge learning |
 | `edge_learning.num_classes` | Total number of classes in the base model |
 | `edge_learning.num_el_classes` | Number of novel edge-learning classes to learn on-device (packed into lower 16 bits of the `num_edge_classes` metadata field sent over BLE) |
@@ -687,57 +689,101 @@ edge_learning:
 > **Edge learning packing:** `num_edge_classes` (32-bit) = `(num_neurons << 16) | num_el_classes`.
 > The firmware unpacks this into `g_num_neurons_per_class` (bits [31:16]) and `g_num_edge_learn_classes` (bits [15:0]).
 
+> ⚠️ **Metadata format / reflash note:** the model metadata struct (`model_meta_t`) and its
+> CRC layout are versioned together by the firmware and `send_model_via_ble.py`. When fields
+> are added (e.g. `inference_mode`), you must **rebuild + reflash the firmware and re-upload the
+> model with the matching `send_model_via_ble.py`**. A model already in flash from an older
+> format will fail the boot CRC check and won't load until re-uploaded.
+
 ---
 
-### Step 1 – Generate Bin Files and info.yaml
+### Step 1 – Fetch & Convert the Model
+
+`fetch_model.py` fetches a `.fbz` model (URL, local path, or `models.conf` lookup) and converts it into the binary + C++ artifacts. It does **not** write `info.yaml` — that is Step 2.
 
 ```bash
 cd spark
 
-# Regular KWS model (12 classes) → bins + info.yaml in model_files/kws
+# Regular KWS model → bins/cpp in model_files/kws
 python source/utils/fetch_model.py \
     --model kws --prefix kws \
     --output_dir source/external/model_files/kws \
     --model_path source/external/model_files/kws/akida_model.fbz \
-    --flash_address 0x101000 --map_mode 1 \
-    --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --map_mode 1 --neurons_per_class 1
 
-# Edge-learning KWS model (15 classes, 3 novel, 15 neurons/class) → its own dir
+# Edge-learning KWS model (15 neurons/class) → its own dir
 python source/utils/fetch_model.py \
     --model kws --prefix kws \
     --output_dir source/external/model_files/kws_edge_learning \
     --model_path source/external/model_files/kws_edge_learning/akida_model.fbz \
-    --flash_address 0x101000 --map_mode 1 \
-    --neurons_per_class 15 --num_el_classes 3 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --map_mode 1 --neurons_per_class 15
+```
+
+**Arguments:**
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--model` | **required** | Model name; looks up `MODEL_<NAME>_URL` in `.env/models.conf` when `--model_path` is omitted |
+| `--prefix` | **required** | Output file prefix (e.g. `kws`) |
+| `--output_dir` | **required** | Directory for the generated files |
+| `--model_path` | — | Direct URL or local path to the `.fbz` (overrides the `models.conf` lookup) |
+| `--map_mode` | `1` | Akida `MapMode` value passed to `model.map()` |
+| `--neurons_per_class` | `1` | Neurons per class; drives the KWS macro injection into `<prefix>_program_info.h` for edge-learning models |
+| `--akida_version` | `v1` | Akida version (`v1` or `v2`) |
+
+**Outputs** (in `--output_dir`):
+- `<prefix>_program_info.bin` / `_program_data.bin` – binary segments for BLE transfer
+- `<prefix>_program_info.cpp` / `_program_data.cpp` (+ `.h`) – C++ array files for compile-time inclusion
+- `<prefix>_shapes.json` – shape sidecar (input/output shapes + edge-learning flag); consumed by Step 2 and used to skip regeneration on re-runs
+
+---
+
+### Step 2 – Generate info.yaml (per app)
+
+`generate_info.py` builds an **app-specific** `info.yaml` from the shapes sidecar written in Step 1. It needs **no Akida SDK**, so it can run anywhere — e.g. on the host even when Step 1 ran in Docker. The `--app` profile decides which fields `info.yaml` carries; only `demo_apps` exists today.
+
+```bash
+cd spark
+
+# Regular KWS model
+python source/utils/generate_info.py --app demo_apps \
+    --output_dir source/external/model_files/kws --prefix kws \
+    --flash_address 0x101000 --neurons_per_class 1 --num_el_classes 0 \
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
+
+# Edge-learning KWS model (15 neurons/class, 3 novel classes)
+python source/utils/generate_info.py --app demo_apps \
+    --output_dir source/external/model_files/kws_edge_learning --prefix kws \
+    --flash_address 0x101000 --neurons_per_class 15 --num_el_classes 3 \
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 ```
 
 > `--mfcc_fs` is the model's normalisation scalar (the value above is for the bundled
 > KWS model — use the value your model was trained with). `silence_class`/`unknown_class`
 > are the model's output indices for those classes.
 
-**Arguments:**
+**Arguments (all required for the `demo_apps` profile):**
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--flash_address` | `0x1000` | Flash address written into `info.yaml` (kws uses `0x101000`) |
-| `--map_mode` | `1` | Akida `MapMode` value passed to `model.map()` |
-| `--neurons_per_class` | `1` | Neurons per class (kws regular: 1, edge-learning: 15) |
-| `--num_el_classes` | `0` | Edge-learning class count (kws regular: 0, edge-learning: 3) |
-| `--mfcc_fs` | **required** | MFCC normalisation scalar written to `info.yaml` (divides every input feature) |
-| `--silence_class` | **required** | Output index of the silence class |
-| `--unknown_class` | **required** | Output index of the unknown/garbage class |
+| Argument | Description |
+|----------|-------------|
+| `--app` | App profile (default `demo_apps`) — selects the `info.yaml` shape and which args are required |
+| `--output_dir` | Model dir holding `<prefix>_shapes.json`; `info.yaml` is written here |
+| `--prefix` | Model file prefix used to locate `<prefix>_shapes.json` |
+| `--flash_address` | Flash address written into `info.yaml` (kws uses `0x101000`) |
+| `--neurons_per_class` | Neurons per class (kws regular: 1, edge-learning: 15) |
+| `--num_el_classes` | Edge-learning class count (kws regular: 0, edge-learning: 3) |
+| `--mfcc_fs` | MFCC normalisation scalar (divides every input feature) |
+| `--silence_class` | Output index of the silence class |
+| `--unknown_class` | Output index of the unknown/garbage class |
+| `--inference_mode` | `sync` or `async` — Akida API mode the firmware applies for this model (DK falls back to sync) |
 
-**Outputs** (in `--output_dir`):
-- `<prefix>_program_info.bin` / `_program_data.bin` – binary segments for BLE transfer
-- `<prefix>_program_info.cpp` / `_program_data.cpp` – C++ array files for compile-time inclusion
-- `info.yaml` – metadata bridge consumed by `send_model_via_ble.py`
-- `<prefix>_shapes.json` – shape sidecar (used to skip regeneration on re-runs)
+**Output:** `info.yaml` in `--output_dir`.
 
 ---
 
-### Step 2 – Transfer via BLE
+### Step 3 – Transfer via BLE
 
 ```bash
 cd spark
@@ -761,67 +807,65 @@ python source/utils/send_model_via_ble.py \
 
 ---
 
-### One-Step Wrapper – run_model_transfer.sh
+### Using run.sh (build + flash + model workflow)
+
+`run.sh` wraps the steps above: `--fetch_model` runs Step 1 (fetch + convert) and `--generate_info` runs Step 2 (write `info.yaml`). They are separate commands; `--send_ble` (Step 3) is separate too. Add `-d` to any of them to run inside Docker.
 
 ```bash
 cd spark
 
-# Default KWS model from BrainChip server
-source/utils/run_model_transfer.sh
-
-# KWS at a specific flash address and map mode
-source/utils/run_model_transfer.sh \
-    http://server/akida_model.fbz kws "" 0x101000 "" "" v1 "" 1
-
-# Edge-learning model (10 classes)
-source/utils/run_model_transfer.sh \
-    http://server/akida_model_el.fbz kws "" 0x1000 "" 10
-```
-
-Positional arguments: `MODEL_PATH MODEL_NAME OUTPUT_DIR FLASH_ADDRESS FS_NAME NUM_CLASSES AKIDA_VERSION NEURONS_PER_CLASS MAP_MODE`
-
----
-
-### Using run.sh (build + flash + model transfer)
-
-```bash
-cd spark
-
-# Fetch a regular kws model (12 classes) → bins + info.yaml only (no BLE send)
+# Step 1: Fetch + convert only (bins/cpp, no info.yaml)
 ./scripts/run.sh \
     --fetch_model http://server/akida_model.fbz \
     --model_name kws \
     --output_dir source/external/model_files/kws \
-    --model_flash_addr 0x101000 --map_mode 1 \
-    --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --map_mode 1 --neurons_per_class 1
+```
 
-# Same fetch inside Docker (akida SDK in the container)
-./scripts/run.sh -d \
-    --fetch_model http://server/akida_model.fbz \
+```bash
+# Step 2: Generate the app-specific info.yaml for the converted model
+# (--app selects the profile; defaults to demo_apps if omitted)
+./scripts/run.sh \
+    --generate_info --app demo_apps \
+    --model_name kws \
+    --output_dir source/external/model_files/kws \
+    --model_flash_addr 0x101000 \
+    --neurons_per_class 1 --num_el_classes 0 \
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
+```
+
+Both steps can also be combined in a single invocation (fetch runs first, then `info.yaml`):
+
+```bash
+./scripts/run.sh \
+    --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps \
     --model_name kws \
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 --map_mode 1 \
     --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
-
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 ```
 
-**Flags for `run.sh` model transfer:**
+**Flags for the `run.sh` model workflow:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--fetch_model <url/path>` | — | Fetch `.fbz`, generate bins + `info.yaml` (fetch only) |
-| `--send_ble` | off | Send model via BLE; requires `--info`, `--bin`, and `--yaml` (separate step; cannot be combined with `--fetch_model`) |
+| `--fetch_model <url/path>` | — | Step 1: fetch `.fbz` + convert to bins/cpp (no `info.yaml`) |
+| `--generate_info` | off | Step 2: write the app-specific `info.yaml` from the shapes sidecar |
+| `--send_ble` | off | Step 3: send model via BLE; requires `--info`, `--bin`, and `--yaml` (separate step; cannot be combined with `--fetch_model`) |
+| `--app <name>` | `demo_apps` | App profile for `--generate_info` (also the build/flash app) |
 | `--model_name <name>` | `kws` | Model name (also the output-file prefix) |
-| `--output_dir <dir>` | — | **Required for kws.** Output dir for bins + `info.yaml` (e.g. `source/external/model_files/kws` or `…/kws_edge_learning`) |
-| `--model_flash_addr <addr>` | — | **Required for kws** (`0x101000`). Flash address passed to `fetch_model.py` |
-| `--map_mode <int>` | `1` | Akida `MapMode` value |
-| `--neurons_per_class <int>` | — | **Required for kws.** Neurons per class (regular: 1, edge-learning: 15) |
-| `--num_el_classes <int>` | — | **Required for kws.** Edge-learning class count (regular: 0, edge-learning: 3) |
-| `--mfcc_fs <float>` | — | **Required for kws.** MFCC normalisation scalar written to `info.yaml` |
-| `--silence_class <int>` | — | **Required for kws.** Output index of the silence class |
-| `--unknown_class <int>` | — | **Required for kws.** Output index of the unknown/garbage class |
+| `--output_dir <dir>` | — | **Required for kws.** Model dir for the bins and `info.yaml` (e.g. `source/external/model_files/kws` or `…/kws_edge_learning`) |
+| `--map_mode <int>` | `1` | Akida `MapMode` value (`--fetch_model`) |
+| `--model_flash_addr <addr>` | — | **Required for `--generate_info`** (`0x101000`). Flash address written to `info.yaml` |
+| `--neurons_per_class <int>` | — | **Required.** Neurons per class (regular: 1, edge-learning: 15) |
+| `--num_el_classes <int>` | — | **Required for `--generate_info`.** Edge-learning class count (regular: 0, edge-learning: 3) |
+| `--mfcc_fs <float>` | — | **Required for `--generate_info`.** MFCC normalisation scalar written to `info.yaml` |
+| `--silence_class <int>` | — | **Required for `--generate_info`.** Output index of the silence class |
+| `--unknown_class <int>` | — | **Required for `--generate_info`.** Output index of the unknown/garbage class |
+| `--inference_mode <sync\|async>` | — | **Required for `--generate_info`.** Akida API mode the firmware applies (DK falls back to sync) |
 | `--info <path>` | — | Path to `_program_info.bin` (use with `--send_ble`) |
 | `--bin <path>` | — | Path to `_program_data.bin` (use with `--send_ble`) |
 | `--yaml <path>` | — | Path to `info.yaml` (use with `--send_ble`) |
@@ -830,32 +874,34 @@ Output files are written to the directory given by `--output_dir`.
 
 ---
 
-### Two-Step Workflow (fetch in Docker, BLE send on host)
+### Split Workflow (convert in Docker, BLE send on host)
 
-Run fetch and BLE transfer as two independent commands — useful when the Akida SDK is only available inside Docker but BLE hardware is on the host.
+Run the steps as independent commands — useful when the Akida SDK is only available inside Docker but BLE hardware is on the host. `--generate_info` needs no SDK, so it can run on the host too.
 
 ```bash
 cd spark
 
-# Step 1a: Fetch an edge-learning model inside Docker → its own dir (no BLE send)
+# Step 1+2: Fetch, convert, and generate info.yaml for an edge-learning model inside Docker
 ./scripts/run.sh -d \
-    --fetch_model http://server/akida_model.fbz \
+    --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps \
     --model_name kws \
     --output_dir source/external/model_files/kws_edge_learning \
     --model_flash_addr 0x101000 --map_mode 1 \
     --neurons_per_class 15 --num_el_classes 3 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 
-# Step 1b: Fetch a regular (non-edge-learning) model
+# Step 1+2: Same for a regular (non-edge-learning) model
 ./scripts/run.sh -d \
-    --fetch_model http://server/akida_model.fbz \
+    --fetch_model http://server/akida_model.fbz --generate_info --app demo_apps \
     --model_name kws \
     --output_dir source/external/model_files/kws \
     --model_flash_addr 0x101000 --map_mode 1 \
     --neurons_per_class 1 --num_el_classes 0 \
-    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11
+    --mfcc_fs 123.56967163085938 --silence_class 10 --unknown_class 11 \
+    --inference_mode async
 
-# Step 2: Send pre-generated files via BLE on the host (no Docker)
+# Step 3: Send pre-generated files via BLE on the host (no Docker)
 ./scripts/run.sh --send_ble \
     --info source/external/model_files/kws/kws_program_info.bin \
     --bin  source/external/model_files/kws/kws_program_data.bin \

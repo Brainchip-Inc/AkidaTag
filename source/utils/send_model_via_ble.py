@@ -42,7 +42,8 @@ def compute_data_crc32(data_path):
 def compute_combined_crc32(total_length, input_shape, output_shape,
                            flash_address, is_edge_learned, num_edge_classes,
                            info_path, model_name="",
-                           mfcc_fs=0.0, silence_class=0, unknown_class=0):
+                           mfcc_fs=0.0, silence_class=0, unknown_class=0,
+                           inference_mode=0):
     """CRC32 over header fields [total_length..model_name] + info file bytes.
 
     Matches the firmware's model_info_hdr_crc32 computation in file_transfer.c.
@@ -50,7 +51,7 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
     (all uint32_t, little-endian; shape arrays zero-padded to 3 elements).
     Layout: total_length, input_shape[3], output_shape[3],
             flash_address, is_edge_learned, num_edge_classes, info_data_len,
-            mfcc_fs_bits, silence_class, unknown_class,
+            mfcc_fs_bits, silence_class, unknown_class, inference_mode,
             model_name[64]  (null-padded to MAX_FS_NAME_LEN bytes)
     """
     MAX_DIMS = 3
@@ -61,9 +62,10 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
     mfcc_fs_bits = struct.unpack('<I', struct.pack('<f', float(mfcc_fs)))[0]
     # Pack uint32_t fields: total_length, input_shape[3], output_shape[3],
     #                       flash_address, is_edge_learned, num_edge_classes,
-    #                       info_data_len, mfcc_fs_bits, silence_class, unknown_class
+    #                       info_data_len, mfcc_fs_bits, silence_class,
+    #                       unknown_class, inference_mode
     header_bytes = struct.pack(
-        "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 4 + 3),
+        "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 4 + 4),
         total_length,
         *in_pad,
         *out_pad,
@@ -74,6 +76,7 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
         mfcc_fs_bits,
         int(silence_class),
         int(unknown_class),
+        int(inference_mode),
     )
     # Append model_name as MAX_FS_NAME_LEN bytes, null-padded
     name_bytes = model_name.encode("utf-8")[:MAX_FS_NAME_LEN]
@@ -109,6 +112,7 @@ FS_NAME_CHAR_UUID            = "f000aa0e-0451-4000-b000-000000000000"  # LittleF
 MFCC_FS_CHAR_UUID            = "f000aa0f-0451-4000-b000-000000000000"  # MFCC normalisation scalar (float bits, 32-bit LE)
 SILENCE_CLASS_CHAR_UUID      = "f000aa10-0451-4000-b000-000000000000"  # silence class output index (32-bit LE)
 UNKNOWN_CLASS_CHAR_UUID      = "f000aa11-0451-4000-b000-000000000000"  # unknown class output index (32-bit LE)
+INFERENCE_MODE_CHAR_UUID     = "f000aa12-0451-4000-b000-000000000000"  # inference mode: 0=sync, 1=async (32-bit LE)
 
 TRANSFER_TYPE_INFO = 0x00
 TRANSFER_TYPE_DATA = 0x01
@@ -161,7 +165,8 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
                              flash_address=0x1000,
                              is_edge_learned=False, num_edge_classes=None,
                              fs_name=None,
-                             mfcc_fs=0.0, silence_class=0, unknown_class=0):
+                             mfcc_fs=0.0, silence_class=0, unknown_class=0,
+                             inference_mode=0):
     """Transfer one binary file over BLE.
 
     Metadata fields (CRC, total_length, shapes, address, EL fields) are sent
@@ -304,6 +309,15 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent unknown_class: {unknown_class}")
 
+        # 12. Inference mode flag (0=sync, 1=async; 32-bit LE)
+        await client.write_gatt_char(
+            INFERENCE_MODE_CHAR_UUID,
+            int(inference_mode).to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent inference_mode: {inference_mode} "
+              f"({'async' if inference_mode else 'sync'})")
+
         # (fs_name already sent before file_size – see step 1b above)
 
     # Stream file data in chunks
@@ -351,7 +365,8 @@ async def send_file(address, filepath, info_path, write_to_sram,
                     flash_address=0x1000,
                     is_edge_learned=False, num_edge_classes=None,
                     fs_name=None, model_name="",
-                    mfcc_fs=0.0, silence_class=0, unknown_class=0):
+                    mfcc_fs=0.0, silence_class=0, unknown_class=0,
+                    inference_mode=0):
     source_file = filepath or info_path
     try:
         APP = detect_app_index(source_file)
@@ -379,6 +394,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
             mfcc_fs=mfcc_fs,
             silence_class=silence_class,
             unknown_class=unknown_class,
+            inference_mode=inference_mode,
         )
     elif info_path and Path(info_path).exists():
         # Shapes not available – warn; CRC will be 0 (skipped at load time)
@@ -418,6 +434,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
                 mfcc_fs=mfcc_fs,
                 silence_class=silence_class,
                 unknown_class=unknown_class,
+                inference_mode=inference_mode,
             )
             if not ok:
                 print("Info transfer failed, aborting.")
@@ -464,6 +481,7 @@ def _load_info_yaml(yaml_path):
         "mfcc_fs":          float(data.get("mfcc_fs", 0.0)),
         "silence_class":    int(data.get("silence_class", 0)),
         "unknown_class":    int(data.get("unknown_class", 0)),
+        "inference_mode":   1 if str(data.get("inference_mode", "sync")).lower() == "async" else 0,
     }
 
 
@@ -516,10 +534,11 @@ async def main(args):
     # model_name: from YAML field (e.g. "kws"), falls back to empty string
     model_name = yaml_meta["model_name"] if yaml_meta else ""
 
-    # mfcc_fs / silence_class / unknown_class: from YAML only
-    mfcc_fs       = yaml_meta["mfcc_fs"]       if yaml_meta else 0.0
-    silence_class = yaml_meta["silence_class"] if yaml_meta else 0
-    unknown_class = yaml_meta["unknown_class"] if yaml_meta else 0
+    # mfcc_fs / silence_class / unknown_class / inference_mode: from YAML only
+    mfcc_fs        = yaml_meta["mfcc_fs"]        if yaml_meta else 0.0
+    silence_class  = yaml_meta["silence_class"]  if yaml_meta else 0
+    unknown_class  = yaml_meta["unknown_class"]  if yaml_meta else 0
+    inference_mode = yaml_meta["inference_mode"] if yaml_meta else 0
 
     # Default fs_name derived from prefix when not supplied
     fs_name = args.fs_name
@@ -582,6 +601,7 @@ async def main(args):
         mfcc_fs=mfcc_fs,
         silence_class=silence_class,
         unknown_class=unknown_class,
+        inference_mode=inference_mode,
     )
 
 
