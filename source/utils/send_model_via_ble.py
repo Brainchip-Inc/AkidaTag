@@ -4,10 +4,12 @@ with BLE devices asynchronously.
 """
 import asyncio
 import argparse
+import signal
 import time
 import struct
 from pathlib import Path
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakDBusError
 import os
 import sys
 import yaml
@@ -41,7 +43,9 @@ def compute_data_crc32(data_path):
 
 def compute_combined_crc32(total_length, input_shape, output_shape,
                            flash_address, is_edge_learned, num_edge_classes,
-                           info_path, model_name=""):
+                           info_path, model_name="",
+                           mfcc_fs=0.0, silence_class=0, unknown_class=0,
+                           inference_mode=0):
     """CRC32 over header fields [total_length..model_name] + info file bytes.
 
     Matches the firmware's model_info_hdr_crc32 computation in file_transfer.c.
@@ -49,6 +53,7 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
     (all uint32_t, little-endian; shape arrays zero-padded to 3 elements).
     Layout: total_length, input_shape[3], output_shape[3],
             flash_address, is_edge_learned, num_edge_classes, info_data_len,
+            mfcc_fs_bits, silence_class, unknown_class, inference_mode,
             model_name[64]  (null-padded to MAX_FS_NAME_LEN bytes)
     """
     MAX_DIMS = 3
@@ -56,11 +61,13 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
     info_data_len = Path(info_path).stat().st_size
     in_pad  = list(input_shape)  + [0] * (MAX_DIMS - len(input_shape))
     out_pad = list(output_shape) + [0] * (MAX_DIMS - len(output_shape))
+    mfcc_fs_bits = struct.unpack('<I', struct.pack('<f', float(mfcc_fs)))[0]
     # Pack uint32_t fields: total_length, input_shape[3], output_shape[3],
     #                       flash_address, is_edge_learned, num_edge_classes,
-    #                       info_data_len
+    #                       info_data_len, mfcc_fs_bits, silence_class,
+    #                       unknown_class, inference_mode
     header_bytes = struct.pack(
-        "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 4),
+        "<" + "I" * (1 + MAX_DIMS + MAX_DIMS + 4 + 4),
         total_length,
         *in_pad,
         *out_pad,
@@ -68,6 +75,10 @@ def compute_combined_crc32(total_length, input_shape, output_shape,
         int(is_edge_learned),
         num_edge_classes,
         info_data_len,
+        mfcc_fs_bits,
+        int(silence_class),
+        int(unknown_class),
+        int(inference_mode),
     )
     # Append model_name as MAX_FS_NAME_LEN bytes, null-padded
     name_bytes = model_name.encode("utf-8")[:MAX_FS_NAME_LEN]
@@ -100,6 +111,10 @@ TOTAL_LENGTH_CHAR_UUID       = "f000aa0b-0451-4000-b000-000000000000"  # info+da
 IS_EDGE_LEARNED_CHAR_UUID    = "f000aa0c-0451-4000-b000-000000000000"  # 1 = edge-learned model (32-bit LE)
 NUM_EDGE_CLASSES_CHAR_UUID   = "f000aa0d-0451-4000-b000-000000000000"  # number of EL classes (32-bit LE)
 FS_NAME_CHAR_UUID            = "f000aa0e-0451-4000-b000-000000000000"  # LittleFS metadata path (UTF-8)
+MFCC_FS_CHAR_UUID            = "f000aa0f-0451-4000-b000-000000000000"  # MFCC normalisation scalar (float bits, 32-bit LE)
+SILENCE_CLASS_CHAR_UUID      = "f000aa10-0451-4000-b000-000000000000"  # silence class output index (32-bit LE)
+UNKNOWN_CLASS_CHAR_UUID      = "f000aa11-0451-4000-b000-000000000000"  # unknown class output index (32-bit LE)
+INFERENCE_MODE_CHAR_UUID     = "f000aa12-0451-4000-b000-000000000000"  # inference mode: 0=sync, 1=async (32-bit LE)
 
 TRANSFER_TYPE_INFO = 0x00
 TRANSFER_TYPE_DATA = 0x01
@@ -151,7 +166,9 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
                              input_shape=None, output_shape=None,
                              flash_address=0x1000,
                              is_edge_learned=False, num_edge_classes=None,
-                             fs_name=None):
+                             fs_name=None,
+                             mfcc_fs=0.0, silence_class=0, unknown_class=0,
+                             inference_mode=0):
     """Transfer one binary file over BLE.
 
     Metadata fields (CRC, total_length, shapes, address, EL fields) are sent
@@ -269,6 +286,40 @@ async def _send_single_file(client, filepath, transfer_type_byte, write_to_sram,
         )
         print(f"[{label}] Sent neurons in higher order 16 bites and num_edge_classes in lower 16bits: {classes}")
 
+        # 9. MFCC normalisation scalar (float → IEEE-754 bits, 32-bit LE)
+        mfcc_fs_bits = struct.unpack('<I', struct.pack('<f', float(mfcc_fs)))[0]
+        await client.write_gatt_char(
+            MFCC_FS_CHAR_UUID,
+            mfcc_fs_bits.to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent mfcc_fs: {mfcc_fs} (bits=0x{mfcc_fs_bits:08X})")
+
+        # 10. Silence class index (32-bit LE)
+        await client.write_gatt_char(
+            SILENCE_CLASS_CHAR_UUID,
+            int(silence_class).to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent silence_class: {silence_class}")
+
+        # 11. Unknown class index (32-bit LE)
+        await client.write_gatt_char(
+            UNKNOWN_CLASS_CHAR_UUID,
+            int(unknown_class).to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent unknown_class: {unknown_class}")
+
+        # 12. Inference mode flag (0=sync, 1=async; 32-bit LE)
+        await client.write_gatt_char(
+            INFERENCE_MODE_CHAR_UUID,
+            int(inference_mode).to_bytes(4, byteorder="little"),
+            response=True,
+        )
+        print(f"[{label}] Sent inference_mode: {inference_mode} "
+              f"({'async' if inference_mode else 'sync'})")
+
         # (fs_name already sent before file_size – see step 1b above)
 
     # Stream file data in chunks
@@ -315,7 +366,9 @@ async def send_file(address, filepath, info_path, write_to_sram,
                     input_shape=None, output_shape=None,
                     flash_address=0x1000,
                     is_edge_learned=False, num_edge_classes=None,
-                    fs_name=None, model_name=""):
+                    fs_name=None, model_name="",
+                    mfcc_fs=0.0, silence_class=0, unknown_class=0,
+                    inference_mode=0):
     source_file = filepath or info_path
     try:
         APP = detect_app_index(source_file)
@@ -340,6 +393,10 @@ async def send_file(address, filepath, info_path, write_to_sram,
             num_edge_classes=num_edge_classes if num_edge_classes is not None else 0,
             info_path=info_path,
             model_name=model_name,
+            mfcc_fs=mfcc_fs,
+            silence_class=silence_class,
+            unknown_class=unknown_class,
+            inference_mode=inference_mode,
         )
     elif info_path and Path(info_path).exists():
         # Shapes not available – warn; CRC will be 0 (skipped at load time)
@@ -376,6 +433,10 @@ async def send_file(address, filepath, info_path, write_to_sram,
                 is_edge_learned=is_edge_learned,
                 num_edge_classes=num_edge_classes,
                 fs_name=fs_name,
+                mfcc_fs=mfcc_fs,
+                silence_class=silence_class,
+                unknown_class=unknown_class,
+                inference_mode=inference_mode,
             )
             if not ok:
                 print("Info transfer failed, aborting.")
@@ -419,6 +480,10 @@ def _load_info_yaml(yaml_path):
         "num_classes":      int(el.get("num_classes",  0)),
         "neurons_per_class": int(el.get("num_neurons", 1)),
         "num_el_classes":   int(el.get("num_el_classes", 0)),
+        "mfcc_fs":          float(data.get("mfcc_fs", 0.0)),
+        "silence_class":    int(data.get("silence_class", 0)),
+        "unknown_class":    int(data.get("unknown_class", 0)),
+        "inference_mode":   1 if str(data.get("inference_mode", "sync")).lower() == "async" else 0,
     }
 
 
@@ -427,6 +492,101 @@ def _parse_shape_arg(value):
     if not value:
         return None
     return tuple(int(x) for x in value.split(",") if x.strip())
+
+
+async def _find_adapter_path(bus):
+    """Return the first BlueZ adapter object path (e.g. /org/bluez/hci0 or hci1).
+
+    The adapter is auto-detected via the ObjectManager rather than hardcoded,
+    because the runner's adapter is not always hci0.
+    """
+    intro = await bus.introspect("org.bluez", "/")
+    obj = bus.get_proxy_object("org.bluez", "/", intro)
+    om = obj.get_interface("org.freedesktop.DBus.ObjectManager")
+    objects = await om.call_get_managed_objects()
+    for path, ifaces in objects.items():
+        if "org.bluez.Adapter1" in ifaces:
+            return path
+    return None
+
+
+async def reset_bluetooth_adapter(power_cycle=False):
+    """Best-effort: leave the BlueZ adapter in a clean, usable state.
+
+    A scan that is never stopped (e.g. when CI kills this process on its
+    timeout) leaves the adapter mid-discovery, so the *next* run's
+    BleakScanner.discover() fails with org.bluez.Error.InProgress. This helper
+    stops any active discovery, and optionally power-cycles the adapter (the
+    lightweight equivalent of `systemctl restart bluetooth`, no sudo needed for
+    a user in the `bluetooth` group) to clear a discovery owned by a now-dead
+    client. It never raises — cleanup must not mask the real transfer result.
+    """
+    try:
+        from dbus_fast import BusType, Variant
+        from dbus_fast.aio import MessageBus
+    except Exception as e:  # dbus-fast is a bleak/Linux dep; absent elsewhere
+        print(f"[bt-cleanup] dbus-fast unavailable, skipping cleanup: {e}")
+        return
+
+    bus = None
+    try:
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        adapter_path = await _find_adapter_path(bus)
+        if not adapter_path:
+            print("[bt-cleanup] no BlueZ adapter found")
+            return
+
+        intro = await bus.introspect("org.bluez", adapter_path)
+        obj = bus.get_proxy_object("org.bluez", adapter_path, intro)
+        adapter = obj.get_interface("org.bluez.Adapter1")
+        props = obj.get_interface("org.freedesktop.DBus.Properties")
+
+        # Stop any active discovery. Benign if none is running
+        # (org.bluez.Error.Failed "No discovery started" / NotReady / InProgress).
+        try:
+            await adapter.call_stop_discovery()
+            print(f"[bt-cleanup] StopDiscovery on {adapter_path}")
+        except Exception as e:
+            print(f"[bt-cleanup] StopDiscovery ignored ({adapter_path}): {e}")
+
+        if power_cycle:
+            try:
+                await props.call_set("org.bluez.Adapter1", "Powered", Variant("b", False))
+                await asyncio.sleep(1.0)
+                await props.call_set("org.bluez.Adapter1", "Powered", Variant("b", True))
+                await asyncio.sleep(1.5)
+                print(f"[bt-cleanup] power-cycled {adapter_path}")
+            except Exception as e:
+                print(f"[bt-cleanup] power-cycle ignored ({adapter_path}): {e}")
+    except Exception as e:
+        print(f"[bt-cleanup] adapter cleanup failed (non-fatal): {e}")
+    finally:
+        if bus is not None:
+            try:
+                bus.disconnect()
+            except Exception:
+                pass
+
+
+async def _scan_with_recovery(timeout=5.0):
+    """Scan for BLE devices, recovering from a leaked discovery session.
+
+    A prior run killed mid-scan can leave the adapter discovering, so the first
+    StartDiscovery here returns org.bluez.Error.InProgress. On that error we
+    power-cycle the adapter to clear the stale session and retry once.
+    """
+    # Pre-scan: clear any stale discovery before we start our own.
+    await reset_bluetooth_adapter()
+    try:
+        return await BleakScanner.discover(timeout=timeout)
+    except BleakDBusError as e:
+        if getattr(e, "dbus_error", "") != "org.bluez.Error.InProgress":
+            raise
+        print("[bt] scan blocked (discovery already in progress); "
+              "recovering adapter and retrying...")
+        await reset_bluetooth_adapter(power_cycle=True)
+        await asyncio.sleep(1.0)
+        return await BleakScanner.discover(timeout=timeout)
 
 
 async def main(args):
@@ -471,6 +631,12 @@ async def main(args):
     # model_name: from YAML field (e.g. "kws"), falls back to empty string
     model_name = yaml_meta["model_name"] if yaml_meta else ""
 
+    # mfcc_fs / silence_class / unknown_class / inference_mode: from YAML only
+    mfcc_fs        = yaml_meta["mfcc_fs"]        if yaml_meta else 0.0
+    silence_class  = yaml_meta["silence_class"]  if yaml_meta else 0
+    unknown_class  = yaml_meta["unknown_class"]  if yaml_meta else 0
+    inference_mode = yaml_meta["inference_mode"] if yaml_meta else 0
+
     # Default fs_name derived from prefix when not supplied
     fs_name = args.fs_name
     if not fs_name:
@@ -486,50 +652,72 @@ async def main(args):
     print(f"Edge-learned:  {is_edge_learned}")
     print(f"FS name:       {fs_name}")
 
-    print("\nScanning for BLE devices...")
-    devices = await BleakScanner.discover(timeout=5.0)
+    # Install signal handlers so a CI-timeout kill (SIGTERM) still cleans up the
+    # adapter instead of leaking the discovery session to the next run.
+    loop = asyncio.get_running_loop()
+    main_task = asyncio.current_task()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, main_task.cancel)
+        except (NotImplementedError, RuntimeError):
+            pass  # signal handlers unavailable on this platform / loop
 
-    if not devices:
-        print("No BLE devices found.")
-        return
+    try:
+        print("\nScanning for BLE devices...")
+        devices = await _scan_with_recovery(timeout=5.0)
 
-    target_device = None
+        if not devices:
+            print("No BLE devices found.")
+            return
 
-    for d in devices:
-        print(f"{d.name or 'Unknown'} - {d.address}")
-        if d.name == DEVICE_NAME:
-            target_device = d
-            break
+        target_device = None
 
-    if not target_device:
-        print(f"{DEVICE_NAME} not found.")
-        return
+        for d in devices:
+            print(f"{d.name or 'Unknown'} - {d.address}")
+            if d.name == DEVICE_NAME:
+                target_device = d
+                break
 
-    address = target_device.address
-    print(f"Connecting to {DEVICE_NAME} ({address})...")
+        if not target_device:
+            print(f"{DEVICE_NAME} not found.")
+            return
 
-    # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_el_classes
-    packed_classes = None
-    if args.num_el_classes is not None:
-        neurons = args.neurons_per_class if args.neurons_per_class is not None else 1
-        packed_classes = ((neurons & 0xFFFF) << 16) | (args.num_el_classes & 0xFFFF)
-        print(f"num_edge_classes packed: neurons={neurons} classes={args.num_el_classes} "
-              f"→ 0x{packed_classes:08X}")
-    else:
-        neurons = 1;
-        packed_classes = ((neurons & 0xFFFF) << 16) | (0 & 0xFFFF)
-        print ("packed_classes = ", packed_classes)
+        address = target_device.address
+        print(f"Connecting to {DEVICE_NAME} ({address})...")
 
-    await send_file(
-        address, bin_path, info_path, args.wc,
-        input_shape=input_shape,
-        output_shape=output_shape,
-        flash_address=int(flash_address_str, 0),
-        is_edge_learned=is_edge_learned,
-        num_edge_classes=packed_classes,
-        fs_name=fs_name,
-        model_name=model_name,
-    )
+        # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_el_classes
+        packed_classes = None
+        if args.num_el_classes is not None:
+            neurons = args.neurons_per_class if args.neurons_per_class is not None else 1
+            packed_classes = ((neurons & 0xFFFF) << 16) | (args.num_el_classes & 0xFFFF)
+            print(f"num_edge_classes packed: neurons={neurons} classes={args.num_el_classes} "
+                  f"→ 0x{packed_classes:08X}")
+        else:
+            neurons = 1;
+            packed_classes = ((neurons & 0xFFFF) << 16) | (0 & 0xFFFF)
+            print ("packed_classes = ", packed_classes)
+
+        await send_file(
+            address, bin_path, info_path, args.wc,
+            input_shape=input_shape,
+            output_shape=output_shape,
+            flash_address=int(flash_address_str, 0),
+            is_edge_learned=is_edge_learned,
+            num_edge_classes=packed_classes,
+            fs_name=fs_name,
+            model_name=model_name,
+            mfcc_fs=mfcc_fs,
+            silence_class=silence_class,
+            unknown_class=unknown_class,
+            inference_mode=inference_mode,
+        )
+    except asyncio.CancelledError:
+        print("\n[bt] interrupted (signal) — cleaning up adapter before exit.")
+        raise
+    finally:
+        # Always leave the adapter usable — success, failure, or kill — so the
+        # next run starts clean without a manual `systemctl restart bluetooth`.
+        await reset_bluetooth_adapter()
 
 
 if __name__ == "__main__":

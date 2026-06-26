@@ -11,9 +11,10 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
-#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
+LOG_MODULE_REGISTER(current_ic, LOG_LEVEL_INF);
 
 #define ADC_CH_0 0
 #define ADC_CH_1 1
@@ -58,22 +59,22 @@ int bat_sts_gpio_init(void) {
 
   /* --- Check GPIO readiness --- */
   if (!gpio_is_ready_dt(&chgr_sts1)) {
-    printk("Charging status1 GPIO not ready\n");
+    LOG_ERR("Charging status1 GPIO not ready");
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&chgr_sts2)) {
-    printk("Charging status2 GPIO not ready\n");
+    LOG_ERR("Charging status2 GPIO not ready");
     return -ENODEV;
   }
   /* --- Configure control pins as input --- */
   err = gpio_pin_configure_dt(&chgr_sts1, GPIO_INPUT);
   if (err) {
-    printk("Failed to configure Charging status1 pin (err %d)\n", err);
+    LOG_ERR("Failed to configure Charging status1 pin (err %d)", err);
     return err;
   }
   err = gpio_pin_configure_dt(&chgr_sts2, GPIO_INPUT);
   if (err) {
-    printk("Failed to configure Charging status2 pin (err %d)\n", err);
+    LOG_ERR("Failed to configure Charging status2 pin (err %d)", err);
     return err;
   }
   return 0;
@@ -95,13 +96,13 @@ int current_ic_init(void) {
   /* Configure channels individually prior to sampling. */
   for (size_t i = 0U; i < ARRAY_SIZE(adc_channels); i++) {
     if (!adc_is_ready_dt(&adc_channels[i])) {
-      printk("ADC controller device %s not ready\n", adc_channels[i].dev->name);
+      LOG_ERR("ADC controller device %s not ready", adc_channels[i].dev->name);
       return -ENODEV;
     }
 
     err = adc_channel_setup_dt(&adc_channels[i]);
     if (err < 0) {
-      printk("Could not setup channel #%d (%d)\n", i, err);
+      LOG_ERR("Could not setup channel #%d (%d)", i, err);
       return -ENODEV;
     }
     sequences[i] = (struct adc_sequence){
@@ -110,7 +111,7 @@ int current_ic_init(void) {
     };
     err = adc_sequence_init_dt(&adc_channels[i], &sequences[i]);
     if (err < 0) {
-      printk("ADC sequence init failed for channel %d: %d\n", i, err);
+      LOG_ERR("ADC sequence init failed for channel %d: %d", i, err);
       return err;
     }
   }
@@ -132,13 +133,13 @@ int current_ic_init(void) {
 bat_status check_bat_status(void) {
   int sts1 = gpio_pin_get_dt(&chgr_sts1);
   if (sts1 < 0) {
-    printk("Failed to read CHGR_STS1: %d", sts1);
+    LOG_ERR("Failed to read CHGR_STS1: %d", sts1);
     return BAT_READ_FAILED;
   }
 
   int sts2 = gpio_pin_get_dt(&chgr_sts2);
   if (sts2 < 0) {
-    printk("Failed to read CHGR_STS2: %d", sts2);
+    LOG_ERR("Failed to read CHGR_STS2: %d", sts2);
     return BAT_READ_FAILED;
   }
 
@@ -147,10 +148,10 @@ bat_status check_bat_status(void) {
   } else if (sts1 == 1 && sts2 == 0) {
     return BAT_CHARGING;
   } else if (sts1 == 0 && sts2 == 1) {
-    printk("Charger Status: Recoverable fault\n");
+    LOG_INF("Charger Status: Recoverable fault");
     return BAT_FAULT_RECOVERABLE;
   } else {
-    printk("Charger Status: Non-recoverable fault\n");
+    LOG_INF("Charger Status: Non-recoverable fault");
     return BAT_FAULT_NON_RECOVERABLE;
   }
 }
@@ -180,13 +181,13 @@ void current_data_thread(void *a, void *b, void *c) {
 
     k_sem_take(&current_stream_sem, K_FOREVER); // sleep until signaled
 
-    printk("Current streaming started\n");
+    LOG_INF("Current streaming started");
 
     while (current_stream_flag == FLAG_ENABLE) {
 
       // Guard: if BLE dropped, stop immediately
       if (!is_ble_connected()) {
-        printk("BLE disconnected during current stream, stopping\n");
+        LOG_INF("BLE disconnected during current stream, stopping");
         current_stream_flag = FLAG_DISABLE;
         break;
       }
@@ -198,7 +199,7 @@ void current_data_thread(void *a, void *b, void *c) {
         // Channel 0 — 1V8 rail
         err = adc_read_dt(&adc_channels[ADC_CH_0], &sequences[ADC_CH_0]);
         if (err < 0) {
-          printk("CH0: read error (%d)\n", err);
+          LOG_ERR("CH0: read error (%d)", err);
           continue;
         }
         float val_mv = (float)(int32_t)buf * adc_scale;
@@ -214,7 +215,7 @@ void current_data_thread(void *a, void *b, void *c) {
       for (int cnt = 0; cnt < AVG_SAMPLES; cnt++) {
         err = adc_read_dt(&adc_channels[ADC_CH_1], &sequences[ADC_CH_1]);
         if (err < 0) {
-          printk("CH1: read error (%d)\n", err);
+          LOG_ERR("CH1: read error (%d)", err);
           continue;
         }
         float val_mv = (float)(int32_t)buf * adc_scale;
@@ -227,10 +228,10 @@ void current_data_thread(void *a, void *b, void *c) {
       float avg_1v8 = (valid_cnt_1v8 > 0) ? (sum_1v8 / valid_cnt_1v8) : 0.0f;
       float avg_0v8 = (valid_cnt_0v8 > 0) ? (sum_0v8 / valid_cnt_0v8) : 0.0f;
 
-      printk("CH0 1V8 Avg Current: %.2f mA (valid=%d)\n", (double)avg_1v8,
-             valid_cnt_1v8);
-      printk("CH1 0V8 Avg Current: %.2f mA (valid=%d)\n", (double)avg_0v8,
-             valid_cnt_0v8);
+      LOG_DBG("CH0 1V8 Avg Current: %.2f mA (valid=%d)", (double)avg_1v8,
+              valid_cnt_1v8);
+      LOG_DBG("CH1 0V8 Avg Current: %.2f mA (valid=%d)", (double)avg_0v8,
+              valid_cnt_0v8);
 
       /* Handle sign separately */
       int sign_1v8 = (avg_1v8 < 0) ? -1 : 1;

@@ -1,4 +1,6 @@
 #include "ble_services/edge_learning.h"
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(edge_learning, LOG_LEVEL_DBG);
 
 static void edge_ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,
                                      uint16_t value);
@@ -78,9 +80,9 @@ static void edge_ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,
   notify_enabled = (value == BT_GATT_CCC_NOTIFY);
 
   if (notify_enabled) {
-    printk("ACK notifications enabled");
+    LOG_INF("ACK notifications enabled");
   } else {
-    printk("ACK notifications disabled");
+    LOG_INF("ACK notifications disabled");
   }
 }
 
@@ -94,7 +96,7 @@ static void edge_ack_ccc_cfg_changed(const struct bt_gatt_attr *attr,
  */
 void send_ack(uint8_t ack_code) {
   if (!notify_enabled) {
-    printk("Notify not enabled");
+    LOG_INF("Notify not enabled");
     return;
   }
 
@@ -102,9 +104,9 @@ void send_ack(uint8_t ack_code) {
       bt_gatt_notify(NULL, &edge_service.attrs[3], &ack_code, sizeof(ack_code));
 
   if (err) {
-    printk("Failed to send ACK (err %d)", err);
+    LOG_ERR("Failed to send ACK (err %d)", err);
   } else {
-    printk("ACK sent: 0x%02X", ack_code);
+    LOG_INF("ACK sent: 0x%02X", ack_code);
   }
 }
 
@@ -145,7 +147,7 @@ static ssize_t edge_cmd_write(struct bt_conn *conn,
                               uint16_t len, uint16_t offset, uint8_t flags) {
   uint8_t cmd = ((uint8_t *)buf)[0];
 
-  printk("Edge learning cmd: %d\n", cmd);
+  LOG_INF("Edge learning cmd: %d", cmd);
 
   edge_learning_cmd_process(cmd);
 

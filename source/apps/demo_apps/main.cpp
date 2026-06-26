@@ -18,7 +18,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
-#include <zephyr/sys/printk.h>
 #include <zephyr/types.h>
 
 #include <bluetooth/services/lbs.h>
@@ -36,6 +35,7 @@
 #include "sample_input/kws/kws_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <cmath>
+#include <new>
 #include <hardware_device_impl.h>
 #include <infra/system.h>
 #include <stdio.h>
@@ -438,7 +438,7 @@ const struct device *wdt_dev; // Global watchdog device
 void kick_watchdog(void) {
   if (wdt_dev) {
     // wdt_feed(wdt_dev, 0); // Feed the watchdog
-    printk("Watchdog fed\n");
+    LOG_INF("Watchdog fed");
   }
 }
 
@@ -484,14 +484,17 @@ static inline void restore_default_led_state(void) {
 }
 #endif
 
-float mfcc_fs = 123.56967163085938f;
+// MFCC normalisation scalar — no built-in default. It divides every input
+// feature, so it must come from the model metadata (info.yaml). A KWS model
+// without a valid mfcc_fs is rejected in update_model_params().
+float mfcc_fs = 0.0f;
 
-// KWS class definitions
-#define KWS_SILENCE_CLASS 10
-#define KWS_UNKNOWN_CLASS 11
+// KWS class indices — supplied by model metadata (info.yaml), not hardcoded.
+// -1 means "not yet configured"; update_model_params() sets them at load time.
+static int g_silence_class = -1;
+static int g_unknown_class = -1;
 
 // Softmax EMA smoothing and chiming trigger parameters
-#define MAX_KWS_CLASSES 15
 #define SMOOTHING_ALPHA 0.7f
 #define SCORE_THRESHOLD 0.5f
 #define CHIMING_THRESHOLD 3
@@ -502,10 +505,9 @@ float score_threshold = SCORE_THRESHOLD; // Smoothed softmax score threshold
 int chiming_threshold =
     CHIMING_THRESHOLD; // Consecutive detections needed to trigger
 
-static float
-    smoothed_scores[MAX_KWS_CLASSES]; // EMA smoothed softmax scores per class
-static int chiming_counters[MAX_KWS_CLASSES]; // Consecutive detection counters
-                                              // per class
+static float *smoothed_scores = nullptr;
+static int *chiming_counters = nullptr;
+static float *softmax_scores = nullptr;
 
 // Metrics mode: show confidence and timing details on keyword detection
 int metrics_on = 0;
@@ -515,18 +517,16 @@ static int check_model_compatibility(uint8_t is_el_model_l,
 
   if (is_el_model_l) {
     if (kws_meta.is_edge_learned) {
-      printk("\n\r model is edge learn capable\n\r");
+      LOG_INF(" model is edge learn capable");
     } else {
-      printk("E: model in-compatability, FS and model to be updated "
-             "correctly\n\r");
+      LOG_ERR("model in-compatability, FS and model to be updated correctly");
       return -1;
     }
   } else {
     if (kws_meta.is_edge_learned == 0) {
-      printk("\n\r model is not edge learn capable\n\r");
+      LOG_INF(" model is not edge learn capable");
     } else {
-      printk("E: model in-compatability, FS and model to be updated "
-             "correctly\n\r");
+      LOG_ERR("model in-compatability, FS and model to be updated correctly");
       return -1;
     }
   }
@@ -593,9 +593,9 @@ const struct device *uart;
 void uart_init(void) {
   uart = DEVICE_DT_GET(DT_NODELABEL(uart0));
   if (!device_is_ready(uart)) {
-    printk("UART not ready\n");
+    LOG_ERR("UART not ready");
   } else {
-    printk("UART is ready\n");
+    LOG_INF("UART is ready");
   }
 }
 
@@ -607,7 +607,7 @@ static int start_dmic_audio_proc(void) {
       audio_processor_start(false, (float *)spectrogram, spectrogram_dims,
                             MFCC_SAMPLE_COUNT, do_inference);
   if (is_audio_started == EFAILURE) {
-    printk("audio_processor not started\n");
+    LOG_ERR("audio_processor not started");
     return EFAILURE;
   }
 
@@ -643,7 +643,7 @@ extern "C" int kws_app_start(void) {
   }
   int rc = dmic_start();
   if (rc < 0) {
-    printk("kws_app_start: dmic_start failed %d\n\r", rc);
+    LOG_ERR("kws_app_start: dmic_start failed %d", rc);
     return rc;
   }
   reset_stale_inference_data();
@@ -651,7 +651,7 @@ extern "C" int kws_app_start(void) {
   cur_kws_edge_state = STATE_INFERENCE;
   kws_app_running = true;
   kws_config_notify_dmic_started();
-  printk("kws_app: started\n\r");
+  LOG_INF("kws_app: started");
   return 0;
 }
 
@@ -663,7 +663,7 @@ extern "C" int kws_app_stop(void) {
   cur_kws_edge_state = STATE_STOPPED;
   stop_dmic();
   kws_app_running = false;
-  printk("kws_app: stopped\n\r");
+  LOG_INF("kws_app: stopped");
   return 0;
 }
 
@@ -730,7 +730,7 @@ static void switch_learning_delayed(struct k_work *work) {
     if (is_ble_connected() && event_flag) {
       learning_started();
     }
-    printk("learn_select -> learning\n\r");
+    LOG_INF("learn_select -> learning");
     last_learn_ts = time_ms();
 
     /* Initialize structured learning state */
@@ -754,11 +754,11 @@ static void switch_learning_delayed(struct k_work *work) {
     /* Start polling for silence timeout */
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
 
-    printk("\nlearn: structured learning for class %d "
-           "(%d inputs/utterance, %d utterances)\n\r",
-           cur_kws_edge_novel_class, learn_state.augmentations_per_utterance,
-           LEARN_NUM_UTTERANCES);
-    printk("learn: say keyword 1/%d\n\r", LEARN_NUM_UTTERANCES);
+    LOG_INF("learn: structured learning for class %d (%d inputs/utterance, %d "
+            "utterances)",
+            cur_kws_edge_novel_class, learn_state.augmentations_per_utterance,
+            LEARN_NUM_UTTERANCES);
+    LOG_INF("learn: say keyword 1/%d", LEARN_NUM_UTTERANCES);
   }
   /* Removed: auto-transition back to learn_select after 5s timeout.
    * The structured learning flow manages its own timeouts via
@@ -829,9 +829,8 @@ static void update_weights_to_mesh() {
           saved_learn_weights_ptr->learn_weights_data.learn_weights_size);
   if (saved_learn_weights_ptr->learn_weights_data.learn_weights_size !=
       (int32_t)akida_learn_mem_size()) {
-    printk(" there is an issue for the learned class, as weights are not "
-           "stored properly "
-           "in Akida Neuron Fabric");
+    LOG_ERR(" there is an issue for the learned class, as weights are not "
+            "stored properly in Akida Neuron Fabric");
     /* as there is an error, initialize the memory again */
     init_learn_weights_mem(mesh_learn_weights_size);
   }
@@ -858,29 +857,27 @@ static void read_learn_weights_from_flash(void) {
           (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
       /* if CRC is failed then user to do re-learning*/
       if (crc32 != saved_learn_weights_ptr->crc) {
-        printk("learn weights CRC check failed, %d bytes read from flash and "
-               "there is an "
-               "error in reading "
-               "learning data, user need to perform learning again \r\n",
-               ret);
+        LOG_ERR("learn weights CRC check failed, %d bytes read from flash and "
+                "there is an error in reading learning data, user need to "
+                "perform learning again ",
+                ret);
         reset_saved_weights();
       } else {
-        printk("%d bytes are read from flash (learn weights) to "
-               "saved_learn_weights_ptr "
-               "location \r\n",
-               ret);
+        LOG_INF("%d bytes are read from flash (learn weights) to "
+                "saved_learn_weights_ptr location ",
+                ret);
         if (saved_learn_weights_ptr->learn_weights_data.label_learnt_val) {
           update_weights_to_mesh();
         }
       }
     } else {
-      printk("incorrect number of bytes read from flash, user need to re-learn "
-             "\r\n");
+      LOG_WRN(
+          "incorrect number of bytes read from flash, user need to re-learn ");
       reset_saved_weights();
     }
   } else {
-    printk("read_learn_weights_from_flash: saved learn weights file open "
-           "failed \n");
+    LOG_ERR(
+        "read_learn_weights_from_flash: saved learn weights file open failed ");
   }
 }
 
@@ -890,7 +887,7 @@ static int initiate_kws_inference(uint8_t is_el_model_l) {
     k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
     mesh_learn_weights_size = akida_learn_mem_size();
 
-    printk("mesh_learn_weights_size = %" PRIu32 "\n", mesh_learn_weights_size);
+    LOG_INF("mesh_learn_weights_size = %" PRIu32, mesh_learn_weights_size);
 
     // Free any prior allocation to avoid memory leak on re-init
     if (saved_learn_weights_ptr) {
@@ -911,9 +908,8 @@ static int initiate_kws_inference(uint8_t is_el_model_l) {
     base_labels_wts_ptr = new uint8_t[mesh_learn_weights_size];
 
     if ((saved_learn_weights_ptr == NULL) || (base_labels_wts_ptr == NULL)) {
-      printk("dynamic memory allocation failed for weights data and hence "
-             "application is not "
-             "running ");
+      LOG_ERR("dynamic memory allocation failed for weights data and hence "
+              "application is not running ");
       return -EFAILURE;
     }
     // initialize the learn_weights_mem structure
@@ -947,23 +943,23 @@ void check_reset_reason(void) {
   uint32_t cause = 0;
 
   if (hwinfo_get_reset_cause(&cause) != 0) {
-    printk("Failed to read reset cause\n");
+    LOG_ERR("Failed to read reset cause");
     return;
   }
 
-  printk("Reset cause: 0x%08x\n", cause);
+  LOG_INF("Reset cause: 0x%08x", cause);
 
   if (cause & RESET_LOW_POWER_WAKE) {
-    printk("Wakeup from System OFF\n");
+    LOG_INF("Wakeup from System OFF");
   }
   if (cause & RESET_PIN) {
-    printk("Reset from RESET pin\n");
+    LOG_INF("Reset from RESET pin");
   }
   if (cause & RESET_WATCHDOG) {
-    printk("Reset from Watchdog\n");
+    LOG_INF("Reset from Watchdog");
   }
   if (cause & RESET_SOFTWARE) {
-    printk("Reset from software reset\n");
+    LOG_INF("Reset from software reset");
   }
 
   /* Do not clear here — init_boot_count() reads and clears later */
@@ -996,13 +992,17 @@ static int start_current_proc(void) {
   return 0;
 }
 #endif
-static void update_model_params(model_meta_t kws_meta) {
+/* Defined later in this file; forward-declared so update_model_params() can
+ * apply the inference mode carried in the model metadata. */
+void akida_init(int mode);
+
+static int update_model_params(model_meta_t kws_meta) {
   g_input_size = kws_meta.input_shape[0] * kws_meta.input_shape[1] *
                  kws_meta.input_shape[2];
   g_num_classes = kws_meta.output_shape[0] * kws_meta.output_shape[1] *
                   kws_meta.output_shape[2];
 
-  printk("kws_meta.num_edge_classes %x \n\r", kws_meta.num_edge_classes);
+  LOG_INF("kws_meta.num_edge_classes %x ", kws_meta.num_edge_classes);
   g_num_neurons_per_class = (kws_meta.num_edge_classes & 0xFFFF0000) >> 16;
   if (g_num_neurons_per_class == 0) {
     g_num_neurons_per_class = 1;
@@ -1011,26 +1011,74 @@ static void update_model_params(model_meta_t kws_meta) {
   g_num_classes = g_num_classes / g_num_neurons_per_class;
   g_num_edge_learn_classes = (kws_meta.num_edge_classes & 0xFFFF);
 
-  printk("kws_meta.input_shape[0] %d, kws_meta.input_shape[1] %d, "
-         "kws_meta.input_shape[2] %d\n\r",
-         kws_meta.input_shape[0], kws_meta.input_shape[1],
-         kws_meta.input_shape[2]);
+  LOG_INF("kws_meta.input_shape[0] %d, kws_meta.input_shape[1] %d, "
+          "kws_meta.input_shape[2] %d",
+          kws_meta.input_shape[0], kws_meta.input_shape[1],
+          kws_meta.input_shape[2]);
 
-  printk("kws_meta.output_shape[0] %d, kws_meta.output_shape[1] %d, "
-         "kws_meta.output_shape[2] %d\n\r",
-         kws_meta.output_shape[0], kws_meta.output_shape[1],
-         kws_meta.output_shape[2]);
+  LOG_INF("kws_meta.output_shape[0] %d, kws_meta.output_shape[1] %d, "
+          "kws_meta.output_shape[2] %d",
+          kws_meta.output_shape[0], kws_meta.output_shape[1],
+          kws_meta.output_shape[2]);
 
-  printk("g_input_size %d, g_num_classes %d, g_num_neurons_per_class %d, "
-         "g_num_edge_learn_classes %d \n\r",
-         g_input_size, g_num_classes, g_num_neurons_per_class,
-         g_num_edge_learn_classes);
+  LOG_INF("g_input_size %d, g_num_classes %d, g_num_neurons_per_class %d, "
+          "g_num_edge_learn_classes %d ",
+          g_input_size, g_num_classes, g_num_neurons_per_class,
+          g_num_edge_learn_classes);
 
   delete[] akida_output;
-  akida_output = new int32_t[g_num_classes * g_num_neurons_per_class];
+  akida_output =
+      new (std::nothrow) int32_t[g_num_classes * g_num_neurons_per_class];
   delete[] akida_output_dq;
-  akida_output_dq = new float[g_num_classes * g_num_neurons_per_class];
+  akida_output_dq =
+      new (std::nothrow) float[g_num_classes * g_num_neurons_per_class];
   akd_op_size = sizeof(int32_t) * g_num_classes * g_num_neurons_per_class;
+
+  delete[] smoothed_scores;
+  smoothed_scores = new (std::nothrow) float[g_num_classes]();
+  delete[] chiming_counters;
+  chiming_counters = new (std::nothrow) int[g_num_classes]();
+  delete[] softmax_scores;
+  softmax_scores = new (std::nothrow) float[g_num_classes]();
+
+  if (akida_output == nullptr || akida_output_dq == nullptr ||
+      smoothed_scores == nullptr || chiming_counters == nullptr ||
+      softmax_scores == nullptr) {
+    LOG_ERR("update_model_params: buffer allocation failed for %u classes",
+            g_num_classes);
+    return -EFAILURE;
+  }
+
+  /* mfcc_fs is mandatory: it divides every input feature, so a missing/zero
+   * value (model uploaded without mfcc_fs in info.yaml) would produce garbage
+   * inference. Reject such a model instead of guessing a default. */
+  if (kws_meta.mfcc_fs_bits == 0) {
+    LOG_ERR("KWS model metadata missing mfcc_fs — refusing to run. "
+            "Regenerate the model with mfcc_fs in info.yaml.");
+    return -EFAILURE;
+  }
+  memcpy(&mfcc_fs, &kws_meta.mfcc_fs_bits, sizeof(float));
+
+  g_silence_class = (int)kws_meta.silence_class;
+  g_unknown_class = (int)kws_meta.unknown_class;
+
+  /* Apply the inference mode carried in the model metadata (info.yaml).
+   * akida_init() sets kws_api_selection and manages the async thread/IRQ, so
+   * the inference path and `kws_mode_get` stay consistent. A manual
+   * `kws_mode sync|async` still overrides this at runtime. */
+  uint32_t requested_mode = kws_meta.inference_mode; /* 0=sync, 1=async */
+#ifndef CONFIG_SPARK_BOARD
+  if (requested_mode == DEFAULT_API_SELECTION_ASYNC) {
+    LOG_WRN("info.yaml requests ASYNC but this board only supports SYNC; "
+            "falling back to SYNC");
+    requested_mode = DEFAULT_API_SELECTION_SYNC;
+  }
+#endif
+  akida_init((int)requested_mode);
+  LOG_INF("Inference mode from metadata: %s",
+          requested_mode == DEFAULT_API_SELECTION_ASYNC ? "ASYNC" : "SYNC");
+
+  return SUCCESS;
 }
 
 static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
@@ -1066,14 +1114,14 @@ static void akd_async_thread(void *a, void *b, void *c) {
       uint64_t fetch_end_ts = time_ms();
       uint32_t fetch_time = (uint32_t)(fetch_end_ts - fetch_start_ts);
       if (verbose_on) {
-        printk("fetch: done (cpu=%ums)\n\r", fetch_time);
+        LOG_INF("fetch: done (cpu=%ums)", fetch_time);
       }
       uint32_t inference_dma_ts =
           akida_get_clock_counter() - inference_start_dma_ts;
       uint32_t inference_time = fetch_end_ts - inference_start_ts;
       kws_post_processing(inference_dma_ts, inference_time);
     } else {
-      printk("Fetch returned EFAILURE or Error\n");
+      LOG_ERR("Fetch returned EFAILURE or Error");
     }
   }
 }
@@ -1113,7 +1161,7 @@ void akida_init(int mode) {
   if (akd_async_tid != NULL) {
     k_thread_abort(akd_async_tid);
     akd_async_tid = NULL;
-    printk("Stopped existing async thread\n");
+    LOG_INF("Stopped existing async thread");
   }
 
   if (mode == DEFAULT_API_SELECTION_ASYNC) {
@@ -1126,19 +1174,19 @@ void akida_init(int mode) {
 
     k_thread_name_set(akd_async_tid, "akd_async");
 
-    printk("Akida Async is initialized\n");
+    LOG_INF("Akida Async is initialized");
   } else {
     akd_irq_disable();
     kws_api_selection = DEFAULT_API_SELECTION_SYNC;
-    printk("Akida Sync is initialized\n");
+    LOG_INF("Akida Sync is initialized");
   }
 
 #else
   /* Non-SPARK boards: only sync supported */
   kws_api_selection = DEFAULT_API_SELECTION_SYNC;
 
-  printk("Akida Sync is initialized\n");
-  printk("Note: Async mode is not supported on this board configuration\n");
+  LOG_INF("Akida Sync is initialized");
+  LOG_INF("Note: Async mode is not supported on this board configuration");
 
 #endif
 }
@@ -1146,7 +1194,7 @@ void akida_init(int mode) {
 int main(void) {
 
   check_reset_reason();
-  /* printk("App Core Version: %s\n", CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION); */
+  /* LOG_INF("App Core Version: %s", CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION); */
   /* Image IDs defined by MCUboot */
   print_image_version(FLASH_AREA_ID(image_0), "App Core");
 
@@ -1163,7 +1211,7 @@ int main(void) {
   }
   int err_button = user_button_init();
   if (err_button) {
-    printk("User button init failed\n");
+    LOG_ERR("User button init failed");
   }
   spark_peripherals_power_enable();
   int ret = battery_init();
@@ -1174,7 +1222,7 @@ int main(void) {
   uart_init();
   start_led_ind();
   led_set_state(LED_STATE_NORMAL_APP);
-  printk("Akida TAG Application\n");
+  LOG_INF("Akida TAG Application");
   confirm_image_if_needed();
   init_setting_sub_system();
   kws_config_init();
@@ -1192,15 +1240,15 @@ int main(void) {
   const struct device *spi_flash = DEVICE_DT_GET(DT_NODELABEL(ext_flash));
 
   if (!device_is_ready(spi_flash)) {
-    printk("SPI flash not ready\n");
+    LOG_ERR("SPI flash not ready");
   } else {
-    printk("SPI flash device ready: %s\n", spi_flash->name);
+    LOG_INF("SPI flash device ready: %s", spi_flash->name);
   }
   int err = storage_init();
   if (err != 0) {
-    printk("LittleFS mount failed %d", err);
+    LOG_ERR("LittleFS mount failed %d", err);
   } else {
-    printk("LittleFS mount succeeded %d", err);
+    LOG_INF("LittleFS mount succeeded %d", err);
   }
 
   init_boot_count();
@@ -1238,19 +1286,19 @@ int main(void) {
   /* Step 1: read header struct only to get flash_address */
   int hdr_ret = file_transfer_read_meta_hdr_only(0, &kws_meta);
   if (hdr_ret != 0) {
-    printk("E: Metadata header unavailable (err %d)\n", hdr_ret);
+    LOG_ERR("Metadata header unavailable (err %d)", hdr_ret);
     return -1;
   }
   uint32_t kws_flash_addr = kws_meta.flash_address;
 
   /* Step 3: validate model name from the header (model_meta_t.model_name) */
   if (file_transfer_check_model_name(0, kws_meta.model_name) != 0) {
-    printk("E: Model name mismatch: stored='%s', expected for slot 1='kws'\n",
-           kws_meta.model_name);
+    LOG_ERR("Model name mismatch: stored='%s', expected for slot 1='kws'",
+            kws_meta.model_name);
     kws_model_present = false;
     return -1;
   }
-  printk("Model name: stored='%s', \n", kws_meta.model_name);
+  LOG_INF("Model name: stored='%s', ", kws_meta.model_name);
   /* Step 2&4: load data meta and validate flash contents */
   int dm_ret = file_transfer_load_data_meta(0, &kws_data_meta);
   if (dm_ret == 0) {
@@ -1260,12 +1308,12 @@ int main(void) {
         file_transfer_validate_flash_data(kws_flash_addr, &kws_data_meta);
     akida_config_spi(0);
     if (val_ret != 0) {
-      printk("E: Model data validation FAILED will not program Akida\n");
+      LOG_ERR("Model data validation FAILED will not program Akida");
       kws_model_present = false;
       return -1;
     }
   } else {
-    printk("E: model_data file is not present and returning\n");
+    LOG_ERR("model_data file is not present and returning");
     return -1;
   }
 
@@ -1274,14 +1322,14 @@ int main(void) {
    * overwritten sram_upload_buffer during the CRC read loop. */
   int meta_ret = file_transfer_load_meta(0, &kws_meta);
   if (meta_ret != 0) {
-    printk("E: Metadata reload failed (err %d)\n", meta_ret);
+    LOG_ERR("Metadata reload failed (err %d)", meta_ret);
     return -1;
   }
 
   /* Step 6: program Akida */
-  printk("Model data found at 0x%08X\n", kws_flash_addr);
+  LOG_INF("Model data found at 0x%08X", kws_flash_addr);
   akida_toggle_clock_counter(true);
-  printk("Programming model info into AKD1500\n");
+  LOG_INF("Programming model info into AKD1500");
 
   uint32_t s_dma_cycls = akida_get_clock_counter();
   uint64_t start_time = time_ms();
@@ -1292,12 +1340,15 @@ int main(void) {
   uint32_t prog_time = (uint32_t)(time_ms() - start_time);
   uint32_t delta_cycle = akida_get_clock_counter() - s_dma_cycls;
   uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
-  printk("\nModel program: %u dma cycles, %u us dma, %u ms cpu\n", delta_cycle,
-         dma_time, prog_time);
+  LOG_INF("Model program: %u dma cycles, %u us dma, %u ms cpu", delta_cycle,
+          dma_time, prog_time);
 
   akida_batch_size(1, true);
   kws_model_present = true;
-  update_model_params(kws_meta);
+  if (update_model_params(kws_meta) != SUCCESS) {
+    kws_model_present = false;
+    return -1;
+  }
 
   if (check_model_compatibility(is_el_model, kws_meta) != SUCCESS) {
     return -1;
@@ -1306,8 +1357,8 @@ int main(void) {
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
 
-  printk("data to check : model_size %d, class %d \n",
-         kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
+  LOG_INF("data to check : model_size %d, class %d ",
+          kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
   start_imu_proc();
 #endif
@@ -1316,15 +1367,15 @@ int main(void) {
   initialize_spi_camera_interface();
 #endif
   // ... inside a function like main() or a separate initialization function
-  printk("Current CPU frequency: %u MHz\n", SystemCoreClock / 1000000);
+  LOG_INF("Current CPU frequency: %u MHz", SystemCoreClock / 1000000);
   // You can also inspect the NRF_CLOCK_S->HFCLKCTRL register value
-  printk("NRF_CLOCK_S->HFCLKCTRL: %d\n", NRF_CLOCK_S->HFCLKCTRL);
+  LOG_INF("NRF_CLOCK_S->HFCLKCTRL: %d", NRF_CLOCK_S->HFCLKCTRL);
 
   return 0;
 }
 
 void cli_worker_proc_thread(void *a, void *b, void *c) {
-  printk("CLI Worker: \n\r");
+  LOG_INF("CLI Worker: ");
 
   while (1) {
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
@@ -1354,10 +1405,10 @@ extern "C" void reset_stale_inference_data(void) {
   if (cur_kws_edge_state != STATE_LEARNING) {
     reset_kws_spectrogram();
   }
-  memset(smoothed_scores, 0, sizeof(smoothed_scores));
-  memset(chiming_counters, 0, sizeof(chiming_counters));
+  memset(smoothed_scores, 0, g_num_classes * sizeof(float));
+  memset(chiming_counters, 0, g_num_classes * sizeof(int));
   if (verbose_on) {
-    printk("reset: clearing stale inference data\n\r");
+    LOG_INF("reset: clearing stale inference data");
   }
   return;
 }
@@ -1383,9 +1434,7 @@ static void reset_kws_spectrogram(void) {
 
 static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
   // Step 1: Per-class max pooling from dequantized output
-  int num_cls_capped =
-      (g_num_classes < MAX_KWS_CLASSES) ? g_num_classes : MAX_KWS_CLASSES;
-  float softmax_scores[MAX_KWS_CLASSES];
+  int num_cls_capped = (int)g_num_classes;
   compute_per_class_max(akida_output_dq, num_cls_capped,
                         (int)g_num_neurons_per_class, softmax_scores);
 
@@ -1411,9 +1460,11 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
   int triggered_class = -1;
   float triggered_score = 0.0f;
   for (int c = 0; c < num_cls_capped; c++) {
-    if (c == KWS_SILENCE_CLASS || c == KWS_UNKNOWN_CLASS) {
+    if (c == g_silence_class || c == g_unknown_class) {
       continue;
     }
+    /* Uniform detection threshold for all classes (base and edge-learned),
+     * runtime-tunable via `app score`. */
     if (smoothed_scores[c] >= score_threshold) {
       chiming_counters[c]++;
     } else {
@@ -1433,25 +1484,25 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
             "chiming=%d/%d",
             found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?",
             softmax_scores[found], smoothed_scores[found],
-            (found < MAX_KWS_CLASSES) ? chiming_counters[found] : 0,
+            (found < num_cls_capped) ? chiming_counters[found] : 0,
             chiming_threshold);
   }
 
   // Step 5: Trigger if chiming threshold reached
   if (triggered_class >= 0) {
     if (verbose_on) {
-      printk("trigger: keyword=%s chiming=%d/%d\n\r",
-             (triggered_class < kws_new_tags_count)
-                 ? kws_new_tags[triggered_class]
-                 : "?",
-             chiming_counters[triggered_class], chiming_threshold);
+      LOG_INF("trigger: keyword=%s chiming=%d/%d",
+              (triggered_class < kws_new_tags_count)
+                  ? kws_new_tags[triggered_class]
+                  : "?",
+              chiming_counters[triggered_class], chiming_threshold);
     }
     current_class = triggered_class;
     float confidence = smoothed_scores[triggered_class];
 
-    printk("\nKeyword Detected: %s\n\r", (triggered_class < kws_new_tags_count)
-                                             ? kws_new_tags[triggered_class]
-                                             : "?");
+    LOG_INF("Keyword Detected: %s", (triggered_class < kws_new_tags_count)
+                                        ? kws_new_tags[triggered_class]
+                                        : "?");
     if (metrics_on) {
       LOG_INF("  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
               "dma=%uus",
@@ -1490,11 +1541,12 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       uint32_t delta_cycle = akida_get_clock_counter() - s_dma_cycls;
       uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
       if (verbose_on) {
-        printk("inference: done (cpu=%ums dma=%uus)\n\r", inf_time, dma_time);
+        LOG_INF("inference: done (cpu=%ums dma=%uus)", inf_time, dma_time);
       }
       kws_post_processing(dma_time, inf_time);
     } else {
-      printk("akida_predict failed\n");
+      LOG_ERR("akida_predict failed");
+      reset_stale_inference_data();
     }
   } else {
     uint64_t start_time = time_ms();
@@ -1504,7 +1556,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       ret = akida_enqueue(input, input_shape, NULL);
       uint32_t enq_time = (uint32_t)(time_ms() - inference_start_ts);
       if (verbose_on) {
-        printk("enqueue: done (cpu=%ums)\n\r", enq_time);
+        LOG_INF("enqueue: done (cpu=%ums)", enq_time);
       }
       {
         // uint32_t power_tmp;
@@ -1513,8 +1565,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       }
       // Check timeout
       if ((time_ms() - start_time) > ENQUEUE_TIMEOUT_MS) {
-        printk("ERROR: akida_enqueue timeout after %d ms\n",
-               ENQUEUE_TIMEOUT_MS);
+        LOG_ERR("akida_enqueue timeout after %d ms", ENQUEUE_TIMEOUT_MS);
         ret = EFAILURE;
         learn_utterance_complete(); // graceful abort
         break;
@@ -1528,10 +1579,10 @@ static void inference_on_user_input(int input_type) {
   switch (input_type) {
   case USER_INPUT_LP(0):
     switch_mode(STATE_LEARN_SELECT);
-    printk("inference -> learn_select");
+    LOG_INF("inference -> learn_select");
     break;
   default:
-    printk(" wrong input");
+    LOG_INF(" wrong input");
     break;
   }
 }
@@ -1548,7 +1599,7 @@ static void save_weights_to_flash() {
       crc32_ieee((uint8_t *)saved_learn_weights_ptr + 4,
                  (saved_learn_weights_ptr->total_saved_learn_weights_size - 4));
   if (verbose_on) {
-    printk(" the computed CRC = %x", saved_learn_weights_ptr->crc);
+    LOG_INF(" the computed CRC = %x", saved_learn_weights_ptr->crc);
   }
   /* save the learned weights into flash */
 
@@ -1561,16 +1612,16 @@ static void save_weights_to_flash() {
              saved_learn_weights_ptr->total_saved_learn_weights_size);
     fs_close(&file);
 
-    printk("%d learned weight bytes are programmed to flash at "
-           "LEARN_WEIGHTS_FILE_NAME",
-           saved_learn_weights_ptr->total_saved_learn_weights_size);
+    LOG_INF("%d learned weight bytes are programmed to flash at "
+            "LEARN_WEIGHTS_FILE_NAME",
+            saved_learn_weights_ptr->total_saved_learn_weights_size);
   } else {
-    printk("save_weights_to_flash: fail open failed \n");
+    LOG_ERR("save_weights_to_flash: fail open failed ");
   }
   uint32_t flash_ts = (uint32_t)(k_cycle_get_32() - cur_ts);
   uint64_t duration_us = k_cyc_to_us_floor64(flash_ts);
   if (verbose_on) {
-    printk("Duration = %" PRIu64 " us\n", duration_us);
+    LOG_INF("Duration = %" PRIu64 " us", duration_us);
   }
 }
 
@@ -1607,20 +1658,20 @@ static void reset_learned_weights(uint8_t *lbl_wts) {
   }
   /* reset weights in model also */
   update_weights_to_mesh();
-  printk("learn weights content in Flash have been reset");
+  LOG_INF("learn weights content in Flash have been reset");
 }
 
 static void learn_select_on_user_input(int input_type) {
-  printk("learn_select_on_user_input\n");
+  LOG_INF("learn_select_on_user_input");
   switch (input_type) {
   case USER_INPUT_LP(0):
     /*  change the state to inference */
     switch_mode(STATE_INFERENCE);
-    printk("learn_select -> inference");
+    LOG_INF("learn_select -> inference");
     /* save the weights to flash only when labels are learnt and state chages to
      * STATE_INFERENCE */
     if (saved_learn_weights_ptr->learn_weights_data.label_learnt_val) {
-      printk("Weights saved from MEM->FLASH");
+      LOG_INF("Weights saved from MEM->FLASH");
       save_weights_to_flash();
     }
     break;
@@ -1634,13 +1685,13 @@ static void learn_select_on_user_input(int input_type) {
     if (cur_kws_edge_novel_class > KWS_EDGE_MAX_NOVEL_CLASS_ID) {
       cur_kws_edge_novel_class = KWS_EDGE_NOVEL_CLASS_BASE_ID;
     }
-    printk("class ID selected is %d\n", cur_kws_edge_novel_class);
+    LOG_INF("class ID selected is %d", cur_kws_edge_novel_class);
     break;
   case USER_INPUT_LP(1):
     reset_learned_weights(base_labels_wts_ptr);
     break;
   default:
-    printk("input_type default\n");
+    LOG_INF("input_type default");
     break;
   }
 }
@@ -1718,12 +1769,12 @@ generate_augmented_input(float captured[][SPECTROGRAM_RES], int keyword_len,
       compress_pos = 1 + (int)(learn_rand_float() * (keyword_len - 2));
     break;
   case 6: /* Frequency masking (1 random MFCC bin) */
-    freq_mask_bin = (int)(learn_rand_float() * SPECTROGRAM_RES);
+    freq_mask_bin = (int)(learn_rand_float() * (SPECTROGRAM_RES - 1));
     break;
   case 7: /* Heavy combined: bg noise + gain + freq mask */
     bg_noise_scale = 0.02f + learn_rand_float() * 0.02f; /* 2-4% */
     gain = 0.85f + learn_rand_float() * 0.30f;           /* 0.85 - 1.15 */
-    freq_mask_bin = (int)(learn_rand_float() * SPECTROGRAM_RES);
+    freq_mask_bin = (int)(learn_rand_float() * (SPECTROGRAM_RES - 1));
     break;
   }
 
@@ -1799,8 +1850,8 @@ static void akd_learn_fetch_handler(struct k_work *work) {
 
   /* Retrieve learning result for the completed augmentation */
   if (-EFAILURE == akida_fetch((uint8_t *)learn_aug_buf, akd_op_size, false)) {
-    printk("learn: fetch EFAILURE for aug %d — retrying\n",
-           learn_state.current_aug_idx);
+    LOG_ERR("learn: fetch EFAILURE for aug %d — retrying",
+            learn_state.current_aug_idx);
     return;
   }
 
@@ -1808,7 +1859,7 @@ static void akd_learn_fetch_handler(struct k_work *work) {
   int idx = ++learn_state.current_aug_idx;
 
   if ((idx % 10 == 0) || (idx == learn_state.num_augs)) {
-    printk("learn: fit %d/%d done\n\r", idx, learn_state.num_augs);
+    LOG_INF("learn: fit %d/%d done", idx, learn_state.num_augs);
   }
 
   if (idx < learn_state.num_augs) {
@@ -1821,7 +1872,7 @@ static void akd_learn_fetch_handler(struct k_work *work) {
     do {
       ret = akida_enqueue((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
       if ((time_ms() - t0) > ENQUEUE_TIMEOUT_MS) {
-        printk("ERROR: learn enqueue timeout at aug %d\n", idx);
+        LOG_ERR("learn enqueue timeout at aug %d", idx);
         learn_utterance_complete(); /* graceful abort */
         return;
       }
@@ -1843,8 +1894,8 @@ static void akd_learn_fetch_handler(struct k_work *work) {
  *        (long-press button 0) to leave learn-select and resume inference.
  */
 static void complete_structured_learning(void) {
-  printk("\nlearn: COMPLETE - %d utterances, %d total fit() calls\n\r",
-         LEARN_NUM_UTTERANCES, learn_state.total_fit_calls);
+  LOG_INF("learn: COMPLETE - %d utterances, %d total fit() calls",
+          LEARN_NUM_UTTERANCES, learn_state.total_fit_calls);
 
   akida_learn_mode(true);
   if (SUCCESS ==
@@ -1853,15 +1904,15 @@ static void complete_structured_learning(void) {
           saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
     saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
         1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
-    printk("learn: weights saved MESH->MEM\n\r");
+    LOG_INF("learn: weights saved MESH->MEM");
 
     save_weights_to_flash();
-    printk("learn: weights saved MEM->FLASH\n\r");
+    LOG_INF("learn: weights saved MEM->FLASH");
 
     learning_completed();
   } else {
-    printk("learn: akida_save_learn_weights failed for class %d\n\r",
-           cur_kws_edge_novel_class);
+    LOG_ERR("learn: akida_save_learn_weights failed for class %d",
+            cur_kws_edge_novel_class);
   }
   akida_learn_mode(false);
 
@@ -1886,8 +1937,8 @@ static void learn_utterance_complete(void) {
     learn_state.waiting_since_ts = time_ms();
     learn_state.capture_write_idx = 0;
     learn_state.speech_detected = false;
-    printk("\nlearn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
-           LEARN_NUM_UTTERANCES);
+    LOG_INF("learn: say keyword %d/%d", learn_state.current_utterance + 1,
+            LEARN_NUM_UTTERANCES);
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
 #ifdef CONFIG_SPARK_BOARD
     led_set_state(LED_STATE_LEARN_SPEAK_NOW);
@@ -1965,17 +2016,16 @@ static void learn_process_handler(struct k_work *work) {
   int32_t label = cur_kws_edge_novel_class;
 
   int keyword_len = trim_captured_keyword(learn_state.captured_mfcc, raw_len);
-  printk("learn: trimmed to %d frames (was %d)\n\r", keyword_len, raw_len);
+  LOG_INF("learn: trimmed to %d frames (was %d)", keyword_len, raw_len);
 
   if (keyword_len < LEARN_MIN_KEYWORD_FRAMES) {
-    printk("learn: utterance too short (%d frames), try again\n\r",
-           keyword_len);
+    LOG_WRN("learn: utterance too short (%d frames), try again", keyword_len);
     learn_state.sub_state = LEARN_SUB_WAITING_FOR_SPEECH;
     learn_state.waiting_since_ts = time_ms();
     learn_state.capture_write_idx = 0;
     learn_state.speech_detected = false;
-    printk("learn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
-           LEARN_NUM_UTTERANCES);
+    LOG_INF("learn: say keyword %d/%d", learn_state.current_utterance + 1,
+            LEARN_NUM_UTTERANCES);
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
 #ifdef CONFIG_SPARK_BOARD
     led_set_state(LED_STATE_LEARN_SPEAK_NOW);
@@ -1988,9 +2038,9 @@ static void learn_process_handler(struct k_work *work) {
   learn_state.num_augs = learn_state.augmentations_per_utterance;
   learn_state.current_aug_idx = 0;
 
-  printk("learn: processing %d augmented inputs for utterance %d/%d\n\r",
-         learn_state.num_augs, learn_state.current_utterance + 1,
-         LEARN_NUM_UTTERANCES);
+  LOG_INF("learn: processing %d augmented inputs for utterance %d/%d",
+          learn_state.num_augs, learn_state.current_utterance + 1,
+          LEARN_NUM_UTTERANCES);
 
   if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
     /* Async path: generate aug[0], enqueue, arm first fake ISR */
@@ -2001,7 +2051,7 @@ static void learn_process_handler(struct k_work *work) {
     do {
       ret = akida_enqueue((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
       if ((time_ms() - t0) > ENQUEUE_TIMEOUT_MS) {
-        printk("ERROR: learn initial enqueue timeout\n");
+        LOG_ERR("learn initial enqueue timeout");
         return;
       }
     } while (ret);
@@ -2014,7 +2064,7 @@ static void learn_process_handler(struct k_work *work) {
       akida_fit((uint8_t *)learn_aug_buf, (uint32_t *)dims, &label);
       learn_state.total_fit_calls++;
       if ((i + 1) % 10 == 0 || i == learn_state.num_augs - 1) {
-        printk("learn: fit %d/%d done\n\r", i + 1, learn_state.num_augs);
+        LOG_INF("learn: fit %d/%d done", i + 1, learn_state.num_augs);
       }
     }
     learn_utterance_complete();
@@ -2039,12 +2089,12 @@ static void learn_speech_end_handler(struct k_work *work) {
   } else if (learn_state.sub_state == LEARN_SUB_WAITING_FOR_SPEECH) {
     uint64_t elapsed = time_ms() - learn_state.waiting_since_ts;
     if (elapsed >= LEARN_SILENCE_TIMEOUT_MS) {
-      printk("learn: no utterance detected (timeout %dms), try again\n\r",
-             LEARN_SILENCE_TIMEOUT_MS);
+      LOG_WRN("learn: no utterance detected (timeout %dms), try again",
+              LEARN_SILENCE_TIMEOUT_MS);
       /* Reset and re-prompt */
       learn_state.waiting_since_ts = time_ms();
-      printk("learn: say keyword %d/%d\n\r", learn_state.current_utterance + 1,
-             LEARN_NUM_UTTERANCES);
+      LOG_INF("learn: say keyword %d/%d", learn_state.current_utterance + 1,
+              LEARN_NUM_UTTERANCES);
     }
     /* Keep polling for timeout */
     k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
@@ -2091,8 +2141,8 @@ static void learning_on_spectrogram(int spectrogram_index) {
     learn_state.speech_detected = true;
     learn_state.capture_write_idx = 0;
     learn_state.last_callback_ts = time_ms();
-    printk("learn: speech detected, capturing utterance %d/%d...\n\r",
-           learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
+    LOG_INF("learn: speech detected, capturing utterance %d/%d...",
+            learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
 #ifdef CONFIG_SPARK_BOARD
     restore_default_led_state();
 #endif
@@ -2138,7 +2188,7 @@ static void learning_on_user_input(int input_type) {
   switch (input_type) {
   case USER_INPUT_LP(0):
     switch_mode(STATE_INFERENCE);
-    printk("learning->inference");
+    LOG_INF("learning->inference");
     akida_learn_mode(true);
 
     /* save the weights to flash only when labels are learnt and state changes
@@ -2150,10 +2200,10 @@ static void learning_on_user_input(int input_type) {
       saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
           1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
       save_weights_to_flash();
-      printk("Save Weights from MEM->FLASH");
+      LOG_INF("Save Weights from MEM->FLASH");
     } else {
-      printk("Sync:akida_save_learn_weights function has failed for label %d ",
-             cur_kws_edge_novel_class);
+      LOG_ERR("Sync:akida_save_learn_weights function has failed for label %d ",
+              cur_kws_edge_novel_class);
     }
 
     akida_learn_mode(false);
@@ -2167,7 +2217,7 @@ static void learning_on_user_input(int input_type) {
     cur_ts = k_cycle_get_32();
 
     switch_mode(STATE_LEARN_SELECT);
-    printk("learning-> learnselect");
+    LOG_INF("learning-> learnselect");
 
     akida_learn_mode(true);
 
@@ -2177,16 +2227,16 @@ static void learning_on_user_input(int input_type) {
             saved_learn_weights_ptr->learn_weights_data.learn_weights_size)) {
       saved_learn_weights_ptr->learn_weights_data.label_learnt_val |=
           1 << (cur_kws_edge_novel_class - KWS_EDGE_NOVEL_CLASS_BASE_ID);
-      printk("Save Weights from MESH->MEM\n\r");
+      LOG_INF("Save Weights from MESH->MEM");
     } else {
-      printk("Sync:akida_save_learn_weights function has failed for label %d ",
-             cur_kws_edge_novel_class);
+      LOG_ERR("Sync:akida_save_learn_weights function has failed for label %d ",
+              cur_kws_edge_novel_class);
     }
 
     akida_learn_mode(false);
     mesh_mem = (k_cycle_get_32() - cur_ts);
     duration_us = k_cyc_to_us_floor64(mesh_mem);
-    printk("mesh_mem = %" PRIu64 " us\n", duration_us);
+    LOG_INF("mesh_mem = %" PRIu64 " us", duration_us);
 #ifdef CONFIG_SPARK_BOARD
     restore_default_led_state();
 #endif
@@ -2200,7 +2250,7 @@ static void learning_on_user_input(int input_type) {
 /* function to run the inference */
 extern "C" int infer(int app_index_l) {
   if (app_index_l > 0) {
-    printk("Illegal model index %d\n", app_index_l);
+    LOG_ERR("Illegal model index %d", app_index_l);
     return -1;
   }
 
@@ -2209,15 +2259,15 @@ extern "C" int infer(int app_index_l) {
   model_meta_t infer_meta;
   int hdr_ret = file_transfer_read_meta_hdr_only(app_index_l, &infer_meta);
   if (hdr_ret != 0) {
-    printk("E: Metadata header unavailable (err %d)\n", hdr_ret);
+    LOG_ERR("Metadata header unavailable (err %d)", hdr_ret);
     return -1;
   }
   uint32_t use_flash_addr = infer_meta.flash_address;
 
   /* Step 3: validate model name from the header (model_meta_t.model_name) */
   if (file_transfer_check_model_name(app_index_l, infer_meta.model_name) != 0) {
-    printk("E: Model name mismatch for slot %d: '%s'\n", app_index_l,
-           infer_meta.model_name);
+    LOG_ERR("Model name mismatch for slot %d: '%s'", app_index_l,
+            infer_meta.model_name);
     return -1;
   }
 
@@ -2231,12 +2281,12 @@ extern "C" int infer(int app_index_l) {
         file_transfer_validate_flash_data(use_flash_addr, &infer_data_meta);
     akida_config_spi(0);
     if (val_ret != 0) {
-      printk("E: Flash data validation FAILED for slot %d\n", app_index_l);
+      LOG_ERR("Flash data validation FAILED for slot %d", app_index_l);
       return -1;
     }
   } else {
     /* Legacy fallback: 4-byte check only */
-    printk("E: No data meta file (err %d) \n", dm_ret);
+    LOG_ERR("No data meta file (err %d) ", dm_ret);
     return -1;
   }
 
@@ -2244,10 +2294,12 @@ extern "C" int infer(int app_index_l) {
    * file_transfer_validate_flash_data() may have overwritten it. */
   int meta_ret = file_transfer_load_meta(app_index_l, &infer_meta);
   if (meta_ret != 0) {
-    printk("Metadata reload failed (err %d)\n", meta_ret);
+    LOG_ERR("Metadata reload failed (err %d)", meta_ret);
     return -1;
   }
-  update_model_params(infer_meta);
+  if (update_model_params(infer_meta) != SUCCESS) {
+    return -1;
+  }
 
   /* Step 6: program Akida */
   akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
@@ -2290,20 +2342,19 @@ extern "C" int infer(int app_index_l) {
   e_dma_cycls = akida_get_clock_counter();
   delta_cycle = e_dma_cycls - s_dma_cycls;
   inf_time = e_tick - s_tick;
-  printk("\n\rinference time= %u dma cycles, time = %u ms\n\r", delta_cycle,
-         inf_time);
+  LOG_INF("inference time= %u dma cycles, time = %u ms", delta_cycle, inf_time);
   if (ret == SUCCESS) {
     class_id =
         get_inferred_class(akida_output, num_classes, num_neurons_per_class);
   } else {
-    printk("\n\r inference failed \n\r");
+    LOG_ERR(" inference failed ");
     return -1;
   }
   if (app_index_l == 0) { // kws
-    printk("\nClass : %d\n", class_id);
-    printk("Word : %s\n", (class_id >= 0 && class_id < kws_new_tags_count)
-                              ? kws_new_tags[class_id]
-                              : "?");
+    LOG_PRINTK("Class : %d\n", class_id);
+    LOG_PRINTK("Word : %s\n", (class_id >= 0 && class_id < kws_new_tags_count)
+                                  ? kws_new_tags[class_id]
+                                  : "?");
     kws_model_present = true;
     if (!is_kws_inference_started) {
       initiate_kws_inference(is_el_model);
@@ -2314,7 +2365,7 @@ extern "C" int infer(int app_index_l) {
     }
   }
 
-  printk("APP Inference Completed\n");
+  LOG_PRINTK("APP Inference Completed\n");
 #ifdef CONFIG_SPARK_BOARD
   if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
     akd_irq_enable();
@@ -2326,16 +2377,16 @@ extern "C" int infer(int app_index_l) {
 /* shell cli function to invoke infer function */
 static int cmd_infer(const struct shell *shell, size_t argc, char **argv) {
   if (argc != 2) {
-    printk("Usage: infer <string>");
+    LOG_INF("Usage: infer <string>");
     return -EINVAL;
   }
 
   char *string = argv[1];
   if (!strcmp(string, "kws")) {
     app_index = 0;
-    printk("inference kws requested, app index %d", app_index);
+    LOG_INF("inference kws requested, app index %d", app_index);
   } else {
-    printk("Illegal model inference request");
+    LOG_ERR("Illegal model inference request");
     return -EINVAL;
   }
 
@@ -2345,14 +2396,14 @@ static int cmd_infer(const struct shell *shell, size_t argc, char **argv) {
 /* shell cli function to set external host MCU/AKD1500 as SPI master */
 static int cmd_set(const struct shell *shell, size_t argc, char **argv) {
   if (argc != 2) {
-    printk("Usage: set <bool>");
+    LOG_INF("Usage: set <bool>");
     return -EINVAL;
   }
   size_t value = strtoul(argv[1], NULL, 0);
 
-  printk("Value = %d", value);
+  LOG_INF("Value = %d", value);
   if (value != 0 && value != 1) {
-    printk("Invalid <bool> value %d", value);
+    LOG_INF("Invalid <bool> value %d", value);
     return -EINVAL;
   }
   if (value == 1) {
@@ -2383,26 +2434,26 @@ static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
 
 /* shell cli function to invoke erase function */
 static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
-  printk("cmd exec argc %d\n", argc);
+  LOG_INF("cmd exec argc %d", argc);
   if (argc > 1) {
     if (argc > 2 && !strcmp(argv[1], "verbose")) {
       verbose_on = atoi(argv[2]);
-      printk("verbose_on = %d\n\r", verbose_on);
+      LOG_INF("verbose_on = %d", verbose_on);
     } else if (!strcmp(argv[1], "stop")) {
       kws_app_stop();
     } else if (!strcmp(argv[1], "start")) {
       kws_app_start();
     } else if (!strcmp(argv[1], "el")) {
       if (argc > 2) {
-        printk(" cur_kws_edge_state %d\n", cur_kws_edge_state);
+        LOG_INF(" cur_kws_edge_state %d", cur_kws_edge_state);
         if (is_el_model == 0) {
-          printk(" illegal request, this is not an edge learning model\n");
+          LOG_ERR(" illegal request, this is not an edge learning model");
           return 0;
         }
 
         if (cur_kws_edge_state == STATE_STOPPED) {
-          printk(
-              " cur_kws_edge_state is STATE_STOPPED user input not possible\n");
+          LOG_INF(
+              " cur_kws_edge_state is STATE_STOPPED user input not possible");
           return 0;
         }
         kws_edge_state[cur_kws_edge_state].on_user_input(atoi(argv[2]));
@@ -2410,16 +2461,16 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
     } else if (argc > 2 && !strcmp(argv[1], "rms")) {
       kws_cfg_err_t e = kws_config_set_from_string(KWS_PARAM_RMS, argv[2]);
       if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
-        printk("rms_threshold = %d\n\r", rms_threshold);
+        LOG_INF("rms_threshold = %d", rms_threshold);
       else
-        printk("rms set failed (err %d)\n\r", (int)e);
+        LOG_ERR("rms set failed (err %d)", (int)e);
     } else if (argc > 2 && !strcmp(argv[1], "debounce")) {
       kws_cfg_err_t e =
           kws_config_set_from_string(KWS_PARAM_DEBOUNCE_MS, argv[2]);
       if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
-        printk("kws_debounce_time = %u ms\n\r", kws_debounce_time);
+        LOG_INF("kws_debounce_time = %u ms", kws_debounce_time);
       else
-        printk("debounce set failed (err %d)\n\r", (int)e);
+        LOG_ERR("debounce set failed (err %d)", (int)e);
     } else if (argc > 2 && !strcmp(argv[1], "alpha")) {
       smoothing_alpha = atof(argv[2]);
       if (smoothing_alpha < 0.0f)
@@ -2430,9 +2481,9 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
     } else if (argc > 2 && !strcmp(argv[1], "chiming")) {
       kws_cfg_err_t e = kws_config_set_from_string(KWS_PARAM_CHIMING, argv[2]);
       if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
-        printk("chiming_threshold = %d\n\r", chiming_threshold);
+        LOG_INF("chiming_threshold = %d", chiming_threshold);
       else
-        printk("chiming set failed (err %d)\n\r", (int)e);
+        LOG_ERR("chiming set failed (err %d)", (int)e);
     } else if (argc > 2 && !strcmp(argv[1], "score")) {
       score_threshold = atof(argv[2]);
       if (score_threshold < 0.0f)
@@ -2444,64 +2495,64 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
       kws_cfg_err_t e =
           kws_config_set_from_string(KWS_PARAM_SPEECH_TIMEOUT, argv[2]);
       if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
-        printk("speech_active_time_ms = %d ms\n\r", speech_active_time_ms);
+        LOG_INF("speech_active_time_ms = %d ms", speech_active_time_ms);
       else
-        printk("speech set failed (err %d)\n\r", (int)e);
+        LOG_ERR("speech set failed (err %d)", (int)e);
     } else if (!strcmp(argv[1], "reset")) {
       kws_cfg_err_t e = kws_config_reset_to_defaults();
-      printk("app reset: defaults restored%s\n\r",
-             e == KWS_CFG_ERR_NVS ? " (NVS save warned)" : "");
-      printk("  rms_threshold    = %d\n\r", rms_threshold);
-      printk("  debounce_time    = %u ms\n\r", kws_debounce_time);
-      printk("  smoothing_alpha  = %.2f\n\r", smoothing_alpha);
-      printk("  score_threshold  = %.2f\n\r", score_threshold);
-      printk("  chiming_threshold= %d\n\r", chiming_threshold);
-      printk("  speech_timeout   = %d ms\n\r", speech_active_time_ms);
+      LOG_INF("app reset: defaults restored%s",
+              e == KWS_CFG_ERR_NVS ? " (NVS save warned)" : "");
+      LOG_INF("  rms_threshold    = %d", rms_threshold);
+      LOG_INF("  debounce_time    = %u ms", kws_debounce_time);
+      LOG_INF("  smoothing_alpha  = %.2f", smoothing_alpha);
+      LOG_INF("  score_threshold  = %.2f", score_threshold);
+      LOG_INF("  chiming_threshold= %d", chiming_threshold);
+      LOG_INF("  speech_timeout   = %d ms", speech_active_time_ms);
     } else if (argc > 2 && !strcmp(argv[1], "metrics")) {
       metrics_on = atoi(argv[2]);
-      printk("metrics_on = %d\n\r", metrics_on);
+      LOG_INF("metrics_on = %d", metrics_on);
     } else if (!strcmp(argv[1], "show")) {
-      printk("\n\r=== App Parameters (app <cmd> <val>) ===\n\r");
-      printk("  verbose          = %d          [app verbose <0|1|2>]\n\r",
-             verbose_on);
-      printk("  rms_threshold    = %d          [app rms <val>]\n\r",
-             rms_threshold);
-      printk("  debounce_time    = %u ms       [app debounce <ms>]\n\r",
-             kws_debounce_time);
+      LOG_INF("=== App Parameters (app <cmd> <val>) ===");
+      LOG_INF("  verbose          = %d          [app verbose <0|1|2>]",
+              verbose_on);
+      LOG_INF("  rms_threshold    = %d          [app rms <val>]",
+              rms_threshold);
+      LOG_INF("  debounce_time    = %u ms       [app debounce <ms>]",
+              kws_debounce_time);
       LOG_INF("  smoothing_alpha  = %.2f        [app alpha <0.0-1.0>]",
               smoothing_alpha);
       LOG_INF("  score_threshold  = %.2f        [app score <0.0-1.0>]",
               score_threshold);
-      printk("  chiming_threshold= %d          [app chiming <n>]\n\r",
-             chiming_threshold);
-      printk("  speech_timeout   = %d ms       [app speech <ms>]\n\r",
-             speech_active_time_ms);
-      printk("  metrics          = %d          [app metrics <0|1>]\n\r",
-             metrics_on);
-      printk("=========================================\n\r");
+      LOG_INF("  chiming_threshold= %d          [app chiming <n>]",
+              chiming_threshold);
+      LOG_INF("  speech_timeout   = %d ms       [app speech <ms>]",
+              speech_active_time_ms);
+      LOG_INF("  metrics          = %d          [app metrics <0|1>]",
+              metrics_on);
+      LOG_INF("=========================================");
     } else {
-      printk("App Commands:\n\r");
-      printk("  app verbose <0|1|2>  (0=off, 1=pipeline, 2=+idle rms)\n\r");
-      printk("  app rms <val>\n\r");
-      printk("  app debounce <ms>\n\r");
-      printk("  app alpha <0.0-1.0>\n\r");
-      printk("  app score <0.0-1.0>\n\r");
-      printk("  app chiming <n>\n\r");
-      printk("  app speech <ms>\n\r");
-      printk("  app reset                (restore all KWS params to "
-             "defaults)\n\r");
-      printk("  app metrics <0|1>\n\r");
-      printk("  app show\n\r");
-      printk("  app start                (resume KWS pipeline)\n\r");
-      printk("  app stop                 (halt KWS pipeline)\n\r");
-      printk("  app el <n>\n\r");
+      LOG_INF("App Commands:");
+      LOG_INF("  app verbose <0|1|2>  (0=off, 1=pipeline, 2=+idle rms)");
+      LOG_INF("  app rms <val>");
+      LOG_INF("  app debounce <ms>");
+      LOG_INF("  app alpha <0.0-1.0>");
+      LOG_INF("  app score <0.0-1.0>");
+      LOG_INF("  app chiming <n>");
+      LOG_INF("  app speech <ms>");
+      LOG_INF(
+          "  app reset                (restore all KWS params to defaults)");
+      LOG_INF("  app metrics <0|1>");
+      LOG_INF("  app show");
+      LOG_INF("  app start                (resume KWS pipeline)");
+      LOG_INF("  app stop                 (halt KWS pipeline)");
+      LOG_INF("  app el <n>");
     }
   }
 
   return 0;
 }
 void edge_learning_cmd_process(uint8_t value) {
-  printk("cur_kws_edge_state %d\n", cur_kws_edge_state);
+  LOG_INF("cur_kws_edge_state %d", cur_kws_edge_state);
 
   kws_edge_state[cur_kws_edge_state].on_user_input(value);
 }

@@ -7,10 +7,12 @@ on:
     branches: [ main ]
 
 env:
+  # Model parameters live in a per-(app,model) config YAML. It is git-ignored, so
+  # CI writes it from the MODEL_CONFIG_DEMO_APPS_KWS repo secret (full YAML) into
+  # the path below before fetch. See source/README.md for the schema.
+  MODEL_CONFIG: .env/demo_apps/kws.yaml
+  MODEL_DIR: source/external/model_files/kws
   MODEL_NAME: kws
-  MODEL_FLASH_ADDR: 0x101000
-  MODEL_URL: https://drive.usercontent.google.com/download?id=19iPANlklDn_OAmPVgurPpCCfZnxyNkaf&export=download&authuser=0
-  MAP_MODE: 1
 
 concurrency:
   group: hil-hardware-test
@@ -28,15 +30,27 @@ jobs:
         run: |
           ./scripts/run.sh -d --key
 
-      - name: Transfer Model
+      # The model config is git-ignored; materialise it from the repo secret.
+      # checkout's git clean wipes .env/ each run, so this must run after checkout
+      # and before fetch.
+      - name: Write Model Config
+        env:
+          MODEL_CONFIG_YAML: ${{ secrets.MODEL_CONFIG_DEMO_APPS_KWS }}
+        run: |
+          if [ -z "${MODEL_CONFIG_YAML}" ]; then
+            echo "Error: secret MODEL_CONFIG_DEMO_APPS_KWS is empty/unset"
+            exit 1
+          fi
+          mkdir -p "$(dirname "${MODEL_CONFIG}")"
+          printf '%s\n' "${MODEL_CONFIG_YAML}" > "${MODEL_CONFIG}"
+
+      - name: Fetch + Generate Model
         timeout-minutes: 4
         run: |
           ./scripts/run.sh -d \
-          --model_transfer "${MODEL_URL}" \
-          --model_name "${MODEL_NAME}" \
-          --model_flash_addr "${MODEL_FLASH_ADDR}" \
-          --map_mode "${MAP_MODE}"
-        
+          --fetch_model "${MODEL_CONFIG}" \
+          --generate_info "${MODEL_CONFIG}"
+
       - name: Build and Flash
         timeout-minutes: 4
         run: |
@@ -50,10 +64,10 @@ jobs:
       - name: Upload Model
         timeout-minutes: 4
         run: |
-          /home/demo/.conda/envs/spark/bin/python source/utils/send_model_via_ble.py \
-          --info source/external/model_files/kws/kws_program_info.bin \
-          --bin source/external/model_files/kws/kws_program_data.bin \
-          --yaml source/external/model_files/kws/info.yaml
+          "${HOME}/.conda/envs/spark/bin/python" source/utils/send_model_via_ble.py \
+          --info "${MODEL_DIR}/${MODEL_NAME}_program_info.bin" \
+          --bin "${MODEL_DIR}/${MODEL_NAME}_program_data.bin" \
+          --yaml "${MODEL_DIR}/info.yaml"
 
       - name: Run inference CLI Test
         timeout-minutes: 4

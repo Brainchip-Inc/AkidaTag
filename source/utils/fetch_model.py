@@ -6,10 +6,11 @@ import sys
 import urllib.request
 
 import akida
-import yaml
 from cnn2snn import set_akida_version, AkidaVersion
 from akida.generate.array_to_cpp import array_to_cpp
 from dotenv import load_dotenv
+
+from model_config import load_model_config, require_keys, resolve_args
 
 
 def _shapes_json_path(output_dir, prefix):
@@ -17,7 +18,8 @@ def _shapes_json_path(output_dir, prefix):
 
 
 def _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el=False):
-    """Persist shapes alongside the bin files for reuse on subsequent runs."""
+    """Persist shapes alongside the bin files so generate_info.py can build info.yaml
+    (and so re-runs can skip regeneration) without re-loading the Akida model."""
     path = _shapes_json_path(output_dir, prefix)
     with open(path, "w") as f:
         json.dump({
@@ -28,73 +30,17 @@ def _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el=False
     print(f"Shapes saved to {path}")
 
 
-def _load_shapes_json(output_dir, prefix):
-    """Return (input_shape, output_shape, is_el) from the sidecar JSON, or (None, None, False)."""
-    path = _shapes_json_path(output_dir, prefix)
-    if not os.path.exists(path):
-        return None, None, False
-    try:
-        with open(path) as f:
-            d = json.load(f)
-        input_shape  = tuple(d["input_shape"])
-        output_shape = tuple(d["output_shape"])
-        is_el = bool(d.get("is_el", False))
-        print(f"Loaded shapes from {path}: input={input_shape} output={output_shape} is_el={is_el}")
-        return input_shape, output_shape, is_el
-    except Exception as e:
-        print(f"Warning: could not load shapes from {path}: {e}")
-        return None, None, False
-
-
-def _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                     flash_address, is_el, neurons_per_class, num_el_classes):
-    """Write info.yaml metadata alongside the bin files."""
-    npc = int(neurons_per_class) if neurons_per_class else 1
-    num_classes = 0
-    if output_shape is not None:
-        if is_el and npc > 0:
-            num_classes = int(output_shape[-1] / npc)
-        else:
-            num_classes = int(output_shape[-1])
-
-    data = {
-        "app":   prefix,
-        "flash_address": str(flash_address),
-        "input_shape":  list(input_shape)  if input_shape  else [],
-        "output_shape": list(output_shape) if output_shape else [],
-        "edge_learning": {
-            "enabled":      is_el,
-            "num_classes":  num_classes,
-            "num_el_classes": int(num_el_classes) if is_el else 0,
-            "num_neurons":  npc,
-        },
-    }
-
-    yaml_path = os.path.join(output_dir, "info.yaml")
-    with open(yaml_path, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    print(f"Info YAML written to {yaml_path}")
-    return yaml_path
-
-
 def fetch_and_convert(args):
     output_dir = args.output_dir
     prefix = args.prefix
     os.makedirs(output_dir, exist_ok=True)
 
-    flash_address = getattr(args, "flash_address", "0x1000")
-
-    # Skip regeneration when output files already exist; restore shapes from JSON
+    # Skip regeneration when output files already exist (conversion is expensive).
     info_file = os.path.join(output_dir, f"{prefix}_program_info.cpp")
     data_file = os.path.join(output_dir, f"{prefix}_program_data.cpp")
     if os.path.exists(info_file) and os.path.exists(data_file):
         print(f"Files exist for prefix '{prefix}'. Skipping generation.")
-        input_shape, output_shape, is_el_cached = _load_shapes_json(output_dir, prefix)
-        _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                         flash_address, is_el_cached,
-                         args.neurons_per_class, args.num_el_classes)
-        _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
-        return input_shape, output_shape
+        return
 
     # Resolve model source: explicit path/URL takes priority over models.conf
     model_path = getattr(args, "model_path", None)
@@ -154,14 +100,11 @@ def fetch_and_convert(args):
         # Extract program parts
         program_parts = model_akida.sequences[0].program_parts
         program = model_akida.sequences[0].program
-        
-       
+
         # Detect edge learning from model
         is_el = bool(model_akida.learning)
         if is_el:
             print("Edge learning model detected")
-        
-
 
         # Generate C++ files
         array_to_cpp(output_dir + "/", program, f"{prefix}_model")
@@ -209,61 +152,35 @@ def fetch_and_convert(args):
 
         print(f"Generated program_info and program_data files for prefix '{prefix}'")
 
-    # Persist shapes so re-runs can skip regeneration but still supply shapes
+    # Persist shapes so generate_info.py can build info.yaml without the Akida SDK
     _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el)
-    _write_info_yaml(output_dir, prefix, input_shape, output_shape,
-                     flash_address, is_el,
-                     args.neurons_per_class, args.num_el_classes)
-    _write_vars_file(args, output_dir, prefix, input_shape, output_shape)
-    return input_shape, output_shape
 
 
-def _write_vars_file(args, output_dir, prefix, input_shape, output_shape):
-    """Write a bash-sourceable vars file so the caller can read shapes and bin paths."""
-    vars_file = getattr(args, "vars_file", None)
-    if not vars_file:
-        return
-    info_bin  = os.path.abspath(os.path.join(output_dir, f"{prefix}_program_info.bin"))
-    data_bin  = os.path.abspath(os.path.join(output_dir, f"{prefix}_program_data.bin"))
-    yaml_file = os.path.abspath(os.path.join(output_dir, "info.yaml"))
-    input_csv  = ",".join(str(d) for d in input_shape)  if input_shape  else ""
-    output_csv = ",".join(str(d) for d in output_shape) if output_shape else ""
-    with open(vars_file, "w") as f:
-        f.write(f'INFO_BIN="{info_bin}"\n')
-        f.write(f'DATA_BIN="{data_bin}"\n')
-        f.write(f'YAML_FILE="{yaml_file}"\n')
-        f.write(f'INPUT_SHAPE="{input_csv}"\n')
-        f.write(f'OUTPUT_SHAPE="{output_csv}"\n')
-    print(f"Vars written to {vars_file}")
+# Maps the args namespace fetch_and_convert() reads to config keys + defaults.
+# model and prefix both come from the model_name; model_path comes from model_url
+# (optional — falls back to .env/models.conf when absent).
+_CONFIG_SCHEMA = {
+    "model":             ("model_name",        None),
+    "prefix":            ("model_name",        None),
+    "output_dir":        ("output_dir",        None),
+    "model_path":        ("model_url",         None),
+    "map_mode":          ("map_mode",          1),
+    "neurons_per_class": ("neurons_per_class", 1),
+    "akida_version":     ("akida_version",     "v1"),
+}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Fetch an Akida .fbz model and generate program_info/program_data files"
+        description="Fetch an Akida .fbz model and convert it into program_info/"
+                    "program_data bin + C++ files (info.yaml is generated separately "
+                    "by generate_info.py). All parameters come from --config; see "
+                    ".env/<app>/<model>.yaml (schema in source/README.md)."
     )
-    parser.add_argument("--model", required=True,
-                        help="Model name (used to look up MODEL_<NAME>_URL in .env/models.conf "
-                             "when --model_path is not provided)")
-    parser.add_argument("--prefix", required=True,
-                        help="Output file prefix (e.g. kws, kws_el, mnist)")
-    parser.add_argument("--output_dir", required=True,
-                        help="Directory for generated files")
-    parser.add_argument("--model_path", default=None,
-                        help="Direct URL or local path to .fbz file "
-                             "(overrides models.conf lookup)")
-    parser.add_argument("--vars_file", default=None,
-                        help="Path to write a bash-sourceable vars file with "
-                             "INFO_BIN, DATA_BIN, YAML_FILE, INPUT_SHAPE, OUTPUT_SHAPE")
-    parser.add_argument("--neurons_per_class", type=int, default=1,
-                        help="Neurons per class (triggers KWS macro injection)")
-    parser.add_argument("--akida_version", default="v1", choices=["v1", "v2"],
-                        help="Akida version (default: v1)")
-    parser.add_argument("--flash_address", default="0x1000",
-                        help="Target flash address embedded in info.yaml (default: 0x1000)")
-    parser.add_argument("--map_mode", type=int, default=1,
-                        help="Akida MapMode value passed to model.map() (default: 1)")
-    parser.add_argument("--num_el_classes", type=int, default=0,
-                        help="Number of edge learning classes")
-
+    parser.add_argument("--config", required=True,
+                        help="Path to the model config YAML (.env/<app>/<model>.yaml)")
     args = parser.parse_args()
-    fetch_and_convert(args)
+
+    cfg = load_model_config(args.config)
+    require_keys(cfg, args.config, ["model_name", "output_dir"])
+    fetch_and_convert(resolve_args(cfg, _CONFIG_SCHEMA))

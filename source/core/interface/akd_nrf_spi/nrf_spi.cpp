@@ -12,6 +12,17 @@
 
 LOG_MODULE_REGISTER(NRF_SPI, LOG_LEVEL_DBG);
 
+namespace akida {
+ZephyrSpiDriver::ZephyrSpiDriver() {
+  int ret = init_spi();
+  if (ret != 0) {
+    LOG_ERR("Failed to initialize SPI in constructor! Error: %d", ret);
+  } else {
+    LOG_INF("SPI initialized in ZephyrSpiDriver constructor.");
+  }
+}
+} // namespace akida
+
 /* SPI configuration for the camera */
 
 static struct spi_config spi_cfg_akida = {

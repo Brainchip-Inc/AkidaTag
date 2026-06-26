@@ -7,7 +7,6 @@
 #include <infra/hardware_driver.h>
 #include <vector>
 #include <zephyr/device.h>
-#include <zephyr/sys/printk.h>
 
 namespace akida {
 
@@ -15,14 +14,7 @@ class ZephyrSpiDriver : public AbstractSpiDriver {
 public:
   const struct device *spi_dev;
 
-  ZephyrSpiDriver() {
-    int ret = init_spi();
-    if (ret != 0) {
-      printk("Failed to initialize SPI in constructor! Error: %d\n", ret);
-    } else {
-      printk("SPI initialized in ZephyrSpiDriver constructor.\n");
-    }
-  }
+  ZephyrSpiDriver();
 
   // Manually initialize SPI
   int init_spi();

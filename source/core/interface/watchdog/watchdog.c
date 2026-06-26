@@ -1,5 +1,7 @@
 #include "watchdog_h/watchdog.h"
+#include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
+LOG_MODULE_REGISTER(watchdog, LOG_LEVEL_DBG);
 
 /* Thread health status array */
 atomic_t thread_health[NUM_THREADS];
@@ -38,22 +40,22 @@ void watchdog_init(const struct device **wdt_dev, int *channel_id) {
   *wdt_dev = DEVICE_DT_GET(DT_ALIAS(watchdog));
 
   if (!device_is_ready(*wdt_dev)) {
-    printk("WDT not ready\n");
+    LOG_ERR("WDT not ready");
     return;
   }
 
   *channel_id = wdt_install_timeout(*wdt_dev, &wdt_config);
   if (*channel_id < 0) {
-    printk("WDT install failed\n");
+    LOG_ERR("WDT install failed");
     return;
   }
 
   // Pause WDT while CPU sleeps and during debug halt
   if (wdt_setup(*wdt_dev, WDT_OPT_PAUSE_HALTED_BY_DBG) < 0) {
-    printk("WDT setup failed\n");
+    LOG_ERR("WDT setup failed");
     return;
   }
-  printk("Watchdog started (%d ms timeout)\n", WDT_TIMEOUT_MS);
+  LOG_INF("Watchdog started (%d ms timeout)", WDT_TIMEOUT_MS);
 }
 
 /**
@@ -89,7 +91,7 @@ bool all_threads_healthy(void) {
     at_least_one = true;
 
     if (atomic_get(&thread_health[i]) == 0) {
-      printk("Thread %d NOT healthy\n", i);
+      LOG_WRN("Thread %d NOT healthy", i);
       return false;
     }
   }
