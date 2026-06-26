@@ -4,10 +4,12 @@ with BLE devices asynchronously.
 """
 import asyncio
 import argparse
+import signal
 import time
 import struct
 from pathlib import Path
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakDBusError
 import os
 import sys
 import yaml
@@ -492,6 +494,101 @@ def _parse_shape_arg(value):
     return tuple(int(x) for x in value.split(",") if x.strip())
 
 
+async def _find_adapter_path(bus):
+    """Return the first BlueZ adapter object path (e.g. /org/bluez/hci0 or hci1).
+
+    The adapter is auto-detected via the ObjectManager rather than hardcoded,
+    because the runner's adapter is not always hci0.
+    """
+    intro = await bus.introspect("org.bluez", "/")
+    obj = bus.get_proxy_object("org.bluez", "/", intro)
+    om = obj.get_interface("org.freedesktop.DBus.ObjectManager")
+    objects = await om.call_get_managed_objects()
+    for path, ifaces in objects.items():
+        if "org.bluez.Adapter1" in ifaces:
+            return path
+    return None
+
+
+async def reset_bluetooth_adapter(power_cycle=False):
+    """Best-effort: leave the BlueZ adapter in a clean, usable state.
+
+    A scan that is never stopped (e.g. when CI kills this process on its
+    timeout) leaves the adapter mid-discovery, so the *next* run's
+    BleakScanner.discover() fails with org.bluez.Error.InProgress. This helper
+    stops any active discovery, and optionally power-cycles the adapter (the
+    lightweight equivalent of `systemctl restart bluetooth`, no sudo needed for
+    a user in the `bluetooth` group) to clear a discovery owned by a now-dead
+    client. It never raises — cleanup must not mask the real transfer result.
+    """
+    try:
+        from dbus_fast import BusType, Variant
+        from dbus_fast.aio import MessageBus
+    except Exception as e:  # dbus-fast is a bleak/Linux dep; absent elsewhere
+        print(f"[bt-cleanup] dbus-fast unavailable, skipping cleanup: {e}")
+        return
+
+    bus = None
+    try:
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        adapter_path = await _find_adapter_path(bus)
+        if not adapter_path:
+            print("[bt-cleanup] no BlueZ adapter found")
+            return
+
+        intro = await bus.introspect("org.bluez", adapter_path)
+        obj = bus.get_proxy_object("org.bluez", adapter_path, intro)
+        adapter = obj.get_interface("org.bluez.Adapter1")
+        props = obj.get_interface("org.freedesktop.DBus.Properties")
+
+        # Stop any active discovery. Benign if none is running
+        # (org.bluez.Error.Failed "No discovery started" / NotReady / InProgress).
+        try:
+            await adapter.call_stop_discovery()
+            print(f"[bt-cleanup] StopDiscovery on {adapter_path}")
+        except Exception as e:
+            print(f"[bt-cleanup] StopDiscovery ignored ({adapter_path}): {e}")
+
+        if power_cycle:
+            try:
+                await props.call_set("org.bluez.Adapter1", "Powered", Variant("b", False))
+                await asyncio.sleep(1.0)
+                await props.call_set("org.bluez.Adapter1", "Powered", Variant("b", True))
+                await asyncio.sleep(1.5)
+                print(f"[bt-cleanup] power-cycled {adapter_path}")
+            except Exception as e:
+                print(f"[bt-cleanup] power-cycle ignored ({adapter_path}): {e}")
+    except Exception as e:
+        print(f"[bt-cleanup] adapter cleanup failed (non-fatal): {e}")
+    finally:
+        if bus is not None:
+            try:
+                bus.disconnect()
+            except Exception:
+                pass
+
+
+async def _scan_with_recovery(timeout=5.0):
+    """Scan for BLE devices, recovering from a leaked discovery session.
+
+    A prior run killed mid-scan can leave the adapter discovering, so the first
+    StartDiscovery here returns org.bluez.Error.InProgress. On that error we
+    power-cycle the adapter to clear the stale session and retry once.
+    """
+    # Pre-scan: clear any stale discovery before we start our own.
+    await reset_bluetooth_adapter()
+    try:
+        return await BleakScanner.discover(timeout=timeout)
+    except BleakDBusError as e:
+        if getattr(e, "dbus_error", "") != "org.bluez.Error.InProgress":
+            raise
+        print("[bt] scan blocked (discovery already in progress); "
+              "recovering adapter and retrying...")
+        await reset_bluetooth_adapter(power_cycle=True)
+        await asyncio.sleep(1.0)
+        return await BleakScanner.discover(timeout=timeout)
+
+
 async def main(args):
     bin_path  = args.bin
     info_path = args.info
@@ -555,54 +652,72 @@ async def main(args):
     print(f"Edge-learned:  {is_edge_learned}")
     print(f"FS name:       {fs_name}")
 
-    print("\nScanning for BLE devices...")
-    devices = await BleakScanner.discover(timeout=5.0)
+    # Install signal handlers so a CI-timeout kill (SIGTERM) still cleans up the
+    # adapter instead of leaking the discovery session to the next run.
+    loop = asyncio.get_running_loop()
+    main_task = asyncio.current_task()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, main_task.cancel)
+        except (NotImplementedError, RuntimeError):
+            pass  # signal handlers unavailable on this platform / loop
 
-    if not devices:
-        print("No BLE devices found.")
-        return
+    try:
+        print("\nScanning for BLE devices...")
+        devices = await _scan_with_recovery(timeout=5.0)
 
-    target_device = None
+        if not devices:
+            print("No BLE devices found.")
+            return
 
-    for d in devices:
-        print(f"{d.name or 'Unknown'} - {d.address}")
-        if d.name == DEVICE_NAME:
-            target_device = d
-            break
+        target_device = None
 
-    if not target_device:
-        print(f"{DEVICE_NAME} not found.")
-        return
+        for d in devices:
+            print(f"{d.name or 'Unknown'} - {d.address}")
+            if d.name == DEVICE_NAME:
+                target_device = d
+                break
 
-    address = target_device.address
-    print(f"Connecting to {DEVICE_NAME} ({address})...")
+        if not target_device:
+            print(f"{DEVICE_NAME} not found.")
+            return
 
-    # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_el_classes
-    packed_classes = None
-    if args.num_el_classes is not None:
-        neurons = args.neurons_per_class if args.neurons_per_class is not None else 1
-        packed_classes = ((neurons & 0xFFFF) << 16) | (args.num_el_classes & 0xFFFF)
-        print(f"num_edge_classes packed: neurons={neurons} classes={args.num_el_classes} "
-              f"→ 0x{packed_classes:08X}")
-    else:
-        neurons = 1;
-        packed_classes = ((neurons & 0xFFFF) << 16) | (0 & 0xFFFF)
-        print ("packed_classes = ", packed_classes)
+        address = target_device.address
+        print(f"Connecting to {DEVICE_NAME} ({address})...")
 
-    await send_file(
-        address, bin_path, info_path, args.wc,
-        input_shape=input_shape,
-        output_shape=output_shape,
-        flash_address=int(flash_address_str, 0),
-        is_edge_learned=is_edge_learned,
-        num_edge_classes=packed_classes,
-        fs_name=fs_name,
-        model_name=model_name,
-        mfcc_fs=mfcc_fs,
-        silence_class=silence_class,
-        unknown_class=unknown_class,
-        inference_mode=inference_mode,
-    )
+        # Pack num_edge_classes: upper 16 bits = neurons_per_class, lower 16 bits = num_el_classes
+        packed_classes = None
+        if args.num_el_classes is not None:
+            neurons = args.neurons_per_class if args.neurons_per_class is not None else 1
+            packed_classes = ((neurons & 0xFFFF) << 16) | (args.num_el_classes & 0xFFFF)
+            print(f"num_edge_classes packed: neurons={neurons} classes={args.num_el_classes} "
+                  f"→ 0x{packed_classes:08X}")
+        else:
+            neurons = 1;
+            packed_classes = ((neurons & 0xFFFF) << 16) | (0 & 0xFFFF)
+            print ("packed_classes = ", packed_classes)
+
+        await send_file(
+            address, bin_path, info_path, args.wc,
+            input_shape=input_shape,
+            output_shape=output_shape,
+            flash_address=int(flash_address_str, 0),
+            is_edge_learned=is_edge_learned,
+            num_edge_classes=packed_classes,
+            fs_name=fs_name,
+            model_name=model_name,
+            mfcc_fs=mfcc_fs,
+            silence_class=silence_class,
+            unknown_class=unknown_class,
+            inference_mode=inference_mode,
+        )
+    except asyncio.CancelledError:
+        print("\n[bt] interrupted (signal) — cleaning up adapter before exit.")
+        raise
+    finally:
+        # Always leave the adapter usable — success, failure, or kill — so the
+        # next run starts clean without a manual `systemctl restart bluetooth`.
+        await reset_bluetooth_adapter()
 
 
 if __name__ == "__main__":
