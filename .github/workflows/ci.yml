@@ -9,7 +9,7 @@ on:
 env:
   # Model parameters live in a per-(app,model) config YAML. It is git-ignored, so
   # CI writes it from the MODEL_CONFIG_DEMO_APPS_KWS repo secret (full YAML) into
-  # the path below before fetch. See .env/README.md for the schema.
+  # the path below before fetch. See source/README.md for the schema.
   MODEL_CONFIG: .env/demo_apps/kws.yaml
   MODEL_DIR: source/external/model_files/kws
   MODEL_NAME: kws

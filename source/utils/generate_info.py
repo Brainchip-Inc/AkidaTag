@@ -119,7 +119,7 @@ if __name__ == "__main__":
         description="Generate an app-specific info.yaml from a converted model's "
                     "shapes sidecar (produced by fetch_model.py). No Akida SDK required. "
                     "All parameters (including the app profile) come from --config; "
-                    "see .env/<app>/<model>.yaml and .env/README.md."
+                    "see .env/<app>/<model>.yaml (schema in source/README.md)."
     )
     parser.add_argument("--config", required=True,
                         help="Path to the model config YAML (.env/<app>/<model>.yaml)")

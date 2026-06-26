@@ -700,11 +700,30 @@ edge_learning:
 ### Model build config (`--config`)
 
 `fetch_model.py` and `generate_info.py` take **only** `--config` — a per-(app, model) YAML file
-at `.env/<app>/<model>.yaml` that holds every parameter (model URL, output dir, flash address,
-mfcc_fs, …). This keeps the values out of git and lets CI run the exact same commands as local
-dev. The file is git-ignored and lives locally / on the self-hosted runner. See
-[`.env/README.md`](../.env/README.md) for the full schema; example files are
-`.env/demo_apps/kws.yaml` and `.env/demo_apps/kws_edge_learning.yaml`.
+at `.env/<app>/<model>.yaml` that holds every parameter. This keeps the values out of git and lets
+CI run the exact same commands as local dev. The file is git-ignored and lives locally / on the
+self-hosted runner.
+
+```yaml
+# .env/demo_apps/kws.yaml
+app: demo_apps                                   # generate_info profile
+model_name: kws                                  # file prefix for bins/cpp/.h + shapes sidecar
+output_dir: source/external/model_files/kws      # converted artifacts + info.yaml are written here
+model_url: http://<internal-host>/path/to/akida_model.fbz   # .fbz to download (VPN required)
+map_mode: 2                                      # Akida MapMode (optional, default 1)
+neurons_per_class: 1                             # regular kws: 1, edge-learning: e.g. 10
+num_el_classes: 0                                # edge-learning novel classes (regular: 0)
+flash_address: "0x101000"                        # quote so info.yaml keeps the hex form
+mfcc_fs: 123.56967163085938                      # MFCC normalisation scalar
+silence_class: 10
+unknown_class: 11
+inference_mode: async                            # sync | async (DK board falls back to sync)
+```
+
+Required keys: `app`, `model_name`, `output_dir` plus everything the chosen `app` profile needs
+(for `demo_apps`: `flash_address`, `neurons_per_class`, `num_el_classes`, `mfcc_fs`,
+`silence_class`, `unknown_class`, `inference_mode`). Optional: `map_mode` (default 1),
+`akida_version` (default `v1`). The scripts report any missing keys by name.
 
 ### Step 1 – Fetch & Convert the Model
 
@@ -723,7 +742,7 @@ python source/utils/fetch_model.py --config .env/demo_apps/kws_edge_learning.yam
 ```
 
 The config keys read here are `model_name`, `output_dir`, `model_url`, `map_mode`,
-`neurons_per_class`, `akida_version` (see `.env/README.md`).
+`neurons_per_class`, `akida_version`.
 
 **Outputs** (in the config's `output_dir`):
 - `<prefix>_program_info.bin` / `_program_data.bin` – binary segments for BLE transfer

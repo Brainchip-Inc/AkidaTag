@@ -175,7 +175,7 @@ if __name__ == "__main__":
         description="Fetch an Akida .fbz model and convert it into program_info/"
                     "program_data bin + C++ files (info.yaml is generated separately "
                     "by generate_info.py). All parameters come from --config; see "
-                    ".env/<app>/<model>.yaml and .env/README.md."
+                    ".env/<app>/<model>.yaml (schema in source/README.md)."
     )
     parser.add_argument("--config", required=True,
                         help="Path to the model config YAML (.env/<app>/<model>.yaml)")

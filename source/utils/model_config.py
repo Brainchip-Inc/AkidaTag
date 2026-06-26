@@ -3,7 +3,8 @@
 A model config lives at .env/<app>/<model>.yaml (local-only, git-ignored) and is
 the single source of truth for fetch_model.py (conversion params) and
 generate_info.py (info.yaml params). Both scripts take only --config and read
-every value from this file. See .env/README.md for the schema.
+every value from this file. See the "Model build config" section of
+source/README.md for the schema.
 """
 
 import os
@@ -20,7 +21,7 @@ def load_model_config(path):
     """
     if not path or not os.path.exists(path):
         sys.exit(f"Error: config file not found: {path}\n"
-                 f"Create it under .env/<app>/<model>.yaml (see .env/README.md).")
+                 f"Create it under .env/<app>/<model>.yaml (schema in source/README.md).")
     import yaml  # lazy import
     with open(path) as f:
         data = yaml.safe_load(f)
