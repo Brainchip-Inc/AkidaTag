@@ -90,6 +90,15 @@ config SPARK_BOARD
     bool "Enable spark Board specific initialization"
     help
       This enables the spark Board specific initialization.
+
+config CURRENT_DEFAULT_RATE_HZ
+    int "Default INA190 current-sense sampler rate (Hz)"
+    default 100
+    depends on SPARK_BOARD
+    help
+      Default rate of the background current/power/energy sampler.
+      Runtime-adjustable via the `power rate` shell command.
+
 config SAMPLING_RATE
     int "Sampling Rate"
     default 16000
