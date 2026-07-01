@@ -120,9 +120,6 @@ uint8_t app_start_flag = FLAG_DISABLE;
  * When set, current values are sent to the phone in real-time.
  */
 uint8_t current_stream_flag = FLAG_DISABLE;
-#ifdef CONFIG_SPARK_BOARD
-K_SEM_DEFINE(current_stream_sem, 0, 1);
-#endif
 /*==================== ADVERTISING DATA ====================
  * Manufacturer data is encoded in ASCII (hex values of characters)
  * instead of raw numeric values. This allows the mobile phone BLE application
@@ -932,10 +929,8 @@ static void nus_received_cb(struct bt_conn *conn, const uint8_t *const data,
   case CMD_CURRENT_START:
     LOG_INF("STREAM CURRENT START command received\n");
     pdm_stream_flag = FLAG_DISABLE;
+    /* Sampler runs continuously; this only enables BLE streaming of it. */
     current_stream_flag = FLAG_ENABLE;
-#ifdef CONFIG_SPARK_BOARD
-    k_sem_give(&current_stream_sem);
-#endif
     break;
   case CMD_CURRENT_STOP:
     LOG_INF("STREAM CURRENT STOP command received\n");
