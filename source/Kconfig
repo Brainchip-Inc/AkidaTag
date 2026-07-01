@@ -62,6 +62,24 @@ config AUDIO_DMIC
     help
       This enables DMIC.
 
+config AUDIO_BLOCK_MS
+    int "Audio DMA block size (ms)"
+    default 60
+    help
+      Default PDM capture block size in milliseconds. Must be a multiple of the
+      MFCC hop (CONFIG_MFCC_SAMPLE_COUNT samples = 20 ms at 16 kHz) so MFCC
+      framing stays aligned, and no larger than CONFIG_AUDIO_MAX_BLOCK_MS.
+      Runtime-adjustable via the `app blkms` shell command. Smaller = lower
+      latency but a faster capture cadence.
+
+config AUDIO_MAX_BLOCK_MS
+    int "Maximum audio DMA block size (ms)"
+    default 80
+    help
+      Upper bound for the audio block size. The DMA mem-slab and the audio
+      processing buffers are statically sized for this value, so a runtime
+      `app blkms` change can never overrun them. Must be a multiple of 20.
+
 config SYNC_MODE
     int "Enable Akida Sync"
     default 0

@@ -2520,6 +2520,23 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
     } else if (argc > 2 && !strcmp(argv[1], "metrics")) {
       metrics_on = atoi(argv[2]);
       LOG_INF("metrics_on = %d", metrics_on);
+    } else if (argc > 2 && !strcmp(argv[1], "blkms")) {
+      /* Change the PDM capture block size (ms). Stop the pipeline, reconfigure
+       * the DMA, then restart if it was running. Must be a multiple of 20 ms. */
+      uint32_t ms = strtoul(argv[2], NULL, 0);
+      bool was_running = kws_app_running;
+      if (was_running) {
+        kws_app_stop();
+      }
+      int rc = audio_set_block_ms(ms);
+      if (rc != 0) {
+        LOG_ERR("blkms failed (err %d); still %u ms", rc, audio_get_block_ms());
+      } else {
+        LOG_INF("audio block size = %u ms", audio_get_block_ms());
+      }
+      if (was_running) {
+        kws_app_start();
+      }
     } else if (!strcmp(argv[1], "show")) {
       LOG_INF("=== App Parameters (app <cmd> <val>) ===");
       LOG_INF("  verbose          = %d          [app verbose <0|1|2>]",
@@ -2538,6 +2555,8 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
               speech_active_time_ms);
       LOG_INF("  metrics          = %d          [app metrics <0|1>]",
               metrics_on);
+      LOG_INF("  block_size       = %u ms       [app blkms <20|40|60|80>]",
+              audio_get_block_ms());
       LOG_INF("=========================================");
     } else {
       LOG_INF("App Commands:");
@@ -2551,6 +2570,7 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
       LOG_INF(
           "  app reset                (restore all KWS params to defaults)");
       LOG_INF("  app metrics <0|1>");
+      LOG_INF("  app blkms <ms>           (PDM block size, multiple of 20)");
       LOG_INF("  app show");
       LOG_INF("  app start                (resume KWS pipeline)");
       LOG_INF("  app stop                 (halt KWS pipeline)");
