@@ -295,6 +295,7 @@ dmic_dev: &pdm0 {
         akdsleep = &akdsleep;
         akdreset = &akdreset;
         spi2 = &spi2;
+        akd-spi = &spi2;   /* Akida SPI bus: SPIM2 on the DK (SPIM4 used by ext-flash) */
         imui = &imui;
     };
 };

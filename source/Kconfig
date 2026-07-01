@@ -126,6 +126,19 @@ config CURRENT_DEFAULT_RATE_HZ
       Default rate of the background current/power/energy sampler.
       Runtime-adjustable via the `power rate` shell command.
 
+config AKD_SPI_FREQ_HZ
+    int "AKD1500 host SPI clock (Hz)"
+    default 4000000 if SPARK_BOARD
+    default 1400000
+    help
+      Boot-time nRF5340 -> AKD1500 SPI clock, applied once the device is
+      confirmed alive during bring-up. Spark defaults to 4 MHz: HW testing found
+      AKD1500 model programming (the DMA-config handshake) reliably works up to
+      4 MHz but times out at the 8 MHz SPIM2 step, even though plain reads/SRAM
+      tolerate 8 MHz. The nRF SPIM rounds down to discrete steps (1/2/4/8 MHz on
+      SPIM2). Use the `spi_freq` shell command to re-characterise on your board.
+      DK keeps the conservative 1.4 MHz default.
+
 config SAMPLING_RATE
     int "Sampling Rate"
     default 16000

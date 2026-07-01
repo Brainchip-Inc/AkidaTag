@@ -35,4 +35,19 @@ public:
 void akd1500_send_custom_cmd(uint8_t opcode, const void *tx_data, size_t tx_len,
                              void *rx_data, size_t rx_len);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Set/get the AKD1500 host SPI (data path) clock in Hz. Takes effect on the
+ * next SPI transaction. Valid range 1 MHz .. 32 MHz; the nRF SPIM rounds down to
+ * the nearest supported divider (and SPIM2 caps at 8 MHz). Returns 0 on success,
+ * -EINVAL if out of range. */
+int akd_spi_set_frequency(uint32_t hz);
+uint32_t akd_spi_get_frequency(void);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif // NRF_SPI_H

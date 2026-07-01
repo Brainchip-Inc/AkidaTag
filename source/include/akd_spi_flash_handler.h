@@ -39,6 +39,10 @@ extern const int64_t program_info_len[];
 void akida_config_spi(bool is_mcu_master);
 void init_akd_1500_spi_flash();
 void akida_spiflash_init();
+/* Read the AKD1500 device ID over SPI and print it (pass a shell, or nullptr to
+ * log). Handy as an SPI integrity check after changing the clock. */
+struct shell;
+void get_akida_device_id(const struct shell *sh);
 
 #ifdef __cplusplus
 extern "C" {

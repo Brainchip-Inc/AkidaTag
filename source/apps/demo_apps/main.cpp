@@ -2425,6 +2425,42 @@ static int cmd_set(const struct shell *shell, size_t argc, char **argv) {
   return 0;
 }
 
+/* shell cli function to set the AKD1500 host SPI clock at runtime, for sweeping
+ * rates (e.g. 8/16/32 MHz) to find the reliable maximum. Stops KWS to avoid
+ * racing an in-flight transfer, then reads back the device ID at the new clock
+ * as an integrity check. */
+static int cmd_spi_freq(const struct shell *shell, size_t argc, char **argv) {
+  if (argc != 2) {
+    shell_print(shell, "Usage: spi_freq <hz>  (current: %u Hz)",
+                akd_spi_get_frequency());
+    return -EINVAL;
+  }
+  uint32_t hz = strtoul(argv[1], NULL, 0);
+
+  bool was_running = kws_app_running;
+  if (was_running) {
+    kws_app_stop();
+  }
+
+  int rc = akd_spi_set_frequency(hz);
+  if (rc == 0) {
+    /* Pure register read at the new clock; garbage/timeout here means the rate
+     * is too high for the current SPIM instance / wiring. */
+    get_akida_device_id(shell);
+    shell_print(shell,
+                "SPI freq now %u Hz - check the device ID above is valid",
+                akd_spi_get_frequency());
+  } else {
+    shell_error(shell, "spi_freq failed (err %d); still %u Hz", rc,
+                akd_spi_get_frequency());
+  }
+
+  if (was_running) {
+    kws_app_start();
+  }
+  return rc;
+}
+
 /* shell cli function to invoke erase function */
 static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
   led_set_state(LED_STATE_FLASH_WRITE);
@@ -2736,4 +2772,6 @@ SHELL_CMD_REGISTER(full_erase, NULL, "Erase flash: erase <size>",
 SHELL_CMD_REGISTER(
     set, NULL, "Set MCU/AKD1500 as SPI-Master: set <bool> (0:AKD1500 1:MCU)",
     cmd_set);
+SHELL_CMD_REGISTER(spi_freq, NULL,
+                   "Set AKD1500 host SPI clock (Hz): spi_freq <hz>", cmd_spi_freq);
 SHELL_CMD_REGISTER(infer, NULL, "Start the Inference: infer", cmd_infer);

@@ -7,6 +7,7 @@ extern "C" {
 }
 
 #include "io_objects.h"
+#include "nrf_spi.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <hardware_device_impl.h>
 #include <zephyr/logging/log.h>
@@ -115,6 +116,13 @@ void akida_spiflash_init(void) {
   LOG_INF("Device Version: v%u.%u", hw_version.major_rev, hw_version.minor_rev);
 
   spi_flash_read_id(spi_driver); // read SPI-Flash id
+
+  /* Device is confirmed alive at the conservative bring-up clock. Apply the
+   * configured boot-time SPI clock (CONFIG_AKD_SPI_FREQ_HZ; spark default 4 MHz,
+   * HW-validated for model programming). Do NOT raise this to the 8 MHz SPIM2
+   * step: reads tolerate it but the model-programming DMA handshake times out
+   * and the watchdog resets. Use `spi_freq` to re-characterise before changing. */
+  akd_spi_set_frequency(CONFIG_AKD_SPI_FREQ_HZ);
 }
 /* function to enable external host MCU/AKD1500 as SPI master for 16 MB flash */
 void akida_config_spi(bool is_mcu_master) {

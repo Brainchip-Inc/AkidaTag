@@ -181,7 +181,9 @@ dmic_dev: &pdm0 {
     cs-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>,  /* CS for AKIDA */
                <&gpio0 12 GPIO_ACTIVE_LOW>;  /* CS for AKIDA flash (CS pin for AKIDA flash changed to pin p0.12 according to schematic)*/
 
-    /* camera device at index 0 */
+    /* AKD1500 SPI-slave data interface. The host clock is applied at runtime
+     * (CONFIG_AKD_SPI_FREQ_HZ default; `spi_freq` to sweep). SPIM2 caps at 8 MHz;
+     * the reliable max is bounded by the AKD1500 SPI_S core clock (see §3.7.1). */
     akd: akd@0 {
         compatible = "spi-device";
         reg = <0>;  /* Uses first CS pin (P0.11) */
@@ -315,6 +317,7 @@ dmic_dev: &pdm0 {
         akd-lp = &akd_lp;
         akdreset = &akdreset;
         spi2 = &spi2;
+        akd-spi = &spi2;   /* Akida SPI bus (SPIM2). SPIM4 revisit needs AKD1500 SPI_S core-clock raise first. */
         imui = &imui;
         akd-enb    = &akd_enb;
         acc-enb    = &acc_enb;
