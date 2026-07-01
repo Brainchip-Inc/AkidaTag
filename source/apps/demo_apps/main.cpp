@@ -1116,8 +1116,10 @@ static void akd_async_thread(void *a, void *b, void *c) {
       if (verbose_on) {
         LOG_INF("fetch: done (cpu=%ums)", fetch_time);
       }
+      /* Clock counter is in Akida cycles; convert to us like the sync path. */
       uint32_t inference_dma_ts =
-          akida_get_clock_counter() - inference_start_dma_ts;
+          (akida_get_clock_counter() - inference_start_dma_ts) /
+          AKIDA_FREQUENCY_MHZ;
       uint32_t inference_time = fetch_end_ts - inference_start_ts;
       kws_post_processing(inference_dma_ts, inference_time);
     } else {
