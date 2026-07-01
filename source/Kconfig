@@ -91,6 +91,15 @@ config SPARK_BOARD
     help
       This enables the spark Board specific initialization.
 
+config SYS_CPU_128MHZ
+    bool "Run the nRF5340 application core at 128 MHz"
+    default y if SPARK_BOARD
+    help
+      Raise the application-core HCLK divider to DIV1 so the CPU runs at its
+      maximum 128 MHz instead of the 64 MHz reset default. Increases core
+      dynamic power by roughly 2x. Only the CPU domain is affected; peripheral
+      and system-timer clocks are unchanged.
+
 config CURRENT_DEFAULT_RATE_HZ
     int "Default INA190 current-sense sampler rate (Hz)"
     default 100
