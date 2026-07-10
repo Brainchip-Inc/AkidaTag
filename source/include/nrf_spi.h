@@ -46,6 +46,11 @@ extern "C" {
 int akd_spi_set_frequency(uint32_t hz);
 uint32_t akd_spi_get_frequency(void);
 
+/* Read back the live SPIM4 FREQUENCY register (raw) to verify the clock on HW. */
+uint32_t akd_spi_read_freq_reg(void);
+/* Set IFTIMING.RXDELAY (0-7) on SPIM4; apply AFTER a frequency change. */
+void akd_spi_apply_rxdelay(uint32_t rxdelay);
+
 #ifdef __cplusplus
 }
 #endif

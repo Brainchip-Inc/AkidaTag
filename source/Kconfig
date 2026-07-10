@@ -111,12 +111,14 @@ config SPARK_BOARD
 
 config SYS_CPU_128MHZ
     bool "Run the nRF5340 application core at 128 MHz"
-    default y if SPARK_BOARD
+    default y
     help
       Raise the application-core HCLK divider to DIV1 so the CPU runs at its
       maximum 128 MHz instead of the 64 MHz reset default. Increases core
       dynamic power by roughly 2x. Only the CPU domain is affected; peripheral
-      and system-timer clocks are unchanged.
+      and system-timer clocks are unchanged. REQUIRED for SPIM4 at 32 MHz
+      (the Zephyr driver clamps SPIM4 to 16 MHz unless HFCLK is DIV1) — so this
+      is now default y for the DK too, not just the spark board.
 
 config CURRENT_DEFAULT_RATE_HZ
     int "Default INA190 current-sense sampler rate (Hz)"
@@ -128,16 +130,15 @@ config CURRENT_DEFAULT_RATE_HZ
 
 config AKD_SPI_FREQ_HZ
     int "AKD1500 host SPI clock (Hz)"
-    default 4000000 if SPARK_BOARD
-    default 1400000
+    default 8000000
     help
-      Boot-time nRF5340 -> AKD1500 SPI clock, applied once the device is
-      confirmed alive during bring-up. Spark defaults to 4 MHz: HW testing found
-      AKD1500 model programming (the DMA-config handshake) reliably works up to
-      4 MHz but times out at the 8 MHz SPIM2 step, even though plain reads/SRAM
-      tolerate 8 MHz. The nRF SPIM rounds down to discrete steps (1/2/4/8 MHz on
-      SPIM2). Use the `spi_freq` shell command to re-characterise on your board.
-      DK keeps the conservative 1.4 MHz default.
+      Boot-time nRF5340 -> AKD1500 host SPI clock (both boards), applied after the
+      AKD1500 SPI_S core is routed onto the PLL (akd_core_clock_to_pll) and then
+      scaled to 5x this clock (akd_spi_set_clock) to keep a 25% ¼-rule margin.
+      HW-validated at 8/16/32 MHz on SPIM4 (H0H1 drive). The nRF SPIM4
+      rounds down to discrete steps (…/8/16/32 MHz; 32 MHz needs the 128 MHz core,
+      capped at 32 MHz). Runtime-tunable via `spi_freq`; an app can override this
+      default in its own .conf.
 
 config SAMPLING_RATE
     int "Sampling Rate"

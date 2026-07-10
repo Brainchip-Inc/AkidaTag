@@ -48,6 +48,16 @@ void get_akida_device_id(const struct shell *sh);
 extern "C" {
 #endif
 
+/* Route the AKD1500 dividers onto the 800 MHz PLL (needed in Safe Mode to lift
+ * the ¼-rule host-SPI ceiling). Leaves SPIS at ÷2; akd_spi_set_clock() sets the
+ * operating ratio. Call at a safe host clock. Returns 0 on success. */
+int akd_core_clock_to_pll(void);
+
+/* Set the AKD1500 host SPI clock (Hz) and scale the SPI_S core to 5x it, ordered
+ * so the ¼-rule holds during the change. Call with SPI idle. Returns 0 on
+ * success (else akd_spi_set_frequency()'s error). */
+int akd_spi_set_clock(uint32_t host_hz);
+
 int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
 void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
                                  size_t size);

@@ -1333,17 +1333,20 @@ int main(void) {
   akida_toggle_clock_counter(true);
   LOG_INF("Programming model info into AKD1500");
 
-  uint32_t s_dma_cycls = akida_get_clock_counter();
+  /* Use the CONFIG-DMA counter for programming (the HRC/event counter read by
+   * akida_get_clock_counter() is idle during programming -> would show 0).
+   * Read the absolute value after programming: it latches this model's
+   * config-DMA cycle count (~2.1M), Akida-internal / host-clock-independent. */
   uint64_t start_time = time_ms();
 
   akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len,
                       kws_meta.flash_address, &is_el_model);
 
   uint32_t prog_time = (uint32_t)(time_ms() - start_time);
-  uint32_t delta_cycle = akida_get_clock_counter() - s_dma_cycls;
+  uint32_t delta_cycle = akida_get_config_clock_counter();
   uint32_t dma_time = delta_cycle / AKIDA_FREQUENCY_MHZ;
-  LOG_INF("Model program: %u dma cycles, %u us dma, %u ms cpu", delta_cycle,
-          dma_time, prog_time);
+  LOG_INF("Model program: %u config-dma cycles, %u us dma, %u ms cpu (SPI %u Hz)",
+          delta_cycle, dma_time, prog_time, akd_spi_get_frequency());
 
   akida_batch_size(1, true);
   kws_model_present = true;
@@ -2263,6 +2266,10 @@ extern "C" int infer(int app_index_l) {
     return -1;
   }
 
+  /* [bench] app end-to-end starts here (whole infer() call). */
+  uint64_t bench_t0 = time_ms();
+  uint32_t validate_ms = 0, program_ms = 0, prog_cfg_cycles = 0;
+
   /* Step 1: read header only to get flash_address without touching
    * sram_upload_buffer */
   model_meta_t infer_meta;
@@ -2284,11 +2291,13 @@ extern "C" int infer(int app_index_l) {
   model_data_meta_t infer_data_meta;
   int dm_ret = file_transfer_load_data_meta(app_index_l, &infer_data_meta);
   if (dm_ret == 0) {
-    /* Step 4: full SPI flash CRC validation */
+    /* Step 4: full SPI flash CRC validation (part of "model loading") */
+    uint64_t t_val0 = time_ms();
     akida_config_spi(1);
     int val_ret =
         file_transfer_validate_flash_data(use_flash_addr, &infer_data_meta);
     akida_config_spi(0);
+    validate_ms = (uint32_t)(time_ms() - t_val0);
     if (val_ret != 0) {
       LOG_ERR("Flash data validation FAILED for slot %d", app_index_l);
       return -1;
@@ -2310,9 +2319,17 @@ extern "C" int infer(int app_index_l) {
     return -1;
   }
 
-  /* Step 6: program Akida */
+  /* Step 6: program Akida (model loading). Time it with the CONFIG-DMA counter
+   * + wall clock (the wall time is what shrinks as the host SPI clock rises). */
+  akida_toggle_clock_counter(true);
+  uint64_t t_prog0 = time_ms();
   akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len,
                       infer_meta.flash_address, &is_el_model);
+  program_ms = (uint32_t)(time_ms() - t_prog0);
+  /* Absolute config-DMA counter (it latches the model's config-DMA cycle count
+   * ~2.1M; a before/after delta reads as noise because it does not advance on a
+   * same-model re-program). This count is Akida-internal, host-clock-independent. */
+  prog_cfg_cycles = akida_get_config_clock_counter();
 
   akida_batch_size(1, true);
   app_index = app_index_l;
@@ -2321,7 +2338,7 @@ extern "C" int infer(int app_index_l) {
     return -1;
   }
 
-  akida_toggle_clock_counter(true);
+  /* clock counter already enabled before programming above */
 
   uint32_t s_dma_cycls = 0;
   uint64_t s_tick = 0;
@@ -2344,14 +2361,16 @@ extern "C" int infer(int app_index_l) {
   }
 #endif
   s_dma_cycls = akida_get_clock_counter();
+  uint32_t fwd_cyc0 = k_cycle_get_32();
   s_tick = time_ms();
   int ret = akida_forward((uint8_t *)inputs[app_index_l], inp_shap,
                           (uint8_t *)akida_output, akd_op_size);
   e_tick = time_ms();
+  uint32_t fwd_wall_us =
+      (uint32_t)k_cyc_to_us_floor64(k_cycle_get_32() - fwd_cyc0);
   e_dma_cycls = akida_get_clock_counter();
   delta_cycle = e_dma_cycls - s_dma_cycls;
   inf_time = e_tick - s_tick;
-  LOG_INF("inference time= %u dma cycles, time = %u ms", delta_cycle, inf_time);
   if (ret == SUCCESS) {
     class_id =
         get_inferred_class(akida_output, num_classes, num_neurons_per_class);
@@ -2373,6 +2392,23 @@ extern "C" int infer(int app_index_l) {
       kws_model_present = false;
     }
   }
+
+  /* [bench] consolidated per-frequency breakdown for the SPI-clock sweep. */
+  uint32_t app_ms = (uint32_t)(time_ms() - bench_t0);
+  const char *word = (class_id >= 0 && class_id < kws_new_tags_count)
+                         ? kws_new_tags[class_id]
+                         : "?";
+  LOG_PRINTK("[bench] SPI=%u Hz (FREQ.reg=0x%08X)\n", akd_spi_get_frequency(),
+             akd_spi_read_freq_reg());
+  LOG_PRINTK("[bench]  model-load : crc-validate=%u ms  program=%u ms  "
+             "(config-dma=%u cyc ~%u us @%d MHz)\n",
+             validate_ms, program_ms, prog_cfg_cycles,
+             prog_cfg_cycles / AKIDA_FREQUENCY_MHZ, AKIDA_FREQUENCY_MHZ);
+  LOG_PRINTK("[bench]  inference  : dma=%u cyc (%u us @%d MHz)  cpu-wall=%u us\n",
+             delta_cycle, delta_cycle / AKIDA_FREQUENCY_MHZ, AKIDA_FREQUENCY_MHZ,
+             fwd_wall_us);
+  LOG_PRINTK("[bench]  app-e2e    : %u ms   result: class=%d word=%s\n", app_ms,
+             class_id, word);
 
   LOG_PRINTK("APP Inference Completed\n");
 #ifdef CONFIG_SPARK_BOARD
@@ -2399,7 +2435,17 @@ static int cmd_infer(const struct shell *shell, size_t argc, char **argv) {
     return -EINVAL;
   }
 
-  return infer(app_index);
+  /* Pause the background continuous-KWS threads so this one-shot infer does not
+   * race the async thread on the single shared Akida device / SPI bus. */
+  bool was_running = kws_app_running;
+  if (was_running) {
+    kws_app_stop();
+  }
+  int rc = infer(app_index);
+  if (was_running) {
+    kws_app_start();
+  }
+  return rc;
 }
 
 /* shell cli function to set external host MCU/AKD1500 as SPI master */
@@ -2425,6 +2471,197 @@ static int cmd_set(const struct shell *shell, size_t argc, char **argv) {
   return 0;
 }
 
+/* ===================================================================== */
+/* AKD1500 high-freq SPI investigation helpers (exploration only).        */
+/* ===================================================================== */
+
+#define AKD_DEVICE_ID_REG 0xFCC00000U
+/* akd1500.read() returns the native-uint32 word; the AKD1500 device ID, shown
+ * MSB-first as bytes "09 03 A1 BC", reads back as the word 0xBCA10309. */
+#define AKD_DEVICE_ID_VAL 0xBCA10309U
+/* AKD1500 clock/reset controller (base 0xFCE0_1000) + Chip-Info (0xFCE0_0010) */
+#define AKD_CHIP_INFO_REG 0xFCE00010U /* [9:8]=OP_MODE, [13]=SEL_CLK */
+#define AKD_CLK_GENCTRL_REG 0xFCE01000U /* [0]=PLLCLK_SEL [1]=SEL_MAN [4]=BYPASS */
+#define AKD_CLK_PLLCTRL_REG 0xFCE01010U
+#define AKD_CLK_PLLSTAT_REG 0xFCE01014U /* [0]=PLL_LOCK */
+#define AKD_CLK_DIVUPD_REG 0xFCE0102CU  /* [0]=DIV_UPDATE_EN */
+#define AKD_CLK_SYSDIV_REG 0xFCE01030U
+#define AKD_CLK_SPISDIV_REG 0xFCE0103CU /* [7:0]=SPIS_DIV_RATIO (reset 2) */
+
+static uint32_t akd_reg_rd(uint32_t addr) {
+  uint32_t v = 0;
+  akd1500.read(addr, &v, 4);
+  return v;
+}
+static void akd_reg_wr(uint32_t addr, uint32_t val) {
+  akd1500.write(addr, &val, 4);
+}
+
+/* Read one 32-bit AKD1500 register at the current SPI clock. */
+static int cmd_akida_rd(const struct shell *sh, size_t argc, char **argv) {
+  if (argc != 2) {
+    shell_print(sh, "Usage: akida_rd <hexaddr>");
+    return -EINVAL;
+  }
+  uint32_t addr = strtoul(argv[1], NULL, 0);
+  shell_print(sh, "AKD[0x%08X] = 0x%08X", addr, akd_reg_rd(addr));
+  return 0;
+}
+
+/* Write one 32-bit AKD1500 register, then read it back. */
+static int cmd_akida_wr(const struct shell *sh, size_t argc, char **argv) {
+  if (argc != 3) {
+    shell_print(sh, "Usage: akida_wr <hexaddr> <hexval>");
+    return -EINVAL;
+  }
+  uint32_t addr = strtoul(argv[1], NULL, 0);
+  uint32_t val = strtoul(argv[2], NULL, 0);
+  akd_reg_wr(addr, val);
+  shell_print(sh, "AKD[0x%08X] <= 0x%08X (readback 0x%08X)", addr, val,
+              akd_reg_rd(addr));
+  return 0;
+}
+
+/* Drop to a safe 1.4 MHz clock and dump/decode the AKD1500 clock state. This
+ * tells us whether the SPI_S core is on the fast PLL or the slow bypass clock
+ * (the ¼-rule then sets the true max host SCK). Leaves the clock at 1.4 MHz. */
+static int cmd_akd_clkinfo(const struct shell *sh, size_t argc, char **argv) {
+  if (kws_app_running) {
+    kws_app_stop();
+  }
+  akd_spi_set_frequency(1400000);
+  (void)akd_reg_rd(AKD_DEVICE_ID_REG); /* flush the pointer-swap reconfigure */
+
+  uint32_t devid = akd_reg_rd(AKD_DEVICE_ID_REG);
+  uint32_t chip = akd_reg_rd(AKD_CHIP_INFO_REG);
+  uint32_t gen = akd_reg_rd(AKD_CLK_GENCTRL_REG);
+  uint32_t pllc = akd_reg_rd(AKD_CLK_PLLCTRL_REG);
+  uint32_t plls = akd_reg_rd(AKD_CLK_PLLSTAT_REG);
+  uint32_t divu = akd_reg_rd(AKD_CLK_DIVUPD_REG);
+  uint32_t sysd = akd_reg_rd(AKD_CLK_SYSDIV_REG);
+  uint32_t spisd = akd_reg_rd(AKD_CLK_SPISDIV_REG);
+
+  uint32_t op_mode = (chip >> 8) & 0x3;
+  uint32_t sel_clk = (chip >> 13) & 0x1;
+  uint32_t pllclk_sel = gen & 0x1;
+  uint32_t pllclk_sel_man = (gen >> 1) & 0x1;
+  uint32_t pll_bypass = (gen >> 4) & 0x1;
+  uint32_t pll_lock = plls & 0x1;
+  uint32_t spis_div = spisd & 0xff;
+
+  shell_print(sh, "--- AKD1500 clock state (read @1.4 MHz) ---");
+  shell_print(sh, "DEVICE_ID   0x%08X (%s)", devid,
+              devid == AKD_DEVICE_ID_VAL ? "OK" : "BAD-read");
+  shell_print(sh, "CHIP_INFO   0x%08X : OP_MODE=%u (bit9=OP_MODE1=%s), SEL_CLK=%u",
+              chip, op_mode, (op_mode & 0x2) ? "SAFE" : "normal", sel_clk);
+  shell_print(sh, "GEN_CTRL    0x%08X : PLLCLK_SEL=%u PLLCLK_SEL_MAN=%u PLL_BYPASS=%u",
+              gen, pllclk_sel, pllclk_sel_man, pll_bypass);
+  shell_print(sh, "PLL_CTRL    0x%08X", pllc);
+  shell_print(sh, "PLL_STATUS  0x%08X : PLL_LOCK=%u", plls, pll_lock);
+  shell_print(sh, "DIV_UPDATE  0x%08X   SYS_DIV 0x%08X   SPIS_DIV 0x%08X (ratio=%u)",
+              divu, sysd, spisd, spis_div);
+
+  /* Infer the SPI_S core clock and the ¼-rule host ceiling. */
+  const char *src = pllclk_sel ? "PLL(800MHz)" : "REF(25MHz)";
+  uint32_t core_mhz = pllclk_sel ? (spis_div ? 800 / spis_div : 800)
+                                 : (spis_div ? 25 / spis_div : 25);
+  shell_print(sh,
+              "=> SPI_S core src=%s div=%u => ~%u MHz => host SCK ceiling ~%u MHz",
+              src, spis_div, core_mhz, core_mhz / 4);
+  shell_print(sh, "(clock left at 1.4 MHz; use akd_pll_on then spi_freq/akd_probe)");
+  return 0;
+}
+
+/* Manually switch the AKD1500 SPI_S core clock onto the 400 MHz PLL (needed in
+ * Safe Mode, where the auto-switch is disabled). Runs entirely at 1.4 MHz. Per
+ * AKD500 clkrst spec §9.1.2. Leaves the clock at 1.4 MHz. */
+static int cmd_akd_pll_on(const struct shell *sh, size_t argc, char **argv) {
+  if (kws_app_running) {
+    kws_app_stop();
+  }
+  akd_spi_set_frequency(1400000);
+  (void)akd_reg_rd(AKD_DEVICE_ID_REG);
+
+  uint32_t gen = akd_reg_rd(AKD_CLK_GENCTRL_REG);
+  shell_print(sh, "before: GEN_CTRL=0x%08X PLL_LOCK=%u", gen,
+              akd_reg_rd(AKD_CLK_PLLSTAT_REG) & 1);
+
+  akd_core_clock_to_pll(); /* shared with the boot path */
+
+  uint32_t genr = akd_reg_rd(AKD_CLK_GENCTRL_REG);
+  uint32_t spisd = akd_reg_rd(AKD_CLK_SPISDIV_REG) & 0xff;
+  uint32_t core = spisd ? 800 / spisd : 800;
+  shell_print(sh, "after:  GEN_CTRL=0x%08X PLLCLK_SEL=%u SPIS_DIV=%u => core ~%u MHz => ceiling ~%u MHz",
+              genr, genr & 1, spisd, core, core / 4);
+  shell_print(sh, "(clock left at 1.4 MHz; now raise with spi_freq/akd_probe)");
+  return 0;
+}
+
+/* Read the device-ID <count> times at the CURRENT clock; report mismatches. */
+static int cmd_akd_rdtest(const struct shell *sh, size_t argc, char **argv) {
+  uint32_t count = (argc >= 2) ? strtoul(argv[1], NULL, 0) : 100;
+  uint32_t bad = 0, sample = 0;
+  uint32_t first = akd_reg_rd(AKD_DEVICE_ID_REG);
+  for (uint32_t i = 0; i < count; i++) {
+    uint32_t v = akd_reg_rd(AKD_DEVICE_ID_REG);
+    if (v != AKD_DEVICE_ID_VAL) {
+      bad++;
+      sample = v;
+    }
+  }
+  shell_print(sh,
+              "rdtest @%u Hz (FREQ.reg=0x%08X): %u reads, %u BAD, first=0x%08X sample=0x%08X => %s",
+              akd_spi_get_frequency(), akd_spi_read_freq_reg(), count, bad, first,
+              sample, bad == 0 ? "PASS" : "FAIL");
+  return 0;
+}
+
+/* Self-contained sweep point: set freq, flush reconfigure, apply rx-delay,
+ * then read device-ID <count> times. Usage: akd_probe <hz> <rxdelay> [count] */
+static int cmd_akd_probe(const struct shell *sh, size_t argc, char **argv) {
+  if (argc < 3) {
+    shell_print(sh, "Usage: akd_probe <hz> <rxdelay 0-7> [count=200]");
+    return -EINVAL;
+  }
+  uint32_t hz = strtoul(argv[1], NULL, 0);
+  uint32_t rxd = strtoul(argv[2], NULL, 0);
+  uint32_t count = (argc >= 4) ? strtoul(argv[3], NULL, 0) : 200;
+
+  if (kws_app_running) {
+    kws_app_stop();
+  }
+  if (akd_spi_set_clock(hz) != 0) {
+    shell_error(sh, "freq %u rejected", hz);
+    return -EINVAL;
+  }
+  (void)akd_reg_rd(AKD_DEVICE_ID_REG); /* flush reconfigure (applies freq) */
+  akd_spi_apply_rxdelay(rxd);          /* apply rx-delay after freq settles */
+
+  uint32_t bad = 0, sample = 0, first = akd_reg_rd(AKD_DEVICE_ID_REG);
+  for (uint32_t i = 0; i < count; i++) {
+    uint32_t v = akd_reg_rd(AKD_DEVICE_ID_REG);
+    if (v != AKD_DEVICE_ID_VAL) {
+      bad++;
+      sample = v;
+    }
+  }
+  shell_print(sh,
+              "probe req=%u eff=%u FREQ.reg=0x%08X rxd=%u : %u reads %u BAD first=0x%08X sample=0x%08X => %s",
+              hz, akd_spi_get_frequency(), akd_spi_read_freq_reg(), rxd, count,
+              bad, first, sample, bad == 0 ? "PASS" : "FAIL");
+  return 0;
+}
+
+/* Set IFTIMING.RXDELAY at runtime (apply after a spi_freq change). */
+static int cmd_spi_rxdelay(const struct shell *sh, size_t argc, char **argv) {
+  if (argc != 2) {
+    shell_print(sh, "Usage: spi_rxdelay <0-7>");
+    return -EINVAL;
+  }
+  akd_spi_apply_rxdelay(strtoul(argv[1], NULL, 0));
+  return 0;
+}
+
 /* shell cli function to set the AKD1500 host SPI clock at runtime, for sweeping
  * rates (e.g. 8/16/32 MHz) to find the reliable maximum. Stops KWS to avoid
  * racing an in-flight transfer, then reads back the device ID at the new clock
@@ -2442,14 +2679,15 @@ static int cmd_spi_freq(const struct shell *shell, size_t argc, char **argv) {
     kws_app_stop();
   }
 
-  int rc = akd_spi_set_frequency(hz);
+  int rc = akd_spi_set_clock(hz);
   if (rc == 0) {
     /* Pure register read at the new clock; garbage/timeout here means the rate
      * is too high for the current SPIM instance / wiring. */
     get_akida_device_id(shell);
     shell_print(shell,
-                "SPI freq now %u Hz - check the device ID above is valid",
-                akd_spi_get_frequency());
+                "SPI freq now %u Hz (SPIM4 FREQUENCY reg=0x%08X) - check the "
+                "device ID above is valid",
+                akd_spi_get_frequency(), akd_spi_read_freq_reg());
   } else {
     shell_error(shell, "spi_freq failed (err %d); still %u Hz", rc,
                 akd_spi_get_frequency());
@@ -2775,3 +3013,23 @@ SHELL_CMD_REGISTER(
 SHELL_CMD_REGISTER(spi_freq, NULL,
                    "Set AKD1500 host SPI clock (Hz): spi_freq <hz>", cmd_spi_freq);
 SHELL_CMD_REGISTER(infer, NULL, "Start the Inference: infer", cmd_infer);
+
+/* --- AKD1500 high-freq SPI investigation commands (exploration) --- */
+SHELL_CMD_REGISTER(akida_rd, NULL, "Read AKD reg: akida_rd <hexaddr>",
+                   cmd_akida_rd);
+SHELL_CMD_REGISTER(akida_wr, NULL, "Write AKD reg: akida_wr <hexaddr> <hexval>",
+                   cmd_akida_wr);
+SHELL_CMD_REGISTER(akd_clkinfo, NULL,
+                   "Dump AKD1500 SPI_S core-clock/PLL state (@1.4 MHz)",
+                   cmd_akd_clkinfo);
+SHELL_CMD_REGISTER(akd_pll_on, NULL,
+                   "Switch AKD1500 SPI_S core clock onto the 400 MHz PLL",
+                   cmd_akd_pll_on);
+SHELL_CMD_REGISTER(akd_rdtest, NULL,
+                   "Read device-ID N times at current clock: akd_rdtest <count>",
+                   cmd_akd_rdtest);
+SHELL_CMD_REGISTER(akd_probe, NULL,
+                   "Probe reads: akd_probe <hz> <rxdelay 0-7> [count]",
+                   cmd_akd_probe);
+SHELL_CMD_REGISTER(spi_rxdelay, NULL, "Set SPIM4 rx-delay: spi_rxdelay <0-7>",
+                   cmd_spi_rxdelay);

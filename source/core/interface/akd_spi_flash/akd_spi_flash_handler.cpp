@@ -10,10 +10,99 @@ extern "C" {
 #include "nrf_spi.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <hardware_device_impl.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/types.h>
 LOG_MODULE_REGISTER(akd_spi_flash, LOG_LEVEL_DBG);
+
+/* AKD1500 clock/reset controller (base 0xFCE0_1000). The spark board straps the
+ * AKD1500 into Safe Mode (OP_MODE1=1), where the automatic switch of the SPI_S
+ * core clock from the 25 MHz reference to the 400 MHz PLL is DISABLED. Until the
+ * host performs the switch, the SPI_S core runs on the reference clock and the
+ * datasheet ¼-rule caps the host SPI at ~6 MHz (this was the real "4 MHz wall").
+ * With the core on the PLL the ¼-rule ceiling clears the 32 MHz host max
+ * (akd_spi_set_clock() then right-sizes the SPIS divider to 5x the host clock).
+ * Must be done at a safe (<=4 MHz) host clock, before raising it. */
+#define AKD_CLK_GENCTRL_REG 0xFCE01000U /* [0]=PLLCLK_SEL [1]=SEL_MAN [4]=BYPASS */
+#define AKD_CLK_PLLSTAT_REG 0xFCE01014U /* [0]=PLL_LOCK */
+#define AKD_CLK_DIVUPD_REG 0xFCE0102CU  /* [0]=DIV_UPDATE_EN */
+#define AKD_CLK_SPISDIV_REG 0xFCE0103CU /* [7:0]=SPIS_DIV_RATIO, [31]=DC_50PCT_EN */
+
+static uint32_t akd_clk_rd(uint32_t addr) {
+  uint32_t v = 0;
+  akd1500.read(addr, &v, 4);
+  return v;
+}
+static void akd_clk_wr(uint32_t addr, uint32_t val) {
+  akd1500.write(addr, &val, 4);
+}
+
+/* Route the AKD1500 dividers onto the 800 MHz PLL (AKD500 clkrst §9.1.2), leaving
+ * the SPIS divider at reset (÷2 = 400 MHz). akd_spi_set_clock() then sets the
+ * operating SPI_S ratio (scaled to the host clock); SYS_DIV stays at ÷2 = 400 MHz
+ * so config-DMA model programming stays fast. Idempotent; run at a safe host
+ * clock. Returns 0 if PLLCLK_SEL reads back 1. */
+extern "C" int akd_core_clock_to_pll(void) {
+  uint32_t gen = akd_clk_rd(AKD_CLK_GENCTRL_REG);
+  /* manual mode, clear PLL bypass, keep ref clock selected while waiting */
+  gen |= (1u << 1);  /* PLLCLK_SEL_MAN = 1 */
+  gen &= ~(1u << 4); /* PLL_BYPASS = 0 */
+  gen &= ~(1u << 0); /* PLLCLK_SEL = 0 (ref) */
+  akd_clk_wr(AKD_CLK_GENCTRL_REG, gen);
+
+  int locked = 0;
+  for (int i = 0; i < 200; i++) {
+    if (akd_clk_rd(AKD_CLK_PLLSTAT_REG) & 1u) {
+      locked = 1;
+      break;
+    }
+    k_msleep(1);
+  }
+
+  akd_clk_wr(AKD_CLK_DIVUPD_REG, 1u); /* latch divider ratios */
+  gen = akd_clk_rd(AKD_CLK_GENCTRL_REG);
+  gen |= 1u; /* PLLCLK_SEL = 1 -> route dividers onto the 800 MHz PLL */
+  akd_clk_wr(AKD_CLK_GENCTRL_REG, gen);
+
+  uint32_t spisd = akd_clk_rd(AKD_CLK_SPISDIV_REG) & 0xffu;
+  uint32_t genr = akd_clk_rd(AKD_CLK_GENCTRL_REG);
+  LOG_INF("AKD1500 SPI_S core -> PLL: GEN_CTRL=0x%08X PLLCLK_SEL=%u SPIS_DIV=%u PLL_LOCK=%d",
+          genr, genr & 1u, spisd, locked);
+  return (genr & 1u) ? 0 : -1;
+}
+
+/* SPIS_DIV ratio for a host clock: SPI_S core = 5x host (25% ¼-rule margin), i.e.
+ * 800/(5*host). Clamped to the 8-bit divider [2,255]. */
+static uint32_t spis_div_for_host(uint32_t host_hz) {
+  uint32_t div = host_hz ? (160000000u / host_hz) : 255u;
+  if (div < 2u) div = 2u;
+  if (div > 255u) div = 255u;
+  return div;
+}
+
+/* Program the SPI_S core divider (DC_50PCT_EN for odd ratios) and latch it. */
+static void akd_spis_write_div(uint32_t div) {
+  akd_clk_wr(AKD_CLK_SPISDIV_REG, (div & 1u) ? (div | (1u << 31)) : div);
+  akd_clk_wr(AKD_CLK_DIVUPD_REG, 1u);
+}
+
+/* Set the host SPI clock and scale the SPI_S core to 5x it, ordered so the ¼-rule
+ * (host <= core/4) holds throughout: raising bumps the core first (divider write
+ * runs at the old, lower host); lowering drops the host first (divider write runs
+ * at the new, lower host). Callers must be idle (KWS stopped). */
+extern "C" int akd_spi_set_clock(uint32_t host_hz) {
+  uint32_t div = spis_div_for_host(host_hz);
+  if (host_hz >= akd_spi_get_frequency()) {
+    akd_spis_write_div(div);
+    return akd_spi_set_frequency(host_hz);
+  }
+  int rc = akd_spi_set_frequency(host_hz);
+  if (rc == 0) {
+    akd_spis_write_div(div);
+  }
+  return rc;
+}
 #if FLASH_READ_BACK_CHECK
 uint8_t read_back_flash[HALF_OF_SRAM_BUFFER_SIZE];
 #endif
@@ -117,12 +206,14 @@ void akida_spiflash_init(void) {
 
   spi_flash_read_id(spi_driver); // read SPI-Flash id
 
-  /* Device is confirmed alive at the conservative bring-up clock. Apply the
-   * configured boot-time SPI clock (CONFIG_AKD_SPI_FREQ_HZ; spark default 4 MHz,
-   * HW-validated for model programming). Do NOT raise this to the 8 MHz SPIM2
-   * step: reads tolerate it but the model-programming DMA handshake times out
-   * and the watchdog resets. Use `spi_freq` to re-characterise before changing. */
-  akd_spi_set_frequency(CONFIG_AKD_SPI_FREQ_HZ);
+  /* Device is confirmed alive at the conservative bring-up clock. Route the SPI_S
+   * core onto the 800 MHz PLL (still at the safe bring-up clock). */
+  akd_core_clock_to_pll();
+
+  /* Apply the configured operating clock; akd_spi_set_clock() scales the SPI_S
+   * core to 5x it (e.g. 8 MHz host -> 40 MHz core). Runtime-tunable via
+   * `spi_freq`/`akd_probe`. */
+  akd_spi_set_clock(CONFIG_AKD_SPI_FREQ_HZ);
 }
 /* function to enable external host MCU/AKD1500 as SPI master for 16 MB flash */
 void akida_config_spi(bool is_mcu_master) {
