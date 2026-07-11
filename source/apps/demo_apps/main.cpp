@@ -1125,6 +1125,7 @@ static void akd_async_thread(void *a, void *b, void *c) {
     } else {
       LOG_ERR("Fetch returned EFAILURE or Error");
     }
+    akd_sleep(true); /* sleep until next inference */
   }
 }
 #endif
@@ -1361,6 +1362,7 @@ int main(void) {
 
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
+  akd_sleep(true); /* idle until first utterance */
 
   LOG_INF("data to check : model_size %d, class %d ",
           kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
@@ -1541,7 +1543,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   int ret = 0;
 
   if (kws_api_selection == DEFAULT_API_SELECTION_SYNC) {
-
+    akd_sleep(false); /* wake for inference */
     inference_start_ts = time_ms();
     uint32_t s_dma_cycls = akida_get_clock_counter();
 
@@ -1560,7 +1562,9 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       LOG_ERR("akida_predict failed");
       reset_stale_inference_data();
     }
+    akd_sleep(true); /* sleep after inference */
   } else {
+    akd_sleep(false); /* wake for inference */
     uint64_t start_time = time_ms();
     do {
       inference_start_ts = time_ms();
@@ -2053,6 +2057,7 @@ static void learn_process_handler(struct k_work *work) {
   LOG_INF("learn: processing %d augmented inputs for utterance %d/%d",
           learn_state.num_augs, learn_state.current_utterance + 1,
           LEARN_NUM_UTTERANCES);
+  akd_sleep(false); /* wake for learning (stays awake through the session) */
 
   if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
     /* Async path: generate aug[0], enqueue, arm first fake ISR */
@@ -2265,6 +2270,7 @@ extern "C" int infer(int app_index_l) {
     LOG_ERR("Illegal model index %d", app_index_l);
     return -1;
   }
+  akd_sleep(false); /* wake for programming + inference */
 
   /* [bench] app end-to-end starts here (whole infer() call). */
   uint64_t bench_t0 = time_ms();
@@ -2416,6 +2422,7 @@ extern "C" int infer(int app_index_l) {
     akd_irq_enable();
   }
 #endif
+  akd_sleep(true); /* idle after inference */
   return 0;
 }
 
@@ -2521,6 +2528,26 @@ static int cmd_akida_wr(const struct shell *sh, size_t argc, char **argv) {
               akd_reg_rd(addr));
   return 0;
 }
+
+#ifdef CONFIG_SPARK_BOARD
+/* Toggle AKD1500 low-power sleep: akd_sleep <0|1> (0 = wake, 1 = sleep).
+ * Refuse to sleep while KWS is running — it drives sleep per-inference itself,
+ * and a manual sleep would race an in-flight inference. Stop it with `app stop`. */
+static int cmd_akd_sleep(const struct shell *sh, size_t argc, char **argv) {
+  if (argc != 2) {
+    shell_print(sh, "Usage: akd_sleep <0|1>");
+    return -EINVAL;
+  }
+  bool sleep = strtoul(argv[1], NULL, 0) != 0;
+  if (sleep && kws_app_running) {
+    shell_print(sh, "KWS running — stop it first (app stop)");
+    return -EBUSY;
+  }
+  akd_sleep(sleep);
+  shell_print(sh, "AKD1500 %s", sleep ? "sleeping" : "awake");
+  return 0;
+}
+#endif
 
 /* Drop to a safe 1.4 MHz clock and dump/decode the AKD1500 clock state. This
  * tells us whether the SPI_S core is on the fast PLL or the slow bypass clock
@@ -3033,3 +3060,7 @@ SHELL_CMD_REGISTER(akd_probe, NULL,
                    cmd_akd_probe);
 SHELL_CMD_REGISTER(spi_rxdelay, NULL, "Set SPIM4 rx-delay: spi_rxdelay <0-7>",
                    cmd_spi_rxdelay);
+#ifdef CONFIG_SPARK_BOARD
+SHELL_CMD_REGISTER(akd_sleep, NULL, "Toggle AKD1500 sleep: akd_sleep <0|1>",
+                   cmd_akd_sleep);
+#endif
