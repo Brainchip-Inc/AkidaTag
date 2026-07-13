@@ -62,6 +62,24 @@ config AUDIO_DMIC
     help
       This enables DMIC.
 
+config AUDIO_BLOCK_MS
+    int "Audio DMA block size (ms)"
+    default 60
+    help
+      Default PDM capture block size in milliseconds. Must be a multiple of the
+      MFCC hop (CONFIG_MFCC_SAMPLE_COUNT samples = 20 ms at 16 kHz) so MFCC
+      framing stays aligned, and no larger than CONFIG_AUDIO_MAX_BLOCK_MS.
+      Runtime-adjustable via the `app blkms` shell command. Smaller = lower
+      latency but a faster capture cadence.
+
+config AUDIO_MAX_BLOCK_MS
+    int "Maximum audio DMA block size (ms)"
+    default 80
+    help
+      Upper bound for the audio block size. The DMA mem-slab and the audio
+      processing buffers are statically sized for this value, so a runtime
+      `app blkms` change can never overrun them. Must be a multiple of 20.
+
 config SYNC_MODE
     int "Enable Akida Sync"
     default 0
@@ -90,6 +108,40 @@ config SPARK_BOARD
     bool "Enable spark Board specific initialization"
     help
       This enables the spark Board specific initialization.
+
+config SYS_CPU_128MHZ
+    bool "Run the nRF5340 application core at 128 MHz"
+    default y
+    help
+      Raise the application-core HCLK divider to DIV1 so the CPU runs at its
+      maximum 128 MHz instead of the 64 MHz reset default. Increases core
+      dynamic power by roughly 2x. Only the CPU domain is affected; peripheral
+      and system-timer clocks are unchanged. REQUIRED for SPIM4 at 32 MHz
+      (the Zephyr driver clamps SPIM4 to 16 MHz unless HFCLK is DIV1) — so this
+      is now default y for the DK too, not just the spark board.
+
+config AKD_SPI_FREQ_HZ
+    int "AKD1500 host SPI clock (Hz)"
+    default 8000000
+    help
+      Boot-time nRF5340 -> AKD1500 host SPI clock (both boards), applied after the
+      AKD1500 SPI_S core is routed onto the PLL (akd_core_clock_to_pll) and then
+      scaled to 5x this clock (akd_spi_set_clock) to keep a 25% ¼-rule margin.
+      HW-validated at 8/16/32 MHz on SPIM4 (H0H1 drive). The nRF SPIM4
+      rounds down to discrete steps (…/8/16/32 MHz; 32 MHz needs the 128 MHz core,
+      capped at 32 MHz). Runtime-tunable via `spi_freq`; an app can override this
+      default in its own .conf.
+
+config AKD_CORE_CLOCK_HZ
+    int "AKD1500 core clock (Hz)"
+    default 400000000
+    help
+      Boot-time AKD1500 internal core clock (both boards), applied once after the
+      SPI_S core is routed onto the PLL. 400 MHz (the default) is the reset value
+      so it is a no-op. Values that divide 800 MHz evenly change only the SYS_DIV
+      divider (SPI untouched); other values reprogram the PLL. Lower clocks trade
+      compute speed for power. Runtime-tunable via `akd_coreclk`.
+
 config SAMPLING_RATE
     int "Sampling Rate"
     default 16000
