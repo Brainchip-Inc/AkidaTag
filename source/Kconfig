@@ -140,6 +140,16 @@ config AKD_SPI_FREQ_HZ
       capped at 32 MHz). Runtime-tunable via `spi_freq`; an app can override this
       default in its own .conf.
 
+config AKD_CORE_CLOCK_HZ
+    int "AKD1500 core clock (Hz)"
+    default 400000000
+    help
+      Boot-time AKD1500 internal core clock (both boards), applied once after the
+      SPI_S core is routed onto the PLL. 400 MHz (the default) is the reset value
+      so it is a no-op. Values that divide 800 MHz evenly change only the SYS_DIV
+      divider (SPI untouched); other values reprogram the PLL. Lower clocks trade
+      compute speed for power. Runtime-tunable via `akd_coreclk`.
+
 config SAMPLING_RATE
     int "Sampling Rate"
     default 16000

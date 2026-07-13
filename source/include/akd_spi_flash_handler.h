@@ -58,6 +58,26 @@ int akd_core_clock_to_pll(void);
  * success (else akd_spi_set_frequency()'s error). */
 int akd_spi_set_clock(uint32_t host_hz);
 
+/* Set the AKD1500 core clock (Hz), bounded [5,400] MHz. Uses a divider off the
+ * 800 MHz PLL when possible (on-the-fly, SPI untouched); otherwise reprograms the
+ * PLL and re-scales SPI. Returns 0, -ERANGE if unreachable. Run with SPI idle for
+ * the PLL path. */
+int akd_core_clock_set(uint32_t core_hz);
+
+/* Reprogram the PLL output (Hz), conservative band 600..800 MHz in 12.5 MHz
+ * steps. Re-scales SPI and restores the host clock. Returns 0, -ERANGE for an
+ * unsupported value, -EIO if the PLL fails to lock. Run with SPI idle. */
+int akd_pll_set(uint32_t pll_out_hz);
+
+/* Set the core (SYS) divider off the current PLLCLK, on-the-fly (§9.2). Rejects a
+ * ratio giving >400 MHz. Returns 0 on success. */
+int akd_sys_div_set(uint32_t div);
+
+/* Run the AKD1500 from the 25 MHz reference (on=true, PLL output unused) or back
+ * onto the 800 MHz PLL (on=false). Runs at a safe host clock; raise it after.
+ * Returns 0 on success. */
+int akd_clk_use_ref(bool on);
+
 int spi_flash_erase_helper_func(uint32_t offset, uint32_t size);
 void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
                                  size_t size);
