@@ -2556,6 +2556,8 @@ static int cmd_akd_clkinfo(const struct shell *sh, size_t argc, char **argv) {
   if (kws_app_running) {
     kws_app_stop();
   }
+  akd_sleep(false); /* wake, else an asleep chip reads all-0 (misleading decode) */
+  uint32_t op_hz = akd_spi_get_frequency(); /* the operating host clock */
   akd_spi_set_frequency(1400000);
   (void)akd_reg_rd(AKD_DEVICE_ID_REG); /* flush the pointer-swap reconfigure */
 
@@ -2575,26 +2577,37 @@ static int cmd_akd_clkinfo(const struct shell *sh, size_t argc, char **argv) {
   uint32_t pll_bypass = (gen >> 4) & 0x1;
   uint32_t pll_lock = plls & 0x1;
   uint32_t spis_div = spisd & 0xff;
+  uint32_t sys_div = sysd & 0xff;
+  uint32_t divf_val = (pllc & 0x1ff) + 1;
+  uint32_t divr_val = ((pllc >> 16) & 0x3f) + 1;
+  uint32_t divq_val = 1u << ((pllc >> 24) & 0x7);
+  uint32_t pllout_mhz = (50u * divf_val) / (divr_val * divq_val);
+  uint32_t vco_mhz = (50u * divf_val) / divr_val;
+  uint32_t pllclk_mhz = pllclk_sel ? pllout_mhz : 25u;
 
-  shell_print(sh, "--- AKD1500 clock state (read @1.4 MHz) ---");
+  shell_print(sh, "--- AKD1500 clock state (operating host ~%u Hz; read @1.4 MHz) ---",
+              op_hz);
   shell_print(sh, "DEVICE_ID   0x%08X (%s)", devid,
               devid == AKD_DEVICE_ID_VAL ? "OK" : "BAD-read");
   shell_print(sh, "CHIP_INFO   0x%08X : OP_MODE=%u (bit9=OP_MODE1=%s), SEL_CLK=%u",
               chip, op_mode, (op_mode & 0x2) ? "SAFE" : "normal", sel_clk);
   shell_print(sh, "GEN_CTRL    0x%08X : PLLCLK_SEL=%u PLLCLK_SEL_MAN=%u PLL_BYPASS=%u",
               gen, pllclk_sel, pllclk_sel_man, pll_bypass);
-  shell_print(sh, "PLL_CTRL    0x%08X", pllc);
+  shell_print(sh, "PLL_CTRL    0x%08X : DIVF=%u DIVR=%u DIVQ=%u => PLLOUT ~%u MHz (VCO ~%u MHz)",
+              pllc, divf_val, divr_val, divq_val, pllout_mhz, vco_mhz);
   shell_print(sh, "PLL_STATUS  0x%08X : PLL_LOCK=%u", plls, pll_lock);
-  shell_print(sh, "DIV_UPDATE  0x%08X   SYS_DIV 0x%08X   SPIS_DIV 0x%08X (ratio=%u)",
-              divu, sysd, spisd, spis_div);
+  shell_print(sh, "DIV_UPDATE  0x%08X   SYS_DIV 0x%08X (ratio=%u)   SPIS_DIV 0x%08X (ratio=%u)",
+              divu, sysd, sys_div, spisd, spis_div);
 
-  /* Infer the SPI_S core clock and the ¼-rule host ceiling. */
-  const char *src = pllclk_sel ? "PLL(800MHz)" : "REF(25MHz)";
-  uint32_t core_mhz = pllclk_sel ? (spis_div ? 800 / spis_div : 800)
-                                 : (spis_div ? 25 / spis_div : 25);
+  /* Infer the SPI_S core clock and the ¼-rule host ceiling, plus the core clock. */
+  const char *src = pllclk_sel ? "PLL" : "REF(25MHz)";
+  uint32_t spis_core_mhz = spis_div ? pllclk_mhz / spis_div : pllclk_mhz;
+  uint32_t sys_core_mhz = sys_div ? pllclk_mhz / sys_div : pllclk_mhz;
   shell_print(sh,
               "=> SPI_S core src=%s div=%u => ~%u MHz => host SCK ceiling ~%u MHz",
-              src, spis_div, core_mhz, core_mhz / 4);
+              src, spis_div, spis_core_mhz, spis_core_mhz / 4);
+  shell_print(sh, "=> core (SYS) src=%s div=%u => ~%u MHz", src, sys_div,
+              sys_core_mhz);
   shell_print(sh, "(clock left at 1.4 MHz; use akd_pll_on then spi_freq/akd_probe)");
   return 0;
 }
@@ -2622,6 +2635,99 @@ static int cmd_akd_pll_on(const struct shell *sh, size_t argc, char **argv) {
               genr, genr & 1, spisd, core, core / 4);
   shell_print(sh, "(clock left at 1.4 MHz; now raise with spi_freq/akd_probe)");
   return 0;
+}
+
+/* Set the AKD1500 core clock (Hz). Refuse while KWS runs — it sleeps the chip
+ * per-inference (clocks gated), so a change would race and not land; stop it
+ * first (app stop). Wakes the chip so the write lands after a stop. */
+static int cmd_akd_coreclk(const struct shell *sh, size_t argc, char **argv) {
+  if (argc != 2) {
+    shell_print(sh, "Usage: akd_coreclk <hz>");
+    return -EINVAL;
+  }
+  if (kws_app_running) {
+    shell_print(sh, "KWS running — stop it first (app stop)");
+    return -EBUSY;
+  }
+  uint32_t hz = strtoul(argv[1], NULL, 0);
+  akd_sleep(false);
+  int rc = akd_core_clock_set(hz);
+  if (rc) {
+    shell_error(sh, "akd_coreclk %u failed (err %d)", hz, rc);
+    return rc;
+  }
+  uint32_t v = akd_reg_rd(AKD_DEVICE_ID_REG);
+  shell_print(sh, "core clock %u Hz; DEVICE_ID 0x%08X (%s)", hz, v,
+              v == AKD_DEVICE_ID_VAL ? "OK" : "BAD-read");
+  return 0;
+}
+
+/* Reprogram the AKD1500 PLL output (Hz), 600e6..800e6 in 12.5 MHz steps. Drops
+ * host SPI during the switch, so refuse while KWS runs. Leaves host at 1.4 MHz. */
+static int cmd_akd_pll(const struct shell *sh, size_t argc, char **argv) {
+  if (argc != 2) {
+    shell_print(sh, "Usage: akd_pll <hz>  (600e6..800e6, 12.5 MHz steps)");
+    return -EINVAL;
+  }
+  if (kws_app_running) {
+    shell_print(sh, "KWS running — stop it first (app stop)");
+    return -EBUSY;
+  }
+  uint32_t hz = strtoul(argv[1], NULL, 0);
+  akd_sleep(false);
+  int rc = akd_pll_set(hz);
+  if (rc) {
+    shell_error(sh, "akd_pll %u failed (err %d)", hz, rc);
+    return rc;
+  }
+  uint32_t v = akd_reg_rd(AKD_DEVICE_ID_REG);
+  shell_print(sh, "PLL %u Hz; DEVICE_ID 0x%08X (%s) (host @1.4 MHz; raise with spi_freq)",
+              hz, v, v == AKD_DEVICE_ID_VAL ? "OK" : "BAD-read");
+  return 0;
+}
+
+/* Set the core (SYS) divider off the current PLLCLK: akd_sysdiv <n>. Refuse while
+ * KWS runs (chip sleeps per-inference); wakes the chip so the write lands. */
+static int cmd_akd_sysdiv(const struct shell *sh, size_t argc, char **argv) {
+  if (argc != 2) {
+    shell_print(sh, "Usage: akd_sysdiv <n>");
+    return -EINVAL;
+  }
+  if (kws_app_running) {
+    shell_print(sh, "KWS running — stop it first (app stop)");
+    return -EBUSY;
+  }
+  uint32_t n = strtoul(argv[1], NULL, 0);
+  akd_sleep(false);
+  int rc = akd_sys_div_set(n);
+  if (rc) {
+    shell_error(sh, "akd_sysdiv %u rejected (err %d)", n, rc);
+    return rc;
+  }
+  uint32_t v = akd_reg_rd(AKD_DEVICE_ID_REG);
+  shell_print(sh, "SYS_DIV=%u; DEVICE_ID 0x%08X (%s)", n, v,
+              v == AKD_DEVICE_ID_VAL ? "OK" : "BAD-read");
+  return 0;
+}
+
+/* Run the AKD1500 from the 25 MHz reference (1) or back onto the PLL (0). Drops
+ * host SPI, so refuse while KWS runs. Leaves host at 1.4 MHz. */
+static int cmd_akd_clkref(const struct shell *sh, size_t argc, char **argv) {
+  if (argc != 2) {
+    shell_print(sh, "Usage: akd_clkref <0|1>");
+    return -EINVAL;
+  }
+  if (kws_app_running) {
+    shell_print(sh, "KWS running — stop it first (app stop)");
+    return -EBUSY;
+  }
+  bool on = strtoul(argv[1], NULL, 0) != 0;
+  akd_sleep(false);
+  int rc = akd_clk_use_ref(on);
+  uint32_t v = akd_reg_rd(AKD_DEVICE_ID_REG);
+  shell_print(sh, "AKD1500 clock: %s; DEVICE_ID 0x%08X (%s) (host @1.4 MHz)",
+              on ? "25 MHz ref" : "PLL", v, v == AKD_DEVICE_ID_VAL ? "OK" : "BAD-read");
+  return rc;
 }
 
 /* Read the device-ID <count> times at the CURRENT clock; report mismatches. */
@@ -2743,6 +2849,23 @@ static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
 }
 
 /* shell cli function to invoke erase function */
+#ifdef CONFIG_SPARK_BOARD
+/* `app stop` deep idle: PLL off (25 MHz ref) + sleep. */
+static void kws_enter_low_power(void) {
+  akd_sleep(false);
+  akd_clk_use_ref(true);
+  akd_sleep(true);
+}
+/* `app start` operating state: PLL on (800 MHz, 400 MHz core), host clock
+ * restored, asleep until the first inference. */
+static void kws_exit_low_power(void) {
+  akd_sleep(false);
+  akd_clk_use_ref(false);
+  akd_spi_set_clock(CONFIG_AKD_SPI_FREQ_HZ);
+  akd_sleep(true);
+}
+#endif
+
 static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
   LOG_INF("cmd exec argc %d", argc);
   if (argc > 1) {
@@ -2751,7 +2874,13 @@ static int cmd_app(const struct shell *shell, size_t argc, char **argv) {
       LOG_INF("verbose_on = %d", verbose_on);
     } else if (!strcmp(argv[1], "stop")) {
       kws_app_stop();
+#ifdef CONFIG_SPARK_BOARD
+      kws_enter_low_power();
+#endif
     } else if (!strcmp(argv[1], "start")) {
+#ifdef CONFIG_SPARK_BOARD
+      kws_exit_low_power();
+#endif
       kws_app_start();
     } else if (!strcmp(argv[1], "el")) {
       if (argc > 2) {
@@ -3052,6 +3181,18 @@ SHELL_CMD_REGISTER(akd_clkinfo, NULL,
 SHELL_CMD_REGISTER(akd_pll_on, NULL,
                    "Switch AKD1500 SPI_S core clock onto the 400 MHz PLL",
                    cmd_akd_pll_on);
+SHELL_CMD_REGISTER(akd_coreclk, NULL,
+                   "Set AKD1500 core clock (Hz): akd_coreclk <hz>",
+                   cmd_akd_coreclk);
+SHELL_CMD_REGISTER(akd_pll, NULL,
+                   "Reprogram AKD1500 PLL output (Hz): akd_pll <600e6..800e6>",
+                   cmd_akd_pll);
+SHELL_CMD_REGISTER(akd_sysdiv, NULL,
+                   "Set AKD1500 core (SYS) divider: akd_sysdiv <n>",
+                   cmd_akd_sysdiv);
+SHELL_CMD_REGISTER(akd_clkref, NULL,
+                   "AKD1500 clock source: akd_clkref <0=PLL|1=25MHz ref>",
+                   cmd_akd_clkref);
 SHELL_CMD_REGISTER(akd_rdtest, NULL,
                    "Read device-ID N times at current clock: akd_rdtest <count>",
                    cmd_akd_rdtest);
