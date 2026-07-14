@@ -17,17 +17,16 @@
 #define ADC_REF_MV_1v8 1800.0f
 
 /* ------------------------------------------------------------------------- */
-/* INA190A1 current-sense conversion                                         */
+/* INA190 current-sense conversion (shunts verified against Board BOM V10).  */
 /* U25 senses VDD_1V8 (shunt R117), U26 senses VDD_0V8_AKD (shunt R118).     */
 /* Vout(mV) = I(mA) * Rshunt(ohm) * gain  =>  I(mA) = Vout(mV) / (Rshunt*gain)*/
-/* Shunt values are from the board schematic (POWER sheet); validate against  */
-/* a known load on the bench.                                                */
+/* The A1/A3 difference is amplifier gain only; the shunts are board parts    */
+/* (same on the A1 board — re-verify against the A3 board BOM).               */
 /* ------------------------------------------------------------------------- */
-#define INA_GAIN 25.0f       /* INA190A1RSW gain (V/V) */
-#define SHUNT_OHMS_1V8 0.1f  /* R117 */
-#define SHUNT_OHMS_0V8 0.02f /* R118 */
-#define I_PER_MV_1V8 (1.0f / (SHUNT_OHMS_1V8 * INA_GAIN)) /* mA per mV (=0.4) */
-#define I_PER_MV_0V8 (1.0f / (SHUNT_OHMS_0V8 * INA_GAIN)) /* mA per mV (=2.0) */
+#define SHUNT_OHMS_1V8 0.1f    /* R117 */
+#define SHUNT_OHMS_0V8 0.02f   /* R118 */
+#define INA190_GAIN_A1 25.0f   /* INA190A1RSW gain (V/V) */
+#define INA190_GAIN_A3 100.0f  /* INA190A3RSW gain (V/V) */
 
 /* Nominal regulated rail voltages (V), used for power/energy since the
  * INA190 chain measures current only. */
@@ -43,7 +42,7 @@
 #define CURRENT_RATE_MIN_HZ 1
 #define CURRENT_RATE_MAX_HZ 1000
 #ifndef CONFIG_CURRENT_DEFAULT_RATE_HZ
-#define CONFIG_CURRENT_DEFAULT_RATE_HZ 100
+#define CONFIG_CURRENT_DEFAULT_RATE_HZ 10
 #endif
 
 typedef enum {
@@ -62,6 +61,14 @@ typedef enum {
   CURRENT_RAIL_0V8 = 1, /* U26 -> SAADC AIN1 */
   CURRENT_RAIL_COUNT
 } current_rail_t;
+
+/* Fitted INA190 amplifier variant (gain). Cannot be auto-detected (analog
+ * part, no board ID), so it is selected: boot default CONFIG_INA190_VARIANT,
+ * overridable at runtime. */
+typedef enum {
+  INA190_A1 = 0, /* gain 25 V/V (current Spark board) */
+  INA190_A3 = 1, /* gain 100 V/V */
+} ina190_variant_t;
 
 /* Latest per-rail current/power snapshot maintained by the sampler. */
 typedef struct {
@@ -122,6 +129,20 @@ void current_sense_set_rate(uint16_t rate_hz);
 
 /* Current sampler rate (Hz). */
 uint16_t current_sense_get_rate(void);
+
+/* Select the fitted INA190 variant (recomputes the current conversion). Safe
+ * to call anytime; no hardware access. */
+void current_sense_set_variant(ina190_variant_t variant);
+
+/* Currently selected INA190 variant. */
+ina190_variant_t current_sense_get_variant(void);
+
+/* Blocking averaged measurement over @p window_ms, sampled independently of
+ * the background rate. Fills @p avg (mean current/power per rail) and @p energy
+ * (integrated over the window); either may be NULL. Returns 0, -EINVAL if
+ * @p window_ms is 0. */
+int current_sense_measure(uint16_t window_ms, current_sense_reading_t *avg,
+                          current_energy_t *energy);
 
 #ifdef __cplusplus
 }

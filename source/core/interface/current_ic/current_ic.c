@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "ble_services/ble_initialization.h"
 #include "current_ic/current_ic.h"
@@ -39,8 +40,14 @@ static const struct adc_dt_spec adc_channels[] = {
 
 static const float adc_scale = ADC_REF_MV_1v8 / (float)ADC_MAX_VALUE;
 
-/* Per-rail conversion (mA per output mV) and nominal rail voltage (V). */
-static const float i_per_mv[CURRENT_RAIL_COUNT] = {I_PER_MV_1V8, I_PER_MV_0V8};
+/* Per-rail conversion (mA per output mV) and nominal rail voltage (V).
+ * i_per_mv is recomputed on a variant change; defaults to the A1 gain. */
+static const float shunt_ohms[CURRENT_RAIL_COUNT] = {SHUNT_OHMS_1V8,
+                                                     SHUNT_OHMS_0V8};
+static float i_per_mv[CURRENT_RAIL_COUNT] = {
+    1.0f / (SHUNT_OHMS_1V8 * INA190_GAIN_A1),
+    1.0f / (SHUNT_OHMS_0V8 * INA190_GAIN_A1)};
+static ina190_variant_t ina_variant = INA190_A1;
 static const float rail_voltage[CURRENT_RAIL_COUNT] = {RAIL_VOLTAGE_1V8,
                                                        RAIL_VOLTAGE_0V8};
 
@@ -50,6 +57,18 @@ static current_sense_reading_t latest;      /* latest current/power snapshot */
 static float energy_uj[CURRENT_RAIL_COUNT]; /* integrated since last reset */
 static int64_t energy_start_ms;             /* energy reset time base */
 static volatile uint16_t sample_rate_hz = CONFIG_CURRENT_DEFAULT_RATE_HZ;
+
+/* Serializes ADC access (shared buf/sequences) between the sampler thread and
+ * a current_sense_measure() caller. */
+static K_MUTEX_DEFINE(adc_lock);
+
+/* Moving average behind the published snapshot (smooths `power read`); energy
+ * still integrates the instantaneous per-loop power. */
+#define SNAP_AVG_SAMPLES 8
+static float ma_hist[CURRENT_RAIL_COUNT][SNAP_AVG_SAMPLES];
+static float mw_hist[CURRENT_RAIL_COUNT][SNAP_AVG_SAMPLES];
+static int hist_idx;
+static int hist_count;
 
 #define CHRG_STS1_NODE DT_NODELABEL(chgr_sts1)
 #define CHRG_STS2_NODE DT_NODELABEL(chgr_sts2)
@@ -112,6 +131,9 @@ int bat_sts_gpio_init(void) {
  */
 int current_ic_init(void) {
   int err;
+
+  current_sense_set_variant(IS_ENABLED(CONFIG_INA190_VARIANT_A3) ? INA190_A3
+                                                                 : INA190_A1);
 
   /* Configure channels individually prior to sampling. */
   for (size_t i = 0U; i < ARRAY_SIZE(adc_channels); i++) {
@@ -180,6 +202,7 @@ static int sample_rail_ma(current_rail_t rail, float *out_ma) {
   float sum = 0.0f;
   int valid = 0;
 
+  k_mutex_lock(&adc_lock, K_FOREVER);
   for (int i = 0; i < CURRENT_AVG_SAMPLES; i++) {
     int err = adc_read_dt(&adc_channels[rail], &sequences[rail]);
     if (err < 0) {
@@ -190,6 +213,7 @@ static int sample_rail_ma(current_rail_t rail, float *out_ma) {
     sum += val_mv * i_per_mv[rail];
     valid++;
   }
+  k_mutex_unlock(&adc_lock);
 
   if (valid == 0) {
     *out_ma = 0.0f;
@@ -250,9 +274,22 @@ void current_data_thread(void *a, void *b, void *c) {
 
     k_mutex_lock(&snap_lock, K_FOREVER);
     for (int r = 0; r < CURRENT_RAIL_COUNT; r++) {
-      latest.current_ma[r] = ma[r];
-      latest.power_mw[r] = mw[r];
-      energy_uj[r] += mw[r] * (float)dt_ms; /* mW * ms = uJ */
+      ma_hist[r][hist_idx] = ma[r];
+      mw_hist[r][hist_idx] = mw[r];
+      energy_uj[r] += mw[r] * (float)dt_ms; /* mW * ms = uJ (instantaneous) */
+    }
+    hist_idx = (hist_idx + 1) % SNAP_AVG_SAMPLES;
+    if (hist_count < SNAP_AVG_SAMPLES) {
+      hist_count++;
+    }
+    for (int r = 0; r < CURRENT_RAIL_COUNT; r++) {
+      float s_ma = 0.0f, s_mw = 0.0f;
+      for (int i = 0; i < hist_count; i++) {
+        s_ma += ma_hist[r][i];
+        s_mw += mw_hist[r][i];
+      }
+      latest.current_ma[r] = s_ma / hist_count;
+      latest.power_mw[r] = s_mw / hist_count;
     }
     k_mutex_unlock(&snap_lock);
 
@@ -351,6 +388,67 @@ void current_sense_set_rate(uint16_t rate_hz) {
 
 uint16_t current_sense_get_rate(void) { return sample_rate_hz; }
 
+void current_sense_set_variant(ina190_variant_t variant) {
+  float gain = (variant == INA190_A3) ? INA190_GAIN_A3 : INA190_GAIN_A1;
+  k_mutex_lock(&snap_lock, K_FOREVER);
+  ina_variant = variant;
+  for (int r = 0; r < CURRENT_RAIL_COUNT; r++) {
+    i_per_mv[r] = 1.0f / (shunt_ohms[r] * gain);
+  }
+  k_mutex_unlock(&snap_lock);
+}
+
+ina190_variant_t current_sense_get_variant(void) { return ina_variant; }
+
+/* Inter-sample spacing of the averaged burst (ms). */
+#define MEASURE_STEP_MS 5
+
+int current_sense_measure(uint16_t window_ms, current_sense_reading_t *avg,
+                          current_energy_t *energy) {
+  if (window_ms == 0) {
+    return -EINVAL;
+  }
+
+  float sum_ma[CURRENT_RAIL_COUNT] = {0};
+  float e_uj[CURRENT_RAIL_COUNT] = {0};
+  uint32_t n = 0;
+  int64_t start = k_uptime_get();
+  int64_t last = start;
+
+  while ((uint32_t)(k_uptime_get() - start) < window_ms) {
+    float ma[CURRENT_RAIL_COUNT];
+    for (int r = 0; r < CURRENT_RAIL_COUNT; r++) {
+      sample_rail_ma((current_rail_t)r, &ma[r]);
+      sum_ma[r] += ma[r];
+    }
+    int64_t now = k_uptime_get();
+    uint32_t dt = (uint32_t)(now - last);
+    last = now;
+    for (int r = 0; r < CURRENT_RAIL_COUNT; r++) {
+      e_uj[r] += ma[r] * rail_voltage[r] * (float)dt;
+    }
+    n++;
+    k_msleep(MEASURE_STEP_MS);
+  }
+
+  uint32_t dur = (uint32_t)(last - start);
+  for (int r = 0; r < CURRENT_RAIL_COUNT; r++) {
+    float mean_ma = (n > 0) ? sum_ma[r] / (float)n : 0.0f;
+    if (avg) {
+      avg->current_ma[r] = mean_ma;
+      avg->power_mw[r] = mean_ma * rail_voltage[r];
+    }
+    if (energy) {
+      energy->energy_uj[r] = e_uj[r];
+      energy->avg_power_mw[r] = (dur > 0) ? e_uj[r] / (float)dur : 0.0f;
+    }
+  }
+  if (energy) {
+    energy->duration_ms = dur;
+  }
+  return 0;
+}
+
 /* --- Shell: `power` ------------------------------------------------------- */
 
 static int cmd_power_read(const struct shell *sh, size_t argc, char **argv) {
@@ -396,14 +494,57 @@ static int cmd_power_reset(const struct shell *sh, size_t argc, char **argv) {
   return 0;
 }
 
+static int cmd_power_measure(const struct shell *sh, size_t argc, char **argv) {
+  uint16_t window = 500;
+  if (argc > 1) {
+    int v = atoi(argv[1]);
+    if (v > 0) {
+      window = (uint16_t)v;
+    }
+  }
+  current_sense_reading_t avg;
+  current_energy_t e;
+  current_sense_measure(window, &avg, &e);
+  shell_print(sh, "avg over %u ms:", e.duration_ms);
+  shell_print(sh, "  1V8: %.2f mA  %.2f mW  %.1f uJ",
+              (double)avg.current_ma[CURRENT_RAIL_1V8],
+              (double)avg.power_mw[CURRENT_RAIL_1V8],
+              (double)e.energy_uj[CURRENT_RAIL_1V8]);
+  shell_print(sh, "  0V8: %.2f mA  %.2f mW  %.1f uJ",
+              (double)avg.current_ma[CURRENT_RAIL_0V8],
+              (double)avg.power_mw[CURRENT_RAIL_0V8],
+              (double)e.energy_uj[CURRENT_RAIL_0V8]);
+  return 0;
+}
+
+static int cmd_power_variant(const struct shell *sh, size_t argc, char **argv) {
+  if (argc > 1) {
+    if (!strcmp(argv[1], "a1")) {
+      current_sense_set_variant(INA190_A1);
+    } else if (!strcmp(argv[1], "a3")) {
+      current_sense_set_variant(INA190_A3);
+    } else {
+      shell_error(sh, "usage: power variant [a1|a3]");
+      return -EINVAL;
+    }
+  }
+  shell_print(sh, "INA190 variant = %s",
+              current_sense_get_variant() == INA190_A3 ? "a3" : "a1");
+  return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(
     power_cmds,
     SHELL_CMD(read, NULL, "Print current & power for both rails", cmd_power_read),
+    SHELL_CMD(measure, NULL, "Averaged current/power/energy over a window: measure [ms]",
+              cmd_power_measure),
     SHELL_CMD(rate, NULL, "Get/set sampler rate in Hz: rate [hz]",
               cmd_power_rate),
     SHELL_CMD(energy, NULL, "Print accumulated energy & average power",
               cmd_power_energy),
     SHELL_CMD(reset, NULL, "Reset the energy accumulator", cmd_power_reset),
+    SHELL_CMD(variant, NULL, "Get/set INA190 variant: variant [a1|a3]",
+              cmd_power_variant),
     SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(power, &power_cmds, "INA190 current/power/energy", NULL);
