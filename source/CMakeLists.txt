@@ -54,6 +54,7 @@ target_sources(app PRIVATE
 	core/interface/akd_spi_flash/akd1500_spi_driver.cpp
 	core/interface/akd_spi_flash/akd_spi_flash_handler.cpp
 	core/interface/ble_services/file_transfer.c
+    core/interface/ble_services/imu_ble.c
 	core/interface/ble_services/ble_initialization.c
     core/interface/ble_services/battery_service.c
     core/interface/ble_services/edge_learning.c

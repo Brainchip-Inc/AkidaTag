@@ -3,6 +3,7 @@
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 #include "watchdog_h/watchdog.h"
 #endif
+#include "ble_services/imu_ble.h"
 #include <math.h>
 #include <string.h>
 #include <zephyr/device.h>
@@ -41,8 +42,8 @@ static float gyr_sens;
 
 /* ================= OFFSETS ================= */
 
-static float acc_offset[SEN_DATA_COUNT];
-static float gyro_offset[SEN_DATA_COUNT];
+int32_t acc_offset[SEN_DATA_COUNT] = {0};
+int32_t gyro_offset[SEN_DATA_COUNT] = {0};
 #if CONFIG_IMU_USE_INTERRUPT
 static float acc_filt[SEN_DATA_COUNT];
 static float gyro_filt[SEN_DATA_COUNT];
@@ -518,7 +519,7 @@ static void imu_calibrate(void) {
 
   acc_offset[0] = acc_sum[0] / CAL_SAMPLES;
   acc_offset[1] = acc_sum[1] / CAL_SAMPLES;
-  acc_offset[2] = (acc_sum[2] / CAL_SAMPLES) - (int32_t)acc_sens;
+  acc_offset[2] = (acc_sum[2] / CAL_SAMPLES) - (int32_t)ACC_1G_RAW;
 
   gyro_offset[0] = gyr_sum[0] / CAL_SAMPLES;
   gyro_offset[1] = gyr_sum[1] / CAL_SAMPLES;
@@ -731,14 +732,24 @@ void imu_data_thread(void *a, void *b, void *c) {
 
       imu_read_raw(&data);
 
-      float ax = (data.accel[0] * acc_sens) / MG_PER_G;
-      float ay = (data.accel[1] * acc_sens) / MG_PER_G;
-      float az = (data.accel[2] * acc_sens) / MG_PER_G;
+      int32_t acc_x = data.accel[0] - acc_offset[0];
+      int32_t acc_y = data.accel[1] - acc_offset[1];
+      int32_t acc_z = data.accel[2] - acc_offset[2];
 
-      float gx = (data.gyro[0] * gyr_sens) / MDPS_PER_DPS;
-      float gy = (data.gyro[1] * gyr_sens) / MDPS_PER_DPS;
-      float gz = (data.gyro[2] * gyr_sens) / MDPS_PER_DPS;
+      int32_t gyr_x = data.gyro[0] - gyro_offset[0];
+      int32_t gyr_y = data.gyro[1] - gyro_offset[1];
+      int32_t gyr_z = data.gyro[2] - gyro_offset[2];
 
+      float ax = (acc_x * acc_sens) / MG_PER_G;
+      float ay = (acc_y * acc_sens) / MG_PER_G;
+      float az = (acc_z * acc_sens) / MG_PER_G;
+
+      float gx = (gyr_x * gyr_sens) / MDPS_PER_DPS;
+      float gy = (gyr_y * gyr_sens) / MDPS_PER_DPS;
+      float gz = (gyr_z * gyr_sens) / MDPS_PER_DPS;
+      if (imu_is_streaming()) {
+        imu_send_data(acc_x, acc_y, acc_z, gyr_x, gyr_y, gyr_z);
+      }
       // LOG_INF("%f,%f,%f,%f,%f,%f", ax, ay, az, gx, gy, gz);
     }
 
@@ -761,3 +772,15 @@ SHELL_CMD_REGISTER(
     "1.ACC ODR 2.ACC FS 3.GYRO ODR 4.GYRO FS 5.FIFO ACC ODR 6.FIFO GYRO ODR",
     cmd_imu_start);
 SHELL_CMD_REGISTER(imu_stop, NULL, "imu_stop", cmd_imu_stop);
+static int cmd_imu_calibrate(const struct shell *shell, size_t argc,
+                             char **argv) {
+  ARG_UNUSED(argc);
+  ARG_UNUSED(argv);
+
+  imu_calibrate();
+  shell_print(shell, "IMU calibration triggered");
+
+  return 0;
+}
+
+SHELL_CMD_REGISTER(imu_calibrate, NULL, "Calibrate IMU", cmd_imu_calibrate);

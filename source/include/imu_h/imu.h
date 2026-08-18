@@ -179,7 +179,9 @@ struct ism330_data {
   int16_t accel[3];
   int16_t gyro[3];
 };
-
+#define ACC_1G_RAW 4098
+extern int32_t acc_offset[SEN_DATA_COUNT];
+extern int32_t gyro_offset[SEN_DATA_COUNT];
 /* Public APIs */
 int32_t imu_init();
 void imu_data_thread(void *a, void *b, void *c);

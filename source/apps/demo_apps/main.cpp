@@ -35,9 +35,9 @@
 #include "sample_input/kws/kws_inputs.h"
 #include <akd1500/akd1500_spi_driver.h>
 #include <cmath>
-#include <new>
 #include <hardware_device_impl.h>
 #include <infra/system.h>
+#include <new>
 #include <stdio.h>
 #include <stdlib.h>
 #include <zephyr/device.h>

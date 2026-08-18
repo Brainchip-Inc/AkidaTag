@@ -54,8 +54,8 @@ extern struct k_event sram_buf_event;
 typedef struct {
   uint32_t model_info_hdr_crc32; /**< CRC32(hdr[total_length..model_name] ||
                                     info_bytes) */
-  uint32_t total_length;     /**< program_info size + program_data size (bytes) */
-  uint32_t input_shape[3];   /**< e.g. {49, 10, 1}, zero-padded             */
+  uint32_t total_length;   /**< program_info size + program_data size (bytes) */
+  uint32_t input_shape[3]; /**< e.g. {49, 10, 1}, zero-padded             */
   uint32_t output_shape[3];  /**< e.g. {10, 1}, zero-padded               */
   uint32_t flash_address;    /**< SPI flash addr for data                 */
   uint32_t is_edge_learned;  /**< 1 = edge-learning model                 */
