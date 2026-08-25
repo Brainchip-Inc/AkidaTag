@@ -53,19 +53,22 @@
     };
 };
 &pinctrl {
+    /* SPIM2 now drives the nRF storage flash (relocated off SPIM4 so the Akida
+     * can take SPIM4). Same physical flash pins P0.17/13/14; standard drive and
+     * <=8 MHz are plenty for littlefs storage. */
     spi2_default: spi2_default {
         group1 {
-            psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
-                    <NRF_PSEL(SPIM_MISO, 1, 8)>,  /* Use P1.08 for MISO on DK board since P0.10 used on custom board is not available */
-                    <NRF_PSEL(SPIM_MOSI, 0, 9)>;
+            psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 14)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 13)>;
         };
     };
 
     spi2_sleep: spi2_sleep {
         group1 {
-            psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
-                    <NRF_PSEL(SPIM_MISO, 1, 8)>,
-                    <NRF_PSEL(SPIM_MOSI, 0, 9)>;
+            psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 14)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 13)>;
             low-power-enable;
         };
     };
@@ -123,20 +126,23 @@
 				low-power-enable;
 		};
 	};
-/* SPI pins for external flash */
+    /* Akida host SPI on SPIM4 (only nRF5340 instance that does >8 MHz).
+     * P0.08=SCK, P0.09=MOSI, P0.10=MISO (MISO jumper moved P1.08 -> P0.10 for
+     * SPIM4). HIGH DRIVE (H0H1) for clean SCK/MOSI edges at 16/32 MHz. */
     spi4_default: spi4_default {
 		group1 {
-				psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
-						<NRF_PSEL(SPIM_MOSI, 0, 13)>,
-						<NRF_PSEL(SPIM_MISO, 0, 14)>;
+				psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+						<NRF_PSEL(SPIM_MISO, 0, 10)>,
+						<NRF_PSEL(SPIM_MOSI, 0, 9)>;
+				nordic,drive-mode = <NRF_DRIVE_H0H1>;
 		};
 	};
 
 	spi4_sleep: spi4_sleep {
 		group1 {
-				psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
-						<NRF_PSEL(SPIM_MOSI, 0, 13)>,
-						<NRF_PSEL(SPIM_MISO, 0, 14)>;
+				psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+						<NRF_PSEL(SPIM_MISO, 0, 10)>,
+						<NRF_PSEL(SPIM_MOSI, 0, 9)>;
 				low-power-enable;
 		};
 	};
@@ -186,29 +192,23 @@ dmic_dev: &pdm0 {
 };
 
 
+/* SPIM2 now hosts the nRF storage flash (moved here from SPIM4). */
 &spi2 {
     compatible = "nordic,nrf-spim";
     status = "okay";
     pinctrl-0 = <&spi2_default>;
     pinctrl-1 = <&spi2_sleep>;
     pinctrl-names = "default", "sleep";
-    cs-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>,  /* CS for AKIDA */
-               <&gpio0 12 GPIO_ACTIVE_LOW>;  /* CS for AKIDA flash (CS pin for AKIDA flash changed to pin p0.12 according to schematic)*/
+    cs-gpios = <&gpio0 18 GPIO_ACTIVE_LOW>;  /* CS for nRF storage flash */
 
-    /* camera device at index 0 */
-    akd: akd@0 {
-        compatible = "spi-device";
-        reg = <0>;  /* Uses first CS pin (P0.11) */
+    /* nRF storage flash (littlefs) at index 0 */
+    ext_flash: flash@0 {
+        compatible = "jedec,spi-nor";
+        reg = <0>;
         spi-max-frequency = <8000000>;
-        label = "AKD";
-    };
-
-    /* W25Q128 Flash device at index 1 */
-    akd_flash: akd_flash@1 {
-        compatible = "spi-device";  /* Use spi-device for manual control */
-        reg = <1>;  /* Uses second CS pin (P0.12) */
-        spi-max-frequency = <8000000>;
-        label = "AKD_FLASH";
+        label = "SPI_FLASH";
+        size = <DT_SIZE_M(64)>;
+        jedec-id = [c2 28 17];
     };
 };
 
@@ -236,24 +236,38 @@ dmic_dev: &pdm0 {
         label = "CAMERA";
     };
 };
+/* Akida moved onto SPIM4 (up to 32 MHz). Same akida bus, CS P0.11/P0.12. The
+ * host clock is bounded by the AKD1500 SPI_S core clock (¼-rule, §3.7.1): needs
+ * the SPI_S core on the 400 MHz PLL (akd_core_clock_to_pll, done at boot), else
+ * it caps ~3-6 MHz on the reference/bypass clock. */
 &spi4 {
     compatible = "nordic,nrf-spim";
     status = "okay";
     pinctrl-0 = <&spi4_default>;
     pinctrl-1 = <&spi4_sleep>;
     pinctrl-names = "default", "sleep";
-    cs-gpios = <&gpio0 18 GPIO_ACTIVE_LOW>;  /* CS for NRF flash */
+    /* rx-delay=2 (MISO sample delay). The DK's long jumper wires add round-trip
+     * delay vs the spark PCB, so the sampling eye sits later: HW-swept, 16 & 32
+     * MHz read cleanly (0/500) at rxd 2-3 (spark used 1). NOTE: 4 & 8 MHz show
+     * intermittent first-byte errors on the DK jumper wiring that no rxd fixes —
+     * a DK signal-integrity artifact, not a chip limit. Use 16/32 MHz on the DK. */
+    rx-delay = <2>;
+    cs-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>,  /* CS for AKIDA */
+               <&gpio0 12 GPIO_ACTIVE_LOW>;  /* CS for AKIDA flash (S2M) */
 
-    /* NRF Flash device at index 0 */
-    ext_flash: flash@0 {
-        compatible = "jedec,spi-nor";
-        reg = <0>;
-        spi-max-frequency = <16000000>;
-        label = "SPI_FLASH";
+    akd: akd@0 {
+        compatible = "spi-device";
+        reg = <0>;  /* Uses first CS pin (P0.11) */
+        spi-max-frequency = <32000000>;
+        label = "AKD";
+    };
 
-        /* REQUIRED properties */
-        size = <DT_SIZE_M(64)>; /* 8MB example */
-        jedec-id = [c2 28 17]; /* example JEDEC ID */
+    /* W25Q128 flash accessed by the AKD1500 (S2M) */
+    akd_flash: akd_flash@1 {
+        compatible = "spi-device";  /* manual control */
+        reg = <1>;  /* Uses second CS pin (P0.12) */
+        spi-max-frequency = <8000000>;
+        label = "AKD_FLASH";
     };
 };
 / {
@@ -295,6 +309,7 @@ dmic_dev: &pdm0 {
         akdsleep = &akdsleep;
         akdreset = &akdreset;
         spi2 = &spi2;
+        akd-spi = &spi4;   /* Akida SPI bus: SPIM4 (up to 32 MHz); storage flash moved to SPIM2 */
         imui = &imui;
     };
 };

@@ -7,7 +7,6 @@
 #include <infra/hardware_driver.h>
 #include <vector>
 #include <zephyr/device.h>
-#include <zephyr/sys/printk.h>
 
 namespace akida {
 
@@ -15,14 +14,7 @@ class ZephyrSpiDriver : public AbstractSpiDriver {
 public:
   const struct device *spi_dev;
 
-  ZephyrSpiDriver() {
-    int ret = init_spi();
-    if (ret != 0) {
-      printk("Failed to initialize SPI in constructor! Error: %d\n", ret);
-    } else {
-      printk("SPI initialized in ZephyrSpiDriver constructor.\n");
-    }
-  }
+  ZephyrSpiDriver();
 
   // Manually initialize SPI
   int init_spi();
@@ -42,5 +34,25 @@ public:
 } // namespace akida
 void akd1500_send_custom_cmd(uint8_t opcode, const void *tx_data, size_t tx_len,
                              void *rx_data, size_t rx_len);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Set/get the AKD1500 host SPI (data path) clock in Hz. Takes effect on the
+ * next SPI transaction. Valid range 1 MHz .. 32 MHz; the nRF SPIM rounds down to
+ * the nearest supported divider (and SPIM2 caps at 8 MHz). Returns 0 on success,
+ * -EINVAL if out of range. */
+int akd_spi_set_frequency(uint32_t hz);
+uint32_t akd_spi_get_frequency(void);
+
+/* Read back the live SPIM4 FREQUENCY register (raw) to verify the clock on HW. */
+uint32_t akd_spi_read_freq_reg(void);
+/* Set IFTIMING.RXDELAY (0-7) on SPIM4; apply AFTER a frequency change. */
+void akd_spi_apply_rxdelay(uint32_t rxdelay);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // NRF_SPI_H

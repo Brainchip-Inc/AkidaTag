@@ -1,4 +1,5 @@
 #include "boot_manager.h"
+#include "ble_services/ble_initialization.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -7,8 +8,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/shell/shell.h>
 #include <zephyr/storage/flash_map.h>
-
 LOG_MODULE_REGISTER(boot_manager, LOG_LEVEL_INF);
 
 static uint32_t total_boot_count = 0;
@@ -186,6 +187,10 @@ void print_image_version(uint8_t area_id, const char *name) {
     LOG_INF("%s Version: %d.%d.%d+%d\n", name, header.h.v1.sem_ver.major,
             header.h.v1.sem_ver.minor, header.h.v1.sem_ver.revision,
             header.h.v1.sem_ver.build_num);
+    /* Update Firmware Version in Manufacturer Data */
+    adv_manufacturer_data[2] = '0' + header.h.v1.sem_ver.major;
+    adv_manufacturer_data[3] = '0' + header.h.v1.sem_ver.minor;
+    adv_manufacturer_data[4] = '0' + header.h.v1.sem_ver.revision;
   } else {
     LOG_ERR("Failed to read %s image header\n", name);
   }
@@ -194,3 +199,15 @@ void print_image_version(uint8_t area_id, const char *name) {
 uint32_t boot_count_get_total(void) { return total_boot_count; }
 uint32_t boot_count_get_firmware(void) { return fw_boot_count; }
 uint32_t boot_count_get_watchdog(void) { return wdt_boot_count; }
+
+static int cmd_wdt_count(const struct shell *shell, size_t argc, char **argv) {
+  uint32_t wdt_count;
+
+  wdt_count = boot_count_get_watchdog();
+
+  shell_print(shell, "Watchdog Reset Count: %u", wdt_count);
+
+  return 0;
+}
+
+SHELL_CMD_REGISTER(wdt_count, NULL, "Get watchdog reset count", cmd_wdt_count);

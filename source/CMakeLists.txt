@@ -55,20 +55,37 @@ target_sources(app PRIVATE
 	core/interface/akd_spi_flash/akd_spi_flash_handler.cpp
 	core/interface/ble_services/file_transfer.c
 	core/interface/ble_services/ble_initialization.c
+    core/interface/ble_services/battery_service.c
     core/interface/ble_services/edge_learning.c
 	core/interface/audio/pdm_mic.c
     core/interface/led/led_init.c
 	core/common/audio/mfcc.c
 	core/common/audio/audio_processor.c
 	core/common/inference/akida.cpp
+	core/common/inference/infer_utils.c
     core/interface/camera/spi_camera.c
 	core/io_objects.cpp
 	core/boot_manager.c
 	core/littlefs_storage.c
+	core/common/kws_config.c
 )
 if(CONFIG_CAMERA_ENABLE_THREAD)
     target_sources(app PRIVATE
         core/interface/camera/spi_camera.c
+    )
+endif()
+if(CONFIG_SPARK_BOARD)
+    target_sources(app PRIVATE
+        core/interface/gpio/gpio.c
+        core/interface/button/user_button.c
+        core/interface/current_ic/current_ic.c
+        core/interface/fuel_gauge/fuel_gauge.c
+        core/interface/battery/battery.c
+    )
+endif()
+if(CONFIG_SYS_CPU_128MHZ)
+    target_sources(app PRIVATE
+        core/interface/clock/sys_clock_cfg.c
     )
 endif()
 
@@ -121,6 +138,8 @@ target_compile_options(app PRIVATE
     -fdata-sections
     -fno-common
 )
+
+zephyr_compile_options(-Wno-double-promotion)
 
 #
 # -------------------------------------------------------------

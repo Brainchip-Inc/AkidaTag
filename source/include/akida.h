@@ -10,11 +10,20 @@
 void akida_toggle_clock_counter(bool enable);
 
 /**
- * Read clock from DMA clock counters
+ * Read clock from DMA clock counters (HRC/event = inference path).
  *
  * @return DMA clock counter value
  */
 uint32_t akida_get_clock_counter();
+
+/**
+ * Read the config-DMA clock counter (model-programming path). This is a
+ * separate counter from akida_get_clock_counter(); use it to time model
+ * programming (the inference counter stays idle during programming).
+ *
+ * @return config-DMA clock counter value
+ */
+uint32_t akida_get_config_clock_counter();
 
 /**
  * Program the model into the mesh network and set learning mode.
@@ -78,6 +87,20 @@ int akida_batch_size(int size, bool allocate_inputs);
  */
 int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
                   int output_size);
+
+/**
+ * Execute an inference on input data using the predict (dequantizing) path.
+ * Returns a float output buffer instead of raw integer activations.
+ *
+ * @param input        Input data buffer
+ * @param input_dims   Input dimensions [H, W, C]
+ * @param output       Float buffer where dequantized output is stored
+ * @param output_size_bytes  Size of the output buffer in bytes
+ *
+ * @return SUCCESS if output size matches, else error code
+ */
+int akida_predict(uint8_t *input, uint32_t *input_dims, float *output,
+                  int output_size_bytes);
 
 /**
  * Learn input

@@ -14,32 +14,41 @@
     pinctrl-names = "default", "sleep";
     cs-gpios = <&gpio0 18 GPIO_ACTIVE_LOW>;
  
-    ext_flash: mx25r6435f@0 {
+    mcuboot_ext_flash: mt25qu128aba@0 {
         compatible = "jedec,spi-nor";
         reg = <0>;
         spi-max-frequency = <8000000>;
-        size = <DT_SIZE_M(64)>;
-        jedec-id = [c2 28 17];
+        size = <DT_SIZE_M(128)>;
+        jedec-id = [20 bb 18];
         has-dpd;
         t-enter-dpd = <10000>;
         t-exit-dpd = <35000>;
-        mxicy,mx25r-power-mode = "low-power";
     };
 };
 / {
 	chosen {
-        nordic,pm-ext-flash = &ext_flash;
+        nordic,pm-ext-flash = &mcuboot_ext_flash;
     };
-   aliases {
-        mcuboot-button0 = &button1;
-		mcuboot-led0 = &led_1;
+    aliases {
+        mcuboot-button0 = &dfu_button;
+        mcuboot-led0 = &led_1;
+    };
+
+    /* DFU trigger button on P1.01 */
+    dfu_buttons {
+        compatible = "gpio-keys";
+
+        dfu_button: dfu_button_0 {
+            label = "DFU Button";
+            gpios = <&gpio1 1 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+        };
     };
  
     leds {
         compatible = "gpio-keys";
  
         led_1: led_1 {
-            label = "DFU Button";
+            label = "DFU LED";
             gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>;
  
         };

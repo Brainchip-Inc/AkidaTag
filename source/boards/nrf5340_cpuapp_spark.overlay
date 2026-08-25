@@ -41,7 +41,9 @@
 &pwm0 {
     status = "disabled";
 };
-
+&uicr {
+    nfct-pins-as-gpios;
+};
 /* Disable the entire gpio-keys and leds nodes if needed */
 / {
     buttons {
@@ -58,10 +60,33 @@
             psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
                     <NRF_PSEL(SPIM_MISO, 0, 10)>,
                     <NRF_PSEL(SPIM_MOSI, 0, 9)>;
+                    /* ADD THIS - disable trace function on these pins */
+                    nordic,drive-mode = <NRF_DRIVE_S0S1>;
         };
     };
 
     spi2_sleep: spi2_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 10)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 9)>;
+            low-power-enable;
+        };
+    };
+
+    /* Akida host SPI on SPIM4 (only nRF5340 instance that does >8 MHz).
+     * P0.08/09/10 are the dedicated high-speed pins; HIGH DRIVE (H0H1) is
+     * required for clean SCK/MOSI edges at 16/32 MHz. */
+    spi4_default: spi4_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 10)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 9)>;
+            nordic,drive-mode = <NRF_DRIVE_H0H1>;
+        };
+    };
+
+    spi4_sleep: spi4_sleep {
         group1 {
             psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
                     <NRF_PSEL(SPIM_MISO, 0, 10)>,
@@ -168,29 +193,48 @@ dmic_dev: &pdm0 {
 };
 
 
+/* Akida moved off SPIM2 (8 MHz HW cap) to SPIM4 (up to 32 MHz) on the same
+ * physical pins P0.08/09/10 + CS P0.11/P0.12. SPIM2 disabled to free the pins. */
 &spi2 {
+    status = "disabled";
+};
+
+&spi4 {
     compatible = "nordic,nrf-spim";
     status = "okay";
-    pinctrl-0 = <&spi2_default>;
-    pinctrl-1 = <&spi2_sleep>;
+    pinctrl-0 = <&spi4_default>;
+    pinctrl-1 = <&spi4_sleep>;
     pinctrl-names = "default", "sleep";
+    /* max-frequency (32 MHz) and rx-delay-supported come from the SoC dtsi.
+     * rx-delay=1 (MISO sample delay) reads cleanly at 8/16/32 MHz on this board
+     * (HW-swept: 32 MHz needs rxd 1-2; 8/16 MHz tolerate 0-2 — so 1 is universal).
+     * Zephyr re-applies this DT value on every reconfigure. Override at runtime
+     * with `spi_rxdelay`. */
+    rx-delay = <1>;
     cs-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>,  /* CS for AKIDA */
-               <&gpio0 12 GPIO_ACTIVE_LOW>;  /* CS for AKIDA flash (CS pin for AKIDA flash changed to pin p0.12 according to schematic)*/
+               <&gpio0 12 GPIO_ACTIVE_LOW>;  /* CS for AKIDA flash (S2M feedthrough) */
 
-    /* camera device at index 0 */
+    /* AKD1500 SPI-slave data interface. Host clock applied at runtime
+     * (CONFIG_AKD_SPI_FREQ_HZ default; `spi_freq` to sweep). Bounded by the
+     * AKD1500 SPI_S core clock (¼-rule, §3.7.1) — needs the SPI_S core on the
+     * 400 MHz PLL (see `akd_pll_on`), else it caps ~3-6 MHz on the bypass clock. */
     akd: akd@0 {
         compatible = "spi-device";
         reg = <0>;  /* Uses first CS pin (P0.11) */
-        spi-max-frequency = <8000000>;
+        spi-max-frequency = <32000000>;
         label = "AKD";
     };
 
-    /* W25Q128 Flash device at index 1 */
-    akd_flash: akd_flash@1 {
-        compatible = "spi-device";  /* Use spi-device for manual control */
-        reg = <1>;  /* Uses second CS pin (P0.12) */
+    /* mt25qu128aba Flash device at index 1 (accessed via AKD1500 S2M) */
+    akd_flash: mt25qu128aba@1 {        /* ← @1 to match reg = <1> */
+        compatible = "jedec,spi-nor";
+        reg = <1>;
         spi-max-frequency = <8000000>;
-        label = "AKD_FLASH";
+        size = <DT_SIZE_M(128)>;
+        jedec-id = [20 bb 18];
+        has-dpd;
+        t-enter-dpd = <10000>;
+        t-exit-dpd = <35000>;
     };
 };
 
@@ -215,20 +259,20 @@ dmic_dev: &pdm0 {
     /* camera device at index 0 */
     camera: camera@0 {
         compatible = "spi-device";
-        reg = <0>;  /* Uses first CS pin (P0.11) */
-        spi-max-frequency = <16000000>;
+        reg = <0>;  /* Uses first CS pin (P0.25) */
+        spi-max-frequency = <8000000>;
         label = "CAMERA";
     };
-    /* NRF Flash device at index 1 */
-    ext_flash: flash@1 {
+    /* NRF Flash device at index 1 mt25qu128aba*/
+    ext_flash: flash@0 {
         compatible = "jedec,spi-nor";
         reg = <1>;
-        spi-max-frequency = <16000000>;
-        label = "SPI_FLASH";
-
-        /* REQUIRED properties */
-        size = <DT_SIZE_M(64)>; /* 8MB example */
-        jedec-id = [c2 28 17]; /* example JEDEC ID */
+        spi-max-frequency = <8000000>;
+        size = <DT_SIZE_M(128)>;
+        jedec-id = [20 bb 18];
+        has-dpd;
+        t-enter-dpd = <10000>;
+        t-exit-dpd = <35000>;
     };
 };
 / {
@@ -240,21 +284,58 @@ dmic_dev: &pdm0 {
 / {
     gpios {
 		compatible = "gpio-keys";
-		akdsleep: akdsleep {
-			gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
+		akd_lp: akd_lp {
+			gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
 		};
 
         akdreset: akdreset {
 			gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
 		};
+
+        akd_async: akd_async {
+            gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+        };
 	
         imui: imui {
 			gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
-		};		
-		
+		};
+        akd_enb: akd_enb {
+            gpios = <&gpio0 19 GPIO_ACTIVE_HIGH>;
+        };
+        acc_enb: acc_enb {
+            gpios = <&gpio0 20 GPIO_ACTIVE_HIGH>;
+        };
+        pdm_enb: pdm_enb {
+            gpios = <&gpio0 21 GPIO_ACTIVE_HIGH>;
+        };
+        akd_0v_enb: akd_0v_enb {
+            gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
+        };
+		cam_enb: cam_enb {
+            gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
+        };
+        fg_int: fg_int {
+            gpios = <&gpio0 30 GPIO_ACTIVE_HIGH>;
+        };
+        chgr_sts1: chgr_sts1 {
+            gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
+        };
+        chgr_sts2: chgr_sts2 {
+            gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
+        };
 	};
 
-    leds {
+        /* ---------- Buttons ---------- */
+    custom_buttons {
+        compatible = "gpio-keys";
+
+        user_btn: user_btn {
+            gpios = <&gpio0 26 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "User Button";
+        };
+    };
+
+    custom_leds {
         compatible = "gpio-leds";
 
         led_red: led_red {
@@ -267,9 +348,54 @@ dmic_dev: &pdm0 {
     };
 
     aliases {
-        akdsleep = &akdsleep;
+        akd-lp = &akd_lp;
         akdreset = &akdreset;
         spi2 = &spi2;
+        akd-spi = &spi4;   /* Akida SPI bus moved to SPIM4 (up to 32 MHz). */
         imui = &imui;
+        akd-enb    = &akd_enb;
+        acc-enb    = &acc_enb;
+        pdm-enb    = &pdm_enb;
+        akd-0v-enb = &akd_0v_enb;
+        cam-enb = &cam_enb;
+        user-button = &user_btn;
+        akd-async  = &akd_async;
+        fg-int = &fg_int;
+        chgr-sts1 = &chgr_sts1;
+        chgr-sts2 = &chgr_sts2;
+    };
+};
+/ {
+    zephyr,user {
+        /* Two ADC channels — index 0 = 1V8 rail, index 1 = 0V8 rail */
+        io-channels = <&adc 0>, <&adc 1>;
+    };
+};
+
+&adc {
+    status = "okay";
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    /* CH0: 1V8_AKD rail — AIN0 = P0.04 */
+    channel@0 {
+        reg = <0>;
+        zephyr,gain              = "ADC_GAIN_1_3";
+        zephyr,reference         = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time  = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,input-positive    = <NRF_SAADC_AIN0>;
+        zephyr,resolution        = <12>;
+        /* NO oversampling — nRF SAADC only supports it for single channel */
+    };
+
+    /* CH1: 0V8_AKD rail — AIN1 = P0.05 */
+    channel@1 {
+        reg = <1>;
+        zephyr,gain              = "ADC_GAIN_1_3";
+        zephyr,reference         = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time  = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,input-positive    = <NRF_SAADC_AIN1>;
+        zephyr,resolution        = <12>;
+        /* NO oversampling — nRF SAADC only supports it for single channel */
     };
 };

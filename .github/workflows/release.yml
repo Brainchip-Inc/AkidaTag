@@ -55,6 +55,57 @@ jobs:
             exit 1
           fi
 
+      # Runs before the build so a missing or empty changelog entry fails the
+      # job in seconds rather than after a full firmware build.
+      - name: Build release body from CHANGELOG
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          HEADING="## [$VERSION]"
+
+          if [[ ! -f CHANGELOG.md ]]; then
+            echo "::error::CHANGELOG.md not found at the repository root"
+            exit 1
+          fi
+
+          # The version contains '+', which is a regex metacharacter, so the
+          # heading is matched as a literal prefix rather than as a pattern.
+          # Stops at the next '## ' heading so only this version is published.
+          awk -v h="$HEADING" '
+            index($0, h) == 1 { f = 1; next }
+            f && /^## / { exit }
+            f { print }
+          ' CHANGELOG.md > changelog-section.md
+
+          if ! grep -q '[^[:space:]]' changelog-section.md; then
+            echo "::error::No CHANGELOG.md section with content for $VERSION. Expected a heading of the exact form '$HEADING - YYYY-MM-DD'."
+            exit 1
+          fi
+
+          # Strip leading and trailing blank lines from the extracted section.
+          awk '
+            NF && !started { started = 1 }
+            started { buf[++n] = $0; if (NF) last = n }
+            END { for (i = 1; i <= last; i++) print buf[i] }
+          ' changelog-section.md > release-body.md
+
+          # Static footer: the artifact set is the same for every release, so it
+          # belongs to the release machinery rather than to the changelog.
+          cat >> release-body.md <<EOF
+
+          ## Artifacts
+
+          | File | Purpose |
+          |------|---------|
+          | \`spark-$VERSION.signed.hex\` | Signed firmware for JLink flashing |
+          | \`spark-$VERSION.signed.bin\` | Signed firmware for OTA/DFU via BLE |
+          | \`spark-$VERSION-merged.hex\` | MCUboot + app for initial programming |
+          | \`spark-$VERSION-dfu.zip\` | DFU package for nRF Connect mobile app |
+          | \`SHA256SUMS.txt\` | Integrity checksums |
+          EOF
+
+          echo "Release body:"
+          cat release-body.md
+
       - name: Free disk space
         run: |
           echo "Before cleanup:"
@@ -129,6 +180,6 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "Spark Firmware ${{ steps.version.outputs.tag }}"
           prerelease: ${{ steps.release_type.outputs.prerelease }}
-          body_path: RELEASE_NOTES.md
+          body_path: release-body.md
           files: |
             release-artifacts/*

@@ -49,18 +49,22 @@ extern struct k_event sram_buf_event;
  *   bits[15:0]  = num_classes_to_learn
  *
  * All uint32_t fields are little-endian (native on Cortex-M).
- * Total size: 48 bytes (uint32 fields) + 64 bytes (model_name) = 112 bytes.
+ * Total size: 64 bytes (uint32 fields) + 64 bytes (model_name) = 128 bytes.
  */
 typedef struct {
   uint32_t model_info_hdr_crc32; /**< CRC32(hdr[total_length..model_name] ||
                                     info_bytes) */
-  uint32_t total_length;     /**< (sizeof(model_meta_t)-8) + info_data_len */
+  uint32_t total_length;     /**< program_info size + program_data size (bytes) */
   uint32_t input_shape[3];   /**< e.g. {49, 10, 1}, zero-padded             */
   uint32_t output_shape[3];  /**< e.g. {10, 1}, zero-padded               */
   uint32_t flash_address;    /**< SPI flash addr for data                 */
   uint32_t is_edge_learned;  /**< 1 = edge-learning model                 */
   uint32_t num_edge_classes; /**< upper16=neurons, lower16=classes        */
   uint32_t info_data_len;    /**< bytes of program_info                   */
+  uint32_t mfcc_fs_bits;     /**< IEEE-754 bits of MFCC normalisation scalar */
+  uint32_t silence_class;    /**< Output index of silence class           */
+  uint32_t unknown_class;    /**< Output index of unknown/garbage class   */
+  uint32_t inference_mode;   /**< 0 = sync, 1 = async (from info.yaml)    */
   char model_name[MAX_FS_NAME_LEN]; /**< Model name, e.g. "kws"        */
 } model_meta_t;
 

@@ -30,6 +30,8 @@
 #include <zephyr/kernel.h>
 
 #include "kiss_fftr.h"
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(mfcc, LOG_LEVEL_DBG);
 
 static kiss_fftr_cfg kiss_cfg;
 
@@ -75,20 +77,20 @@ int mfcc_init(int features, int len, float _samplerate) {
   kiss_cfg = kiss_fftr_alloc(frame_len_padded, 0, NULL, NULL);
 
   if (!frame) {
-    printk("mfcc_init: frame alloc failed\n");
+    LOG_ERR("mfcc_init: frame alloc failed");
     return EFAILURE;
   }
   memset(frame, 0, bytes);
   buffer = (float *)malloc(bytes);
   if (!buffer) {
-    printk("mfcc_init: buffer alloc failed\n");
+    LOG_ERR("mfcc_init: buffer alloc failed");
     return EFAILURE;
   }
   memset(buffer, 0, bytes);
   bytes = NUM_FBANK_BINS * sizeof(float);
   mel_energies = (float *)malloc(bytes);
   if (!mel_energies) {
-    printk("mfcc_init: mel_energies alloc failed\n");
+    LOG_ERR("mfcc_init: mel_energies alloc failed");
     return EFAILURE;
   }
   memset(mel_energies, 0, bytes);
@@ -96,25 +98,26 @@ int mfcc_init(int features, int len, float _samplerate) {
   // create window function
   window_func = (float *)malloc(sizeof(float) * frame_len);
   if (!window_func) {
-    printk("mfcc_init: window_func alloc failed\n");
+    LOG_ERR("mfcc_init: window_func alloc failed");
     return EFAILURE;
   }
 
   for (int i = 0; i < frame_len; i++)
-    window_func[i] = 0.5f - 0.5f * cos(M_2PI * ((float)i) / (float)frame_len);
+    window_func[i] =
+        0.5f - 0.5f * cosf((float)M_2PI * (float)i / (float)frame_len);
 
   bytes = sizeof(int32_t) * NUM_FBANK_BINS;
   // create mel filterbank
   fbank_filter_first = (int32_t *)malloc(bytes);
   if (!fbank_filter_first) {
-    printk("mfcc_init: fbank_filter_first alloc failed\n");
+    LOG_ERR("mfcc_init: fbank_filter_first alloc failed");
     return EFAILURE;
   }
 
   memset(fbank_filter_first, 0, bytes);
   fbank_filter_last = (int32_t *)malloc(bytes);
   if (!fbank_filter_last) {
-    printk("mfcc_init: fbank_filter_last alloc failed\n");
+    LOG_ERR("mfcc_init: fbank_filter_last alloc failed");
     return EFAILURE;
   }
 
@@ -147,14 +150,16 @@ float *create_dct_matrix(int32_t input_length, int32_t coefficient_count) {
   int32_t k, n;
   float *M = (float *)malloc(sizeof(float) * input_length * coefficient_count);
   if (!M) {
-    printk("create_dct_matrix: M alloc failed\n");
+    LOG_ERR("create_dct_matrix: M alloc failed");
     return NULL;
   }
   float normalizer = sqrtf(2.0f / (float)input_length);
   for (k = 0; k < coefficient_count; k++) {
     for (n = 0; n < input_length; n++) {
       M[k * input_length + n] =
-          normalizer * cos(((double)M_PI) / input_length * (n + 0.5f) * k);
+          (float)((double)normalizer *
+                  cos(((double)M_PI) / (double)input_length *
+                      ((double)n + 0.5) * (double)k));
     }
   }
   return M;
@@ -171,13 +176,13 @@ float **create_mel_fbank() {
 
   float *this_bin = (float *)malloc(sizeof(float) * num_fft_bins);
   if (!this_bin) {
-    printk("create_mel_fbank: this_bin alloc failed\n");
+    LOG_ERR("create_mel_fbank: this_bin alloc failed");
     return NULL;
   }
 
   float **mel_fbank = (float **)malloc(sizeof(float *) * NUM_FBANK_BINS);
   if (!mel_fbank) {
-    printk("create_mel_fbank: mel_fbank alloc failed\n");
+    LOG_ERR("create_mel_fbank: mel_fbank alloc failed");
     return NULL;
   }
 
@@ -212,7 +217,7 @@ float **create_mel_fbank() {
     mel_fbank[bin] =
         (float *)malloc(sizeof(float) * (last_index - first_index + 1));
     if (!mel_fbank[bin]) {
-      printk("create_mel_fbank: mel_fbank[bin] alloc failed\n");
+      LOG_ERR("create_mel_fbank: mel_fbank[bin] alloc failed");
       return NULL;
     }
 

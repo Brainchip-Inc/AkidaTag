@@ -71,6 +71,8 @@ This allows the LED logic to operate in two modes:
 | FLASH_WRITE / FLASH FULL_ERASE    | Green ON, Red ON |
 | UPDATE_SUCCESS  | Both LEDs blink 3 times, then restore runtime state based on BLE status |
 | UPDATE_FAILED   | Green OFF, Red ON |
+| EL_SPEAK_PROMPT (Spark board)  | Red LED solid ON during each "speak now" prompt window in the edge-learning 5-utterance flow; cleared as soon as speech is detected or the flow is aborted/completed. Green LED behavior preserved. |
+| INFERENCE_TRIGGER (Spark board)| Red LED flashes ~500 ms on every keyword prediction in inference mode for at-a-glance trigger confirmation. |
 
 ### PDM MIC 
 This application uses the DMIC (PDM microphone) interface with PDM_CLK on P1.9 and PDM_DIN on P1.10.
@@ -134,7 +136,7 @@ during `spi_write()` and `spi_transceive()` calls. No manual GPIO toggling is re
 	The IMU parameters can also be configured at runtime using the shell command:
 	imu_start <acc_odr> <acc_fs> <gyro_odr> <gyro_fs> <fifo_acc_odr> <fifo_gyro_odr> <watermark>
 	Example:
-			imu_set 5 3 5 1 5 5 8
+			imu_start 5 3 5 1 5 5 8
 			This means:
 					ACC ODR = 208 Hz
 					ACC FS = ±8g
@@ -377,11 +379,44 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │         Akida_Nodes,      │                           │
      │         Power_Consumption"│                           │
      │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CONFIG:GET"       │                           │
+     │                           │                           ├───handle_config_command("GET")
+     │                           │                           │    6-frame snapshot burst, one
+     │                           │                           │    KWS param per frame
+     │                           │                           │    (MF_START, 4 × MF_MID, MF_LAST)
+     │                           │                           │
+     │◄──Receive Snapshot────────┼──────────────────────────────┤
+     │    "4:rms:550"            │                           │
+     │    "4:debounce_ms:300"    │                           │
+     │    "4:smoothing_alpha:0.70"                            │
+     │    "4:score_threshold:0.60"                            │
+     │    "4:chiming:3"          │                           │
+     │    "4:speech_timeout:1300"│                           │
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CONFIG:<id>:<v>"  │                           │
+     │   (SET single param)      │                           ├───kws_config_set_from_string()
+     │                           │                           │    range-check → write global →
+     │                           │                           │    persist NVS → bounce DMIC
+     │                           │                           │
+     │◄──Receive ACK─────────────┼──────────────────────────────┤
+     │    "4:<id>:OK"            │                           │   on success
+     │    "4:<id>:ERR:<reason>"  │                           │   reason: ID | RANGE | PARSE | NVS
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CONFIG:RESET"     │                           │
+     │                           │                           ├───kws_config_reset_to_defaults()
+     │                           │                           │
+     │◄──Receive ACK + Snapshot──┼──────────────────────────────┤
+     │    "4:RESET:OK"           │                           │
+     │    + 6-frame snapshot     │                           │
      │                           │                           │
 	 ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_START"     │                           │
-     │                           │                           ├───Set event_flag = true
-     │                           │                           │    (KWS detection send start)
+     │                           │                           ├───kws_app_start() + event_flag=1
+     │                           │                           │    (DMIC + KWS pipeline resumed,
+     │                           │                           │     KWS detections sent to phone)
      │                           │                           │
      │◄──Receive KWS Events──────┼──────────────────────────────┤
      │    "KWS:hello"            │                           │
@@ -390,25 +425,34 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_STREAM_START"     │                           │
-     │                           │                           ├───Set pdm_stream_flag = true
-     │                           │                           │    (Audio streaming active)
+     │                           │                           ├───Set pdm_stream_flag = FLAG_ENABLE
+     |                           |                           |   current_stream_flag = FLAG_DISABLE;
+     │                           │                           │    (PCM waveform stream active)
      │                           │                           │
-     │◄──Receive PDM Audio Data──┼──────────────────────────────┤
-     │    [Audio chunk 1]        │                           │
-     │    [Audio chunk 2]        │                           │
-     │    [Audio chunk 3]        │                           │
+     │◄──Binary PCM-envelope─────┼──────────────────────────────┤
+     │    notifications          │                           │   one frame per 60 ms audio block
+     │  CMD_STREAM_WAVE (0x0C)   │                           │   header: 'B', 0x0C, u16 seq LE,
+     │  ┌─ envelope mode ──────┐ │                           │           u16 n_samples LE
+     │  │ n_samples = 64       │ │                           │   envelope:    32 (min,max) pairs
+     │  │ 134 B, ~17.8 kbps    │ │                           │                = 134 B / 60 ms
+     │  └──────────────────────┘ │                           │   fallback:    every-30th-sample
+     │  ┌─ decimation fallback ┐ │                           │                = 70 B / 60 ms
+     │  │ n_samples = 32       │ │                           │   auto-fallback when MTU < 140 B or
+     │  │  70 B, ~9.3 kbps     │ │                           │   >5 retries in last 50 frames;
+     │  └──────────────────────┘ │                           │   recovers after 100 clean frames.
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_DEPLOY_STOP"      │                           │
-     │                           │                           ├───Set event_flag = false
-     │                           │                           │    (KWS detection sending stopped)
+     │                           │                           ├───event_flag=0 + kws_app_stop()
+     │                           │                           │    (KWS detections suppressed,
+     │                           │                           │     DMIC + pipeline halted)
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
      │    "DEPLOY_STOP:ACK"      │                           │
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_STREAM_STOP"      │                           │
-     │                           │                           ├───Set pdm_stream_flag = false
+     │                           │                           ├───Set pdm_stream_flag = FLAG_DISABLE
      │                           │                           │    (Audio streaming stopped)
      │                           │                           │
      │◄──Receive Response────────┼──────────────────────────────┤
@@ -420,6 +464,20 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │                           │                           │    Trigger system reboot
      │                           │                           │    sys_reboot()
      │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CURRENT_START"    │                           │
+     │                           │                           ├───   pdm_stream_flag = FLAG_DISABLE;
+     │                           │                           │      current_stream_flag = FLAG_ENABLE;
+     │                           │                           │      (Current streaming active)
+     │                           │                           │
+     ├───Send Command────────────┼────────────────────────────►│
+     │    "CMD_CURRENT_STOP"     │                           │
+     │                           │                           ├───current_stream_flag = FLAG_DISABLE;
+     │                           │                           │    (Current streaming stopped)
+     │                           │                           │
+     │◄──Receive Response────────┼──────────────────────────────┤
+     │   "CURRENT_STOP:ACK"      │                           │
+     │                           │                           │
 
 3. How It Works
 
@@ -429,7 +487,66 @@ Firmware prepares response - Based on the command type, the appropriate data is 
 Response is sent back - Data is formatted and transmitted to the phone via NUS
 Phone displays the data - The app receives and presents the information to the user
 
-NOTE: A static MAC address is required for phone app testing. Hence, CONFIG_BT_PRIVACY is disabled(CONFIG_BT_PRIVACY = n). Ensure this is re-enabled for the final production build.
+
+## Current Monitoring IC & Battery Status
+This module provides battery charger status monitoring and current sensing capabilities using GPIO status pins and an external current monitoring IC (ADC-based). It enables real-time tracking of battery charging state and current consumption for power management and diagnostics.
+
+1. Current Monitoring IC (INA190, ADC-based)
+Two INA190 current-sense amplifiers drive the nRF5340 SAADC: U25 senses VDD_1V8 through shunt R117 (0.1 Ω), U26 senses VDD_0V8_AKD through shunt R118 (0.02 Ω). Current is derived as `I(mA) = Vout(mV) / (Rshunt × gain)`.
+
+## Configuration
+Channels: 2 (1V8_AKD rail on AIN0, 0V8_AKD rail on AIN1)
+Resolution: 12-bit (0-4095)
+Reference: 1800 mV internal
+SAADC gain: 1/3
+
+INA190 variant: the A1/A3 part difference is amplifier gain only (A1 = 25 V/V, A3 = 100 V/V); the shunts are unchanged. It cannot be auto-detected, so it is chosen at build time via `CONFIG_INA190_VARIANT` (default A1) and overridable at runtime with `power variant a1|a3`.
+
+Sampling & Averaging:
+- A background sampler reads both rails at `CONFIG_CURRENT_DEFAULT_RATE_HZ` (default 10 Hz, runtime-tunable via `power rate`), averaging 8 back-to-back ADC conversions per rail read.
+- `power read` returns an 8-sample moving average for a stable value; energy integrates the instantaneous per-loop power.
+- `power measure [ms]` runs a synchronous averaged burst over a window, independent of the background rate — the most accurate spot reading. Use it after an `akd_coreclk` change or to bracket an inference.
+
+### `power` shell commands
+| Command | Description |
+|---|---|
+| `power read` | Moving-average current & power for both rails |
+| `power measure [ms]` | Averaged current/power/energy over a window (default 500 ms), both rails |
+| `power rate [hz]` | Get/set the background sampler rate (default 10 Hz) |
+| `power energy` | Accumulated energy & average power since the last reset |
+| `power reset` | Reset the energy accumulator |
+| `power variant [a1\|a3]` | Get/set the fitted INA190 variant (gain) |
+
+2. Battery Charger Status Monitoring
+The battery charger status is monitored using two GPIO input pins (chgr_sts1 and chgr_sts2) connected to the charger IC. These pins provide real-time charging state and fault detection.
+
+## Pin Status:
+STS1	STS2	Status	                    Description
+
+High	High	BAT_NOT_CHARGING	        Battery not charging (idle/standby)
+High	Low	    BAT_CHARGING	            Battery actively charging
+Low	    High	BAT_FAULT_RECOVERABLE	    Recoverable fault (e.g., over-temperature, timeout)
+Low	    Low	    BAT_FAULT_NON_RECOVERABLE	Non-recoverable fault (e.g., battery over-voltage)
+
+## Fuel Gauge (Battery SOC Monitoring)
+This module provides battery State of Charge (SOC) monitoring using the BQ27427 Impedance Track™ fuel gauge via I2C communication.
+Reads the current battery State of Charge (SOC) percentage from the BQ27427 fuel gauge and Send to Mobile app
+
+ISR-Based SOC Notification
+The BQ27427 fuel gauge can generate hardware interrupts on the SOC_INT pin whenever the State of Charge (SOC) changes by a configured delta (default 1%). This enables event-driven battery level reporting to the phone app instead of continuous polling, reducing I2C traffic and power consumption
+
+## Configuration
+Battery Parameters (1100mAh 4.2V Li-ion)
+
+Parameter	            Value	    Description
+Design Capacity	        1100 mAh	Battery capacity
+Design Energy	        4070 mWh	Capacity × 3.7V
+Terminate Voltage	    3000 mV	    0% SOC cutoff
+Taper Rate	            100	        Full charge detection
+Taper Voltage           4150        Charge termination voltage
+
+**NOTE**: These values are for testing purposes only using a 1100mAh test battery.
+Always connect the battery before connecting USB power.
 
 ### Edge Learning BLE Service
 
@@ -446,9 +563,9 @@ MOBILE APP                    BLE STACK                    FIRMWARE
      │                              │                             │
      ├───Write Command──────────────┼────────────────────────────►│
      │    [CMD=1] Start Learning    │                             │
-     │                              │                             ├───Begin training process
-     │                              │                             │   
-     │                              │                             │
+     │◄──Receive ACK────────────────┼─────────────────────────────┤───Begin training process
+     │    [ACK=0xA6]                │                             │   
+     │    (Learning started)        │                             │
      │                              │                             │
      │◄──Receive ACK────────────────┼─────────────────────────────┤
      │    [ACK=0xA7]                │                             │   learning_completed()
@@ -461,7 +578,7 @@ MOBILE APP                    BLE STACK                    FIRMWARE
      │    [CMD=3] Select Next Class │                             │
      │                              │                             │
 
-### Build the demo_apps Sample.
+### Build the demo_apps Sample with spark board overlay file.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
 
@@ -526,10 +643,15 @@ Added DeviceTree configuration for the external flash (ext_flash) to enable acce
 
 Different pin configurations are used for the DK board and the Spark board due to pin availability and hardware connections.
 
-The overlay file is selected during the build using the `--dk` flag.
+Both the **application overlay** and the **MCUboot overlay** are selected during the build using the `--dk` flag.
 
-- **DK board overlay file:** `nrf5340dk_nrf5340_cpuapp.overlay`
-- **Spark board overlay file:** `nrf5340_cpuapp_spark.overlay`
+### DK Board
+- **Application overlay:** `boards/nrf5340dk_nrf5340_cpuapp.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot.overlay`
+
+### Spark Board
+- **Application overlay:** `boards/nrf5340_cpuapp_spark.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot_spark.overlay`
 
 ### Model Generation and BLE Transfer
 
@@ -542,13 +664,17 @@ pip install -r scripts/requirements.txt
 
 ### info.yaml – Model Metadata File
 
-`fetch_model.py` generates an `info.yaml` alongside the binary files. It is the single source of truth for model metadata consumed by `send_model_via_ble.py`.
+`generate_info.py` writes an app-specific `info.yaml` from the converted model's shapes sidecar. It is the single source of truth for model metadata consumed by `send_model_via_ble.py`.
 
 ```yaml
-model_name: kws
+app: kws
 flash_address: "0x101000"
 input_shape: [49, 10, 1]
 output_shape: [1, 1, 225]
+mfcc_fs: 123.56967163085938
+silence_class: 10
+unknown_class: 11
+inference_mode: async
 edge_learning:
   enabled: true
   num_classes: 15
@@ -558,10 +684,14 @@ edge_learning:
 
 | Field | Description |
 |-------|-------------|
-| `model_name` | Model identifier string (e.g. `kws`, `mnist`) |
+| `app` | Model identifier / output-file prefix (e.g. `kws`, `mnist`) |
 | `flash_address` | Target SPI flash address for the model data segment |
 | `input_shape` | Model input dimensions read from the Akida model |
 | `output_shape` | Model output dimensions read from the Akida model |
+| `mfcc_fs` | MFCC normalisation scalar — divides every input feature. **Required for kws**: the firmware rejects a kws model whose `mfcc_fs` is missing/zero |
+| `silence_class` | Output index of the silence class (skipped during keyword detection). **Required for kws** |
+| `unknown_class` | Output index of the unknown/garbage class (skipped during keyword detection). **Required for kws** |
+| `inference_mode` | `sync` or `async` — the Akida API mode the firmware applies for this model at load. On a DK board `async` falls back to `sync` with a warning. **Required for kws** |
 | `edge_learning.enabled` | `true` when the model uses on-device edge learning |
 | `edge_learning.num_classes` | Total number of classes in the base model |
 | `edge_learning.num_el_classes` | Number of novel edge-learning classes to learn on-device (packed into lower 16 bits of the `num_edge_classes` metadata field sent over BLE) |
@@ -570,53 +700,95 @@ edge_learning:
 > **Edge learning packing:** `num_edge_classes` (32-bit) = `(num_neurons << 16) | num_el_classes`.
 > The firmware unpacks this into `g_num_neurons_per_class` (bits [31:16]) and `g_num_edge_learn_classes` (bits [15:0]).
 
+> ⚠️ **Metadata format / reflash note:** the model metadata struct (`model_meta_t`) and its
+> CRC layout are versioned together by the firmware and `send_model_via_ble.py`. When fields
+> are added (e.g. `inference_mode`), you must **rebuild + reflash the firmware and re-upload the
+> model with the matching `send_model_via_ble.py`**. A model already in flash from an older
+> format will fail the boot CRC check and won't load until re-uploaded.
+
 ---
 
-### Step 1 – Generate Bin Files and info.yaml
+### Model build config (`--config`)
+
+`fetch_model.py` and `generate_info.py` take **only** `--config` — a per-(app, model) YAML file
+at `.env/<app>/<model>.yaml` that holds every parameter. This keeps the values out of git and lets
+CI run the exact same commands as local dev. The file is git-ignored and lives locally / on the
+self-hosted runner.
+
+```yaml
+# .env/demo_apps/kws.yaml
+app: demo_apps                                   # generate_info profile
+model_name: kws                                  # file prefix for bins/cpp/.h + shapes sidecar
+output_dir: source/external/model_files/kws      # converted artifacts + info.yaml are written here
+model_url: http://<internal-host>/path/to/akida_model.fbz   # .fbz to download (VPN required)
+map_mode: 2                                      # Akida MapMode (optional, default 1)
+neurons_per_class: 1                             # regular kws: 1, edge-learning: e.g. 10
+num_el_classes: 0                                # edge-learning novel classes (regular: 0)
+flash_address: "0x101000"                        # quote so info.yaml keeps the hex form
+mfcc_fs: 123.56967163085938                      # MFCC normalisation scalar
+silence_class: 10
+unknown_class: 11
+inference_mode: async                            # sync | async (DK board falls back to sync)
+```
+
+Required keys: `app`, `model_name`, `output_dir` plus everything the chosen `app` profile needs
+(for `demo_apps`: `flash_address`, `neurons_per_class`, `num_el_classes`, `mfcc_fs`,
+`silence_class`, `unknown_class`, `inference_mode`). Optional: `map_mode` (default 1),
+`akida_version` (default `v1`). The scripts report any missing keys by name.
+
+### Step 1 – Fetch & Convert the Model
+
+`fetch_model.py --config <file>` downloads the `.fbz` named by the config's `model_url` (or falls
+back to `models.conf`) and converts it into the binary + C++ artifacts. It does **not** write
+`info.yaml` — that is Step 2.
 
 ```bash
 cd spark
 
-# KWS model at flash address 0x101000 with default MapMode=1
-python source/utils/fetch_model.py \
-    --model kws \
-    --prefix kws \
-    --output_dir source/external/model_files/kws \
-    --flash_address 0x101000
+# Regular KWS model → bins/cpp in model_files/kws (akida SDK lives in Docker, so use -d via run.sh)
+python source/utils/fetch_model.py --config .env/demo_apps/kws.yaml
 
-# With a direct URL or local .fbz path
-python source/utils/fetch_model.py \
-    --model kws \
-    --prefix kws \
-    --output_dir source/external/model_files/kws \
-    --model_path http://server/akida_model.fbz \
-    --flash_address 0x101000 \
-    --map_mode 1
-
-# MNIST model at its flash address
-python source/utils/fetch_model.py \
-    --model mnist \
-    --prefix mnist \
-    --output_dir source/external/model_files/mnist \
-    --flash_address 0x1000
+# Edge-learning KWS model → its own dir
+python source/utils/fetch_model.py --config .env/demo_apps/kws_edge_learning.yaml
 ```
 
-**New arguments:**
+The config keys read here are `model_name`, `output_dir`, `model_url`, `map_mode`,
+`neurons_per_class`, `akida_version`.
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--flash_address` | `0x1000` | Flash address written into `info.yaml` |
-| `--map_mode` | `1` | Akida `MapMode` value passed to `model.map()` |
-
-**Outputs** (in `--output_dir`):
+**Outputs** (in the config's `output_dir`):
 - `<prefix>_program_info.bin` / `_program_data.bin` – binary segments for BLE transfer
-- `<prefix>_program_info.cpp` / `_program_data.cpp` – C++ array files for compile-time inclusion
-- `info.yaml` – metadata bridge consumed by `send_model_via_ble.py`
-- `<prefix>_shapes.json` – shape sidecar (used to skip regeneration on re-runs)
+- `<prefix>_program_info.cpp` / `_program_data.cpp` (+ `.h`) – C++ array files for compile-time inclusion
+- `<prefix>_shapes.json` – shape sidecar (input/output shapes + edge-learning flag); consumed by Step 2 and used to skip regeneration on re-runs
 
 ---
 
-### Step 2 – Transfer via BLE
+### Step 2 – Generate info.yaml (per app)
+
+`generate_info.py --config <file>` builds an **app-specific** `info.yaml` from the shapes sidecar
+written in Step 1. It needs **no Akida SDK**, so it can run anywhere — e.g. on the host even when
+Step 1 ran in Docker. The profile is taken from the config's `app:` key (only `demo_apps` exists
+today); it decides which fields `info.yaml` carries.
+
+```bash
+cd spark
+
+# Regular KWS model
+python source/utils/generate_info.py --config .env/demo_apps/kws.yaml
+
+# Edge-learning KWS model
+python source/utils/generate_info.py --config .env/demo_apps/kws_edge_learning.yaml
+```
+
+The config keys read here (for the `demo_apps` profile) are `app`, `model_name`, `output_dir`,
+`flash_address`, `neurons_per_class`, `num_el_classes`, `mfcc_fs`, `silence_class`,
+`unknown_class`, `inference_mode`. The script reports any missing keys by name. `mfcc_fs` is the
+model's normalisation scalar — use the value your model was trained with.
+
+**Output:** `info.yaml` in the config's `output_dir`.
+
+---
+
+### Step 3 – Transfer via BLE
 
 ```bash
 cd spark
@@ -640,96 +812,78 @@ python source/utils/send_model_via_ble.py \
 
 ---
 
-### One-Step Wrapper – run_model_transfer.sh
+### Using run.sh (build + flash + model workflow)
+
+`run.sh` wraps the steps above: `--fetch_model <config>` runs Step 1 (fetch + convert) and `--generate_info <config>` runs Step 2 (write `info.yaml`). Each takes its per-(app, model) YAML config (`.env/<app>/<model>.yaml`) as its argument. They are separate flags but can be combined (name the config on each); `--send_ble` (Step 3) is separate. Add `-d` to run the fetch step inside Docker (where the Akida SDK lives).
 
 ```bash
 cd spark
 
-# Default KWS model from BrainChip server
-source/utils/run_model_transfer.sh
+# Step 1: Fetch + convert only (bins/cpp, no info.yaml)
+./scripts/run.sh -d --fetch_model .env/demo_apps/kws.yaml
 
-# KWS at a specific flash address and map mode
-source/utils/run_model_transfer.sh \
-    http://server/akida_model.fbz kws "" 0x101000 "" "" v1 "" 1
+# Step 2: Generate the app-specific info.yaml for the converted model
+./scripts/run.sh --generate_info .env/demo_apps/kws.yaml
 
-# Edge-learning model (10 classes)
-source/utils/run_model_transfer.sh \
-    http://server/akida_model_el.fbz kws "" 0x1000 "" 10
-```
-
-Positional arguments: `MODEL_PATH MODEL_NAME OUTPUT_DIR FLASH_ADDRESS FS_NAME NUM_CLASSES AKIDA_VERSION NEURONS_PER_CLASS MAP_MODE`
-
----
-
-### Using run.sh (build + flash + model transfer)
-
-```bash
-cd spark
-
-# Fetch model locally → generate bins + info.yaml only (no BLE send)
-./scripts/run.sh \
-    --model_transfer http://server/akida_model.fbz \
-    --model_name kws \
-    --model_flash_addr 0x101000
-
-# Fetch inside Docker → generate bins + info.yaml only (no BLE send)
+# Both steps in one invocation (fetch runs first, then info.yaml)
 ./scripts/run.sh -d \
-    --model_transfer http://server/akida_model.fbz \
-    --model_name kws \
-    --model_flash_addr 0x101000
-
+    --fetch_model .env/demo_apps/kws.yaml \
+    --generate_info .env/demo_apps/kws.yaml
 ```
 
-**Flags for `run.sh` model transfer:**
+**Flags for the `run.sh` model workflow:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--model_transfer <url/path>` | — | Fetch `.fbz`, generate bins + `info.yaml` (fetch only) |
-| `--send_ble` | off | Send model via BLE; requires `--info`, `--bin`, and `--yaml` (cannot be used with `--model_transfer`) |
-| `--model_name <name>` | `kws` | Model name prefix for output files |
-| `--model_flash_addr <addr>` | `0x1000` | Flash address passed to `fetch_model.py` |
-| `--map_mode <int>` | `1` | Akida `MapMode` value |
+| `--fetch_model <config>` | off | Step 1: fetch `.fbz` + convert to bins/cpp (no `info.yaml`). Arg is the per-(app, model) YAML (`.env/<app>/<model>.yaml`) |
+| `--generate_info <config>` | off | Step 2: write the app-specific `info.yaml` from the shapes sidecar. Arg is the same YAML config |
+| `--send_ble` | off | Step 3: send model via BLE; requires `--info`, `--bin`, and `--yaml` (separate step; cannot be combined with `--fetch_model`) |
+| `--app <name>` | `demo_apps` | Build/flash app (the `info.yaml` profile now comes from the config's `app:` key) |
 | `--info <path>` | — | Path to `_program_info.bin` (use with `--send_ble`) |
 | `--bin <path>` | — | Path to `_program_data.bin` (use with `--send_ble`) |
 | `--yaml <path>` | — | Path to `info.yaml` (use with `--send_ble`) |
 
-Output files are written to `source/external/model_files/<model_name>/`.
+Output files are written to the directory given by the config's `output_dir`.
 
 ---
 
-### Two-Step Workflow (fetch in Docker, BLE send on host)
+### Split Workflow (convert in Docker, BLE send on host)
 
-Run fetch and BLE transfer as two independent commands — useful when the Akida SDK is only available inside Docker but BLE hardware is on the host.
+Run the steps as independent commands — useful when the Akida SDK is only available inside Docker but BLE hardware is on the host. `--generate_info` needs no SDK, so it can run on the host too.
 
 ```bash
 cd spark
 
-# Step 1: Fetch model inside Docker → generates bins + info.yaml (no BLE send) 
-For edge learning model
+# Step 1+2: Fetch, convert, and generate info.yaml for an edge-learning model inside Docker
 ./scripts/run.sh -d \
-    --model_transfer http://server/akida_model.fbz \
-    --model_name kws \
-    --model_flash_addr 0x101000 \
-    --neurons_per_class 15 \
-    --num_el_classes 3 \
-    --map_mode 1
+    --fetch_model .env/demo_apps/kws_edge_learning.yaml \
+    --generate_info .env/demo_apps/kws_edge_learning.yaml
 
-For non-edge learning model
+# Step 1+2: Same for a regular (non-edge-learning) model
 ./scripts/run.sh -d \
-    --model_transfer http://server/akida_model.fbz \
-    --model_name kws \
-    --model_flash_addr 0x101000 \
-    --neurons_per_class 1 \
-    --num_el_classes 0 \
-    --map_mode 1
+    --fetch_model .env/demo_apps/kws.yaml \
+    --generate_info .env/demo_apps/kws.yaml
 
-# Step 2: Send pre-generated files via BLE on the host (no Docker)
+# Step 3: Send pre-generated files via BLE on the host (no Docker)
 ./scripts/run.sh --send_ble \
     --info source/external/model_files/kws/kws_program_info.bin \
     --bin  source/external/model_files/kws/kws_program_data.bin \
     --yaml source/external/model_files/kws/info.yaml
 ```
-
+### UICR Configuration: nfct-pins-as-gpios
+ This setting repurposes the NFC antenna pins (P0.02 and P0.03) as GPIOs.
+ In this design, P0.03 is used for AKD async functionality, so enabling this
+ configuration is required.
+```
+&uicr {
+    nfct-pins-as-gpios;
+};
+```
+**Note:** 
+ - On nRF5340, P0.02 and P0.03 are dedicated NFC pins by default.
+ - Enabling 'nfct-pins-as-gpios' writes to UICR (User Information Configuration Registers).
+ - This is a one-time programmable setting and permanently disables NFC functionality
+   on the chip until a full chip erase is performed.
 
 ### Application Security
 This project utilizes Secure Boot and Secure DFU (Device Firmware Update) via MCUboot. Security is enforced through an RSA-3072 digital signature.
@@ -769,53 +923,83 @@ Use the following commands on the console:
 | `threads_stop` | Terminate all running threads for testing the WDT. |
 | `wdt_disable` | System crash for watchdog validation. |
 | `device_id` | Print device ID |
+| `kws_mode async` | Switches the system to Async mode. |
+| `kws_mode sync` | Switches the system to Sync mode. |
+| `kws_mode_get` | Displays the currently active KWS mode (Sync or Async). |
 
 __Inference mode__
  -  Default mode, in this mode it captures live audio data and shows the inferred class id.
  -  Below CLI command changes mode from __Inference ---> Learn_select__.
 ```
->> kws_el evt 0
+>> app el 0
 ```
 __Learn Select mode__
  - In this mode it allows user to select the novel class to be learned.
  - Below CLI command changes mode the application mode from __Learn_select ---> Learning__
 ```
->> kws_el evt 1
+>> app el 1
 ```
  - Below CLI command cycles between novel class selection which are to be learned. class_33 **-->** class_34 **-->** class_35 **-->** class_33.
 ```
->> kws_el evt 3
+>> app el 3
 ```
  - Below CLI command changes application mode from __Learn_select ---> Inference__ and the learned weights will be written to flash
 ```
->> kws_el evt 0
+>> app el 0
 ```
  - Below CLI command resets the learned weights. After this, restart the controller.
 ```
->> kws_el evt 2
+>> app el 2
 ```
  - The previously learned weights will be lost if a reboot of the controller occur in __Learn_select mode
 
 __Learning mode__
  - Switching to learning mode is preceded with a forced delay to avoid learning button push sounds (incase learning happens through buttons)
- - In this mode it captures live audio data and use it for training the selected class.
- - Application continues to stay in **__Learning** mode until user switches the mode or if no valid samples are available for last 5 sec. In the later case, application switches from **__Learning ---> __Learn_select** after waiting for 5 sec.
+ - Learning uses a **structured multi-utterance** flow: the user must speak the keyword **5 times**. Each utterance is captured, augmented, and fed to the on-chip learning engine before prompting for the next.
+ - The sub-state machine for each utterance cycles through:
+   1. **WAITING_FOR_SPEECH** — listens for RMS energy above threshold (uses a shorter 400ms VAD timeout for tighter capture)
+   2. **CAPTURING** — records up to ~1.6s of MFCC frames into a float buffer
+   3. **PROCESSING** — speech end detected (500ms gap); generates augmented training samples and calls `fit()` for each
+   4. **COMPLETE** — all 5 utterances collected; weights are saved to flash and the system returns to inference mode
+ - If no speech is detected for 5 seconds, the system re-prompts for the current utterance
+ - Minimum utterance length is ~200ms (10 MFCC frames); shorter utterances are discarded with a re-prompt
 
-### KWS Pipeline Configuration Commands
+#### Data Augmentation
 
-The `kws_el` command provides runtime configuration for the KWS (Keyword Spotting) pipeline:
+Each utterance generates `2 × neurons_per_class` augmented training samples. Samples are created by combining **time-shifting** (spreading the keyword across different positions in the spectrogram window) with one of **8 augmentation types**, cycled per sample:
+
+| Type | Description |
+| --- | --- |
+| 0 | Clean — no augmentation |
+| 1 | Background noise (3–8% of full scale) |
+| 2 | Gain scaling (0.75–1.25×) |
+| 3 | Background noise + gain combined |
+| 4 | Time-stretch (duplicate 1–2 frames) |
+| 5 | Time-compress (skip 1–2 frames) |
+| 6 | Frequency masking (zero out 1 random MFCC bin) |
+| 7 | Heavy combined (noise + gain + frequency mask) |
+
+### App Configuration Commands
+
+The `app` command provides runtime configuration for the KWS (Keyword Spotting) pipeline:
 
 | Command | Default | Description |
 | --- | --- | --- |
-| `kws_el verbose <0\|1>` | 0 | Enable/disable verbose logging (shows per-inference class and voting score) |
-| `kws_el rms <threshold>` | 550 | Set RMS energy threshold for speech detection (higher = less sensitive) |
-| `kws_el debounce <ms>` | 300 | Set debounce cooldown after keyword detection (prevents rapid re-triggers) |
-| `kws_el window <n>` | 5 | Set sliding window size for score smoothing (1–5) |
-| `kws_el score <f>` | 0.60 | Set trigger threshold as fraction of matching inferences (0.0–1.0) |
-| `kws_el min_frames <n>` | 16 | Set minimum frames needed before inference starts (~320ms at default) |
-| `kws_el speech <ms>` | 1300 | Set maximum speech duration window (silence resets state if exceeded) |
-| `kws_el metrics <0\|1>` | 0 | Enable/disable detailed metrics output (confidence %, voting score, timing) |
-| `kws_el show` | — | Print all current KWS parameters |
+| `app verbose <0\|1\|2>` | 0 | Verbose logging: 0=off, 1=pipeline trace, 2=adds idle RMS |
+| `app rms <val>` | 550 | Set RMS energy threshold for speech detection (higher = less sensitive) |
+| `app debounce <ms>` | 300 | Set debounce cooldown after keyword detection (prevents rapid re-triggers) |
+| `app alpha <0.0-1.0>` | 0.70 | Set EMA smoothing factor for softmax scores (higher = less smoothing) |
+| `app score <0.0-1.0>` | 0.60 | Set smoothed softmax score threshold for chiming counter |
+| `app chiming <n>` | 3 | Set consecutive detections needed to trigger keyword |
+| `app speech <ms>` | 1300 | Set speech active timeout (resets to idle if RMS stays low) |
+| `app metrics <0\|1>` | 0 | Enable/disable detailed metrics output (confidence %, timing) |
+| `app show` | — | Print all current parameters with usage |
+| `app start` | — | Resume the KWS pipeline (starts the DMIC, re-arms the learning gate). On spark, restores the AKD1500 operating clocks (PLL on, 400 MHz core, 8 MHz host) |
+| `app stop` | — | Halt the KWS pipeline (stops the DMIC, clears the learning gate). On spark, drops the AKD1500 to its lowest-power state (PLL off, asleep) |
+| `app reset` | — | Restore all KWS params to compile-time defaults and persist to NVS |
+| `app el <n>` | — | Edge learning commands (mode transitions) |
+
+All numeric `app <param> <val>` setters above are routed through `kws_config_set_from_string()` — values are range-checked, written into NVS-backed settings, and the DMIC is briefly bounced (~120 ms) so the new value takes effect on the next inference frame. Persisted values are reloaded on boot; a firmware version change (tracked at NVS key `kws/fw_ver`) automatically resets every parameter back to its compile-time default.
 
 #### Keyword Detection Output
 
@@ -824,15 +1008,16 @@ The `kws_el` command provides runtime configuration for the KWS (Keyword Spottin
 Keyword Detected: up
 ```
 
-**With metrics enabled (kws_el metrics 1):**
+**With metrics enabled (app metrics 1):**
 ```
 Keyword Detected: up
-  confidence=98.5% vote=1.00 cpu=45ms dma=112us
+  confidence=100.0% smoothed=97.3% chiming=3 cpu=9ms dma=155us
 ```
 
 Where:
-- `confidence` — Softmax-based SNN confidence score (0–100%)
-- `vote` — Sliding window voting score (fraction of recent matches)
+- `confidence` — Raw softmax score from model output (0–100%)
+- `smoothed` — EMA smoothed score used for trigger gating (0–100%)
+- `chiming` — Consecutive detections that reached threshold
 - `cpu` — Inference execution time in milliseconds
 - `dma` — Akida DMA cycle time in microseconds
 
@@ -840,28 +1025,70 @@ Where:
 
 **Quieter room (more sensitive):**
 ```
-kws_el rms 400     (lower threshold detects quieter speech)
+app rms 400     (lower threshold detects quieter speech)
 ```
 
 **Stricter detection (fewer false positives):**
 ```
-kws_el window 3
-kws_el score 0.67  (2 of 3 matches required instead of 3 of 5)
+app chiming 5   (require 5 consecutive detections instead of 3)
+app score 0.70  (higher smoothed score threshold)
 ```
 
 **Faster debounce (allowing repeated keywords):**
 ```
-kws_el debounce 200
+app debounce 200
 ```
 
-**Faster first detection:**
-```
-kws_el min_frames 10  (detection ~200ms instead of ~320ms)
-```
+### AKD1500 Clock, SPI & Low-Power
 
+Runtime control of the AKD1500 host SPI, internal clocks, and low-power state. By default the AKD1500 core runs at 400 MHz off the 800 MHz PLL and the host SPI at 8 MHz; the chip is put to sleep between inferences, and `app stop` additionally turns the PLL off for the lowest-power idle. The SLEEP pin and the `app stop` power-down are spark-only; the clock/SPI commands work on both boards.
 
+| Command | Description |
+| --- | --- |
+| `spi_freq <hz>` | Set the host SPI clock (1–32 MHz); the AKD1500 SPI_S core auto-scales to hold the ¼-rule margin |
+| `akd_coreclk <hz>` | Set the AKD1500 core clock (5–400 MHz): divides the 800 MHz PLL, or reprograms the PLL for off-grid targets |
+| `akd_pll <hz>` | Reprogram the PLL output directly (600–800 MHz, 12.5 MHz steps) |
+| `akd_sysdiv <n>` | Set the core divider off the current PLL clock |
+| `akd_clkref <0\|1>` | Clock source: `0` = PLL, `1` = 25 MHz reference (PLL off, lowest power) |
+| `akd_sleep <0\|1>` | AKD1500 hardware SLEEP: `0` = wake, `1` = sleep (clocks gated, model/state retained) |
+| `akd_clkinfo` | Dump the AKD1500 clock/PLL state and the operating host clock |
 
+The clock/PLL/ref/sleep commands refuse while KWS is running (they would race the per-inference sleep) — stop it first with `app stop`. Additional bring-up diagnostics: `akd_probe`, `akd_rdtest`, `akida_rd`/`akida_wr`, `spi_rxdelay`, `akd_pll_on`.
 
+**Configuration (Kconfig):**
+- **`CONFIG_AKD_SPI_FREQ_HZ`** (default `8000000`) — boot host SPI clock; runtime-tunable via `spi_freq`.
+- **`CONFIG_AKD_CORE_CLOCK_HZ`** (default `400000000`) — boot AKD1500 core clock; runtime-tunable via `akd_coreclk`.
+- **`CONFIG_SYS_CPU_128MHZ`** (default `y`) — run the nRF5340 app core at 128 MHz (required for SPIM4 at ≥ 16 MHz).
 
+### Additional GPIO Configuration
 
+The following GPIOs are added in the board overlay to control **power enabling for onboard sensors and peripherals on the Spark board**.
 
+| GPIO Label   | Pin   | Description |
+|---------------|-------|-------------|
+| `imui`        | P0.31 | IMU interrupt signal |
+| `akd_enb`     | P0.19 | Enable pin for the AKIDA device |
+| `acc_enb`     | P0.20 | Enable pin for the accelerometer |
+| `pdm_enb`     | P0.21 | Enable pin for the PDM microphone |
+| `akd_0v_enb`  | P0.22 | Enable control for AKIDA 0V supply |
+| `cam_enb`     | P1.15 | Enable pin for the camera module |
+| `akd_async`   | P0.03 | Enable pin for the AKIDA ASYNC |
+| `fg_int`      | P0.30 | Fuel Gauge interrupt signal |
+| `chgr_sts1`   | P0.23 | Read pin for battery status |
+| `chgr_sts2`   | P0.24 | Read pin for battery status  |
+
+These GPIOs are defined in the **DeviceTree overlay** and are used to manage power enabling of onboard components in the Spark board.
+
+### Inference Pipeline
+
+The scoring pipeline uses **dequantized inference** with **softmax EMA smoothing** to produce stable, confidence-based keyword triggers:
+
+1. **Dequantized inference** — `predict` runs inference on the Akida SNN and applies per-neuron shift and scale factors (from the model's program info) to convert discrete spike potentials into float values suitable for softmax.
+
+2. **Per-class max pooling** — For models with multiple neurons per class, the maximum dequantized value across all neurons for each class is selected. This produces one logit per class.
+
+3. **Softmax normalization** — Standard softmax (with max-subtraction for numerical stability) converts per-class logits into a probability distribution.
+
+4. **EMA smoothing** — An exponential moving average filter smooths the softmax scores across consecutive inference frames, controlled by the `alpha` parameter (`smoothed = alpha × current + (1 - alpha) × previous`). Higher alpha values respond faster but are noisier.
+
+5. **Chiming trigger** — A per-class counter increments each time the smoothed score exceeds the `score` threshold and resets to zero when it falls below. A keyword is triggered when any class counter reaches the `chiming` threshold. All counters reset after a trigger and during the debounce cooldown.

@@ -1,5 +1,11 @@
 #include "led/led_init.h"
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
+LOG_MODULE_REGISTER(led, LOG_LEVEL_DBG);
+
+#ifdef CONFIG_DK_BOARD
+#define RUN_STATUS_LED DK_LED1
+#endif
 
 /*
  * Global semaphore used to synchronize the LED indication thread with
@@ -18,6 +24,9 @@ static atomic_t current_state = ATOMIC_INIT(LED_STATE_NORMAL_APP);
 
 static atomic_t ble_connected = ATOMIC_INIT(0);
 
+#ifdef CONFIG_DK_BOARD
+static int blink_status = 0;
+#endif
 /**
  * @brief Turn ON the RED LED.
  *
@@ -80,28 +89,28 @@ int32_t led_init(void) {
   int ret;
 
   if (!gpio_is_ready_dt(&red_led)) {
-    printk(" RED LED GPIO not ready (port=%s, pin=%d)\n", red_led.port->name,
-           red_led.pin);
+    LOG_ERR(" RED LED GPIO not ready (port=%s, pin=%d)", red_led.port->name,
+            red_led.pin);
     return -ENODEV;
   }
   if (!gpio_is_ready_dt(&green_led)) {
-    printk(" GREEN LED GPIO not ready (port=%s, pin=%d)\n",
-           green_led.port->name, green_led.pin);
+    LOG_ERR(" GREEN LED GPIO not ready (port=%s, pin=%d)", green_led.port->name,
+            green_led.pin);
     return -ENODEV;
   }
 
   ret = gpio_pin_configure_dt(&red_led, GPIO_OUTPUT_INACTIVE);
   if (ret < 0) {
-    printk("   Configuration failed (err=%d)\n", ret);
+    LOG_ERR("   Configuration failed (err=%d)", ret);
     return ret;
   }
   ret = gpio_pin_configure_dt(&green_led, GPIO_OUTPUT_INACTIVE);
   if (ret < 0) {
-    printk("   Configuration failed (err=%d)\n", ret);
+    LOG_ERR("   Configuration failed (err=%d)", ret);
     return ret;
   }
 
-  printk("   INITIALIZATION SUCCESS\n");
+  LOG_INF("   INITIALIZATION SUCCESS");
 
   return 0;
 }
@@ -113,13 +122,16 @@ int32_t led_init(void) {
  * and updates LED patterns accordingly.
  *
  * State behavior:
- * - NORMAL_APP        : Green slow blink (2s), Red OFF
- * - BLE_CONNECTED     : Green ON, Red OFF
- * - MODEL_RECEIVING   : Green ON, Red fast blink (500ms)
- * - FLASH FULL_ERASE  : Green ON, Red ON
- * - UPDATE_SUCCESS    : Both LEDs blink 3 times, then
- *                       restore runtime state based on BLE status
- * - UPDATE_FAILED     : Green OFF, Red ON
+ * - NORMAL_APP         : Green slow blink (2s), Red OFF
+ * - BLE_CONNECTED      : Green ON, Red OFF
+ * - MODEL_RECEIVING    : Green ON, Red fast blink (500ms)
+ * - FLASH FULL_ERASE   : Green ON, Red ON
+ * - UPDATE_SUCCESS     : Both LEDs blink 3 times, then
+ *                        restore runtime state based on BLE status
+ * - UPDATE_FAILED      : Green OFF, Red ON
+ * - LEARN_SPEAK_NOW    : Red ON (prompt to speak); green follows BLE status
+ * - KEYWORD_TRIGGERED  : Red ~500ms flash, then restore runtime state
+ *                        based on BLE status
  *
  * Synchronization:
  * The thread waits for a signal from DMIC thread using a semaphore.
@@ -139,7 +151,7 @@ int32_t led_init(void) {
 
 void led_ind_thread(void *a, void *b, void *c) {
   if (led_init() < 0) {
-    printk("LED init failed\n");
+    LOG_ERR("LED init failed");
     return;
   }
 
@@ -220,6 +232,32 @@ void led_ind_thread(void *a, void *b, void *c) {
       red_led_on();
       break;
 
+    case LED_STATE_LEARN_SPEAK_NOW:
+      /* Red ON for the full speak window; green follows BLE status */
+      if (is_ble_connected()) {
+        green_led_on();
+      } else if ((tick / 10) % 2 == 0) {
+        green_led_on();
+      } else {
+        green_led_off();
+      }
+      red_led_on();
+      break;
+
+    case LED_STATE_KEYWORD_TRIGGERED: {
+      /* Single ~500ms red flash; preserve green's behavior */
+      bool ble = is_ble_connected();
+      if (ble) {
+        green_led_on();
+      }
+      red_led_on();
+      k_msleep(500);
+      red_led_off();
+      atomic_set(&current_state,
+                 ble ? LED_STATE_BLE_CONNECTED : LED_STATE_NORMAL_APP);
+      break;
+    }
+
     default:
       break;
     }
@@ -237,3 +275,15 @@ void led_ind_thread(void *a, void *b, void *c) {
  * @param state New LED state to apply.
  */
 void led_set_state(led_state_t state) { atomic_set(&current_state, state); }
+/**
+ * @brief Toggle the run status LED to indicate system is alive
+ *
+ * Pure LED toggle — no sleep. The caller is responsible for pacing
+ * (e.g. a k_msleep in the worker loop). On Spark this is a no-op since
+ * there is no dedicated run status LED.
+ */
+void process_led(void) {
+#ifdef CONFIG_DK_BOARD
+  dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
+#endif
+}

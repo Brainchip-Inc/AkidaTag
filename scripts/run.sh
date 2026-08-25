@@ -10,18 +10,16 @@ print_help() {
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --app              | (str)  | App to build/flash
+  --app              | (str)  | App to build/flash (default: demo_apps)
   -b, --build        | (flag) | Do Build
   -f, --flash        | (flag) | Do Flash
   -jf, --jlink_flash | (flag) | Do Flash using Jlink. Also pass -f for flash.
   --info             | (str)  | Path to program_info .bin file (use with --send_ble)
   --bin              | (str)  | Path to program_data .bin file (use with --send_ble)
   --yaml             | (str)  | Path to info.yaml metadata file (use with --send_ble)
-  --model_transfer   | (str)  | URL or local path to .fbz – fetch and convert (generate bins + info.yaml)
-  --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (cannot be used with --model_transfer)
-  --model_name       | (str)  | Model name for --model_transfer (default: kws)
-  --model_flash_addr | (str)  | Flash address for --model_transfer (default: 0x1000)
-  --map_mode         | (int)  | Akida MapMode value for --model_transfer (default: 1)
+  --fetch_model      | (str)  | Fetch + convert the model from the given config YAML (.env/<app>/<model>.yaml); bins/cpp/.h, no info.yaml
+  --generate_info    | (str)  | Generate app-specific info.yaml from the given config YAML + the converted shapes sidecar
+  --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (separate step; cannot be combined with --fetch_model)
   -d, --docker       | (str)  | Run build/flash using Docker
                      |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
   -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
@@ -32,7 +30,8 @@ Options:
   -r, --reset        | (flag) | Do Board Reset
   -h, --help         | (flag) | Show this help message
   --dk               | (flag) | Select dk board pin configuration overlay file.
-
+  -t, --test-cli     | (flag) | Run CLI-based hardware validation test (Python)
+  -t --infer-test, --test-cli --infer-test   | (flag) | Run CLI-based hardware validation test (Python) only for inference test of kws
 ###################################################################################################
 Run the script from project root.
 
@@ -60,19 +59,19 @@ How to use script - Examples runs:
   # Flash using Jlink inside Docker
   $SCRIPT_INVOCATION -d -f -jl --app demo_apps
 
-  # Fetch .fbz locally → generate bins + info.yaml only (no BLE send)
-  $SCRIPT_INVOCATION --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1
+  # Fetch + convert only, on the host → bins/cpp (no info.yaml). All params from the config.
+  $SCRIPT_INVOCATION --fetch_model .env/demo_apps/kws.yaml
 
-  # Fetch .fbz inside Docker (akida SDK) → generate bins + info.yaml only (no BLE send)
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1
+  # Generate the app-specific info.yaml for a previously-converted model (no Akida SDK needed)
+  $SCRIPT_INVOCATION --generate_info .env/demo_apps/kws.yaml
 
-  # Fetch inside Docker + send via BLE (outside of docker) on the host (add --send_ble to enable BLE step)
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1 --send_ble
+  # Fetch + convert + generate info.yaml in one go inside Docker (akida SDK lives in the container)
+  $SCRIPT_INVOCATION -d --fetch_model .env/demo_apps/kws.yaml --generate_info .env/demo_apps/kws.yaml
 
-  # Fetch inside Docker + send via BLE (outside of docker) on the host (add --send_ble to enable BLE step) with neurons per class
-  $SCRIPT_INVOCATION -d --model_transfer http://server/akida_model.fbz --model_name kws --model_flash_addr 0x101000 --map_mode 1 --neurons_per_class 15 --send_ble
+  # Edge-learning kws model (its config points at .../kws_edge_learning, 10 neurons/class, 3 novel classes)
+  $SCRIPT_INVOCATION -d --fetch_model .env/demo_apps/kws_edge_learning.yaml --generate_info .env/demo_apps/kws_edge_learning.yaml
 
-  # Send pre-generated model files via BLE using info.yaml (no Docker needed)
+  # Send pre-generated model files via BLE using info.yaml (separate step; no Docker needed)
   $SCRIPT_INVOCATION --send_ble \
       --info source/external/model_files/kws/kws_program_info.bin \
       --bin source/external/model_files/kws/kws_program_data.bin \
@@ -102,6 +101,12 @@ How to use script - Examples runs:
   # Create signing key inside docker
   $SCRIPT_INVOCATION -d --shell
 
+  # Run CLI hardware validation test
+  $SCRIPT_INVOCATION -d -t
+
+  # Full workflow: build, flash, and run CLI test
+  $SCRIPT_INVOCATION -d -b -f -t --app demo_apps
+  
 There is a BUILD_DIR env variable that can be set to override the default build
 directory location. For example:
   BUILD_DIR=custom_build_dir $SCRIPT_INVOCATION -b --app blinky
@@ -129,15 +134,17 @@ DO_JLINK_FLASH=false
 MODEL_BIN=""
 MODEL_INFO=""
 MODEL_YAML=""
-MODEL_TRANSFER_PATH=""
-MODEL_TRANSFER_NAME="kws"
-MODEL_TRANSFER_FLASH_ADDR="0x1000"
-MODEL_TRANSFER_MAP_MODE=1
+# Fetch + generate are config-driven: each step takes a per-(app,model) config
+# (.env/<app>/<model>.yaml) as its argument, e.g. --fetch_model <config>. The
+# combined case names the config on both flags.
+DO_FETCH_MODEL=false
+DO_GENERATE_INFO=false
+FETCH_CONFIG=""
+GENERATE_CONFIG=""
 SEND_BLE=false
+CLI_TEST_CMD=""
 DK_OVERLAY=false
-MODEL_TRANSFER_NEURONS_PER_CLASS=1
-MODEL_TRANSFER_NUM_EL_CLASSES=0
-
+DO_INFER_TEST=false
 
 DOCKER=false
 DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
@@ -160,9 +167,10 @@ case "$(uname -s)" in
 esac
 
 BUILD_DIR="${BUILD_DIR:-}"
-
+DO_CLI_TEST=false
+CLI_PORT="/dev/ttyUSB0"
 # -----------------------------------------------------------------------------
-# Funcitons
+# Functions
 # -----------------------------------------------------------------------------
 
 die() { echo "Error: $*" >&2; exit 1; }
@@ -200,13 +208,15 @@ while [[ $# -gt 0 ]]; do
         --bin) MODEL_BIN="${2:-}"; shift 2;;
         --info) MODEL_INFO="${2:-}"; shift 2;;
         --yaml) MODEL_YAML="${2:-}"; shift 2;;
-        --model_transfer) MODEL_TRANSFER_PATH="${2:-}"; shift 2;;
+        --fetch_model)
+            DO_FETCH_MODEL=true
+            if [[ -n "${2:-}" && "${2:-}" != -* ]]; then FETCH_CONFIG="$2"; shift 2; else shift; fi
+            ;;
+        --generate_info)
+            DO_GENERATE_INFO=true
+            if [[ -n "${2:-}" && "${2:-}" != -* ]]; then GENERATE_CONFIG="$2"; shift 2; else shift; fi
+            ;;
         --send_ble) SEND_BLE=true; shift;;
-        --model_name) MODEL_TRANSFER_NAME="${2:-kws}"; shift 2;;
-        --model_flash_addr) MODEL_TRANSFER_FLASH_ADDR="${2:-0x1000}"; shift 2;;
-        --map_mode) MODEL_TRANSFER_MAP_MODE="${2:-1}"; shift 2;;
-	--neurons_per_class) MODEL_TRANSFER_NEURONS_PER_CLASS="${2:-1}"; shift 2;;
-	--num_el_classes) MODEL_TRANSFER_NUM_EL_CLASSES="${2:-0}"; shift 2;;
         -d|--docker)
             DOCKER=true
             # Optional image name
@@ -248,6 +258,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         -r|--reset) DO_RESET=true; shift;;
         -h|--help) print_help; exit 0;;
+        -t|--test-cli)
+            DO_CLI_TEST=true
+            shift
+            ;;
+        --infer-test)
+            DO_INFER_TEST=true
+            shift
+            ;;
         *) echo "Unknown option $1"; shift;;
     esac
 done
@@ -261,13 +279,13 @@ if $DO_SHELL && ! $DOCKER; then
     exit 1
 fi
 
-# If not shell/minicom, require at least one action: build/flash/send_ble/model_transfer
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE && [[ -z "$MODEL_TRANSFER_PATH" ]]; then
-    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --model_transfer, and/or --key or use --shell / --minicom"
+# If not shell/minicom, require at least one action: build/flash/send_ble/fetch/generate
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && ! $DO_FETCH_MODEL && ! $DO_GENERATE_INFO && ! $DO_CLI_TEST; then
+    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --fetch_model and/or --generate_info, and/or --key or use --shell / --minicom"
     exit 1
 fi
 
-# Require --app when doing build/flash (not needed for --info/--bin/--yaml or --model_transfer)
+# Require --app when doing build/flash (not needed for --info/--bin/--yaml or --fetch_model)
 _needs_app=false
 if $DO_BUILD || $DO_FLASH; then
     _needs_app=true
@@ -298,11 +316,27 @@ if [[ -n "$MODEL_YAML" && ! -f "$MODEL_YAML" ]]; then
     exit 1
 fi
 
-# --send_ble cannot be used with --model_transfer
-if $SEND_BLE && [[ -n "$MODEL_TRANSFER_PATH" ]]; then
-    echo "Error: --send_ble cannot be used with --model_transfer"
+# --send_ble cannot be used with --fetch_model (fetch and send are separate steps)
+if $SEND_BLE && $DO_FETCH_MODEL; then
+    echo "Error: --send_ble cannot be used with --fetch_model"
     exit 1
 fi
+
+# --fetch_model / --generate_info are config-driven: each takes a YAML config path
+# as its argument. The Python scripts validate the file contents; run.sh only
+# ensures a config path was supplied to each requested step and that it exists.
+if $DO_FETCH_MODEL && [[ -z "$FETCH_CONFIG" ]]; then
+    echo "Error: --fetch_model requires a config path"
+    echo "Example: $SCRIPT_INVOCATION -d --fetch_model .env/demo_apps/kws.yaml"
+    exit 1
+fi
+if $DO_GENERATE_INFO && [[ -z "$GENERATE_CONFIG" ]]; then
+    echo "Error: --generate_info requires a config path"
+    echo "Example: $SCRIPT_INVOCATION --generate_info .env/demo_apps/kws.yaml"
+    exit 1
+fi
+[[ -n "$FETCH_CONFIG"    && ! -f "$FETCH_CONFIG"    ]] && die "--fetch_model config not found: $FETCH_CONFIG"
+[[ -n "$GENERATE_CONFIG" && ! -f "$GENERATE_CONFIG" ]] && die "--generate_info config not found: $GENERATE_CONFIG"
 
 # --info/--bin/--yaml require --send_ble
 if [[ -n "$MODEL_INFO" || -n "$MODEL_BIN" || -n "$MODEL_YAML" ]] && ! $SEND_BLE; then
@@ -325,8 +359,8 @@ BLE_NEEDED=false
 if $SEND_BLE || $DO_SHELL; then
     BLE_NEEDED=true
 fi
-# Note: --model_transfer BLE send (send_model_via_ble.py) always runs on the host,
-# so dbus is NOT needed inside Docker for that path.
+# Note: the BLE send (send_model_via_ble.py) always runs on the host, so dbus is
+# NOT needed inside Docker for the --fetch_model path.
 
 # -----------------------------------------------------------------------------
 # Docker run base (IMPORTANT: image name is NOT included here)
@@ -348,9 +382,14 @@ DOCKER_RUN_BASE=(
     -e CCACHE_DIR="/home/demo/.ccache"
 )
 
-# Add interactive TTY flags only when not in release/CI mode (no TTY available in CI)
-if ! $DO_RELEASE; then
+# Add interactive mode only if terminal exists
+if [ -t 1 ]; then
     DOCKER_RUN_BASE+=(-it)
+fi
+
+# Map the host serial port to Docker container when CLI test is enabled so the test script can communicate with the board
+if $DO_CLI_TEST; then
+    DOCKER_RUN_BASE+=(--device "${CLI_PORT}:${CLI_PORT}")
 fi
 
 if $IS_LINUX; then
@@ -392,7 +431,14 @@ if $DO_MINICOM; then
     "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" minicom -D "$MINICOM_DEV"
     exit $?
 fi
+# Build the CLI hardware validation test command when -t is enabled, using the configured serial port
+if $DO_CLI_TEST; then
+    CLI_TEST_CMD="python source/utils/hil_test.py --port ${CLI_PORT}"
 
+    if $DO_INFER_TEST; then
+        CLI_TEST_CMD="${CLI_TEST_CMD} --only-infer"
+    fi
+fi
 # -----------------------------------------------------------------------------
 # SHELL MODE (interactive)
 # NOTE: -it MUST be before the image name
@@ -460,9 +506,13 @@ if [[ -n "$APP" ]]; then
 	  CMAKE_EXTRA_ARGS+=(-DCONFIG_AUDIO_CAPTURE_TEST=n)
       # Overlay selection using USE_AUDIO
       if $DK_OVERLAY; then
+        CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=n)
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/spark/source/sysbuild/mcuboot_dk.overlay")
       else
+        CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=y)
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_spark.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/spark/source/sysbuild/mcuboot_spark.overlay")
       fi
       ;;
   esac
@@ -529,29 +579,18 @@ if $SEND_BLE; then
 --yaml \"${MODEL_YAML}\""
 fi
 
-# --model_transfer: fetch + convert only (no BLE send)
+# --fetch_model: fetch + convert only (bins/cpp/.h + shapes sidecar, no info.yaml).
+# All conversion params come from the config YAML passed as its argument.
 FETCH_MODEL_CMD=""
-if [[ -n "$MODEL_TRANSFER_PATH" ]]; then
-  MT_PREFIX="$MODEL_TRANSFER_NAME"
-  MT_OUTPUT_DIR="source/external/model_files/${MT_PREFIX}"
+if $DO_FETCH_MODEL; then
+  FETCH_MODEL_CMD="python source/utils/fetch_model.py --config \"${FETCH_CONFIG}\""
+fi
 
-  FETCH_MODEL_CMD="python source/utils/fetch_model.py \
---model \"${MODEL_TRANSFER_NAME}\" \
---prefix \"${MT_PREFIX}\" \
---output_dir \"${MT_OUTPUT_DIR}\" \
---model_path \"${MODEL_TRANSFER_PATH}\" \
---flash_address \"${MODEL_TRANSFER_FLASH_ADDR}\" \
---map_mode \"${MODEL_TRANSFER_MAP_MODE}\" \
---neurons_per_class \"${MODEL_TRANSFER_NEURONS_PER_CLASS}\" \
---num_el_classes \"${MODEL_TRANSFER_NUM_EL_CLASSES}\""
-
-
-  if $SEND_BLE; then
-    SEND_MODEL_YAML_CMD="python source/utils/send_model_via_ble.py \
---info \"${MT_INFO_BIN}\" \
---bin \"${MT_DATA_BIN}\" \
---yaml \"${MT_YAML}\""
-  fi
+# --generate_info: write the app-specific info.yaml from the shapes sidecar (no Akida SDK).
+# Profile and all info.yaml params come from the config YAML passed as its argument.
+GENERATE_INFO_CMD=""
+if $DO_GENERATE_INFO; then
+  GENERATE_INFO_CMD="python source/utils/generate_info.py --config \"${GENERATE_CONFIG}\""
 fi
 
 # -----------------------------------------------------------------------------
@@ -564,9 +603,13 @@ declare -a LOCAL_STEPS=()
 
 $DO_BUILD && DOCKER_STEPS+=("$BUILD_CMD")
 $DO_FLASH && DOCKER_STEPS+=("$FLASH_CMD")
-[[ -n "$FETCH_MODEL_CMD" ]] && DOCKER_STEPS+=("$FETCH_MODEL_CMD")
+[[ -n "$FETCH_MODEL_CMD"   ]] && DOCKER_STEPS+=("$FETCH_MODEL_CMD")
+# info.yaml generation runs after the fetch/convert so the shapes sidecar exists
+[[ -n "$GENERATE_INFO_CMD" ]] && DOCKER_STEPS+=("$GENERATE_INFO_CMD")
 # BLE send always runs on the host (needs direct BLE hardware access)
 [[ -n "$SEND_YAML_CMD"   ]] && LOCAL_STEPS+=("$SEND_YAML_CMD")
+# If CLI test command is defined, add it to the Docker execution steps
+[[ -n "$CLI_TEST_CMD" ]] && DOCKER_STEPS+=("$CLI_TEST_CMD")
 
 if [[ ${#DOCKER_STEPS[@]} -eq 0 && ${#LOCAL_STEPS[@]} -eq 0 ]]; then
   echo "Nothing to do"

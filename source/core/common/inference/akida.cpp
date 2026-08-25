@@ -5,11 +5,31 @@
 #include "akida/tensor.h"
 #include "error.h"
 #include "io_objects.h"
+#include <stdint.h>
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(akida, LOG_LEVEL_DBG);
 
 uint8_t *current_program;
 static bool current_learn_en = false;
 static akida::ProgramInfo program_info = akida::ProgramInfo();
 #define FLASH_BASE_ADDRESS 0x80000000
+
+void akida_toggle_clock_counter(bool enable) {
+  akd_device.toggle_clock_counter(enable);
+}
+
+uint32_t akida_get_clock_counter(void) {
+  return akd_device.read_clock_counter();
+}
+
+/* Config-DMA (model-programming) clock counter — a DIFFERENT counter than the
+ * inference one above. read_clock_counter() reads the HRC/event DMA timers
+ * (idle during programming, which is why program time showed 0 cycles);
+ * read_config_clock_counter() reads the config-DMA engine timer, which is what
+ * actually advances while a model is being programmed into the mesh. */
+uint32_t akida_get_config_clock_counter(void) {
+  return akd_device.read_config_clock_counter();
+}
 
 int akida_program(uint8_t *buffer, int size, bool learn_en) {
   if (current_program)
@@ -45,7 +65,7 @@ int akida_program_flash(uint8_t *program_info, int len, uint32_t flash_address,
       program_info, len, flash_address + FLASH_BASE_ADDRESS);
   if (info.is_valid()) {
     auto inputsz = info.input_dims();
-    printk("input size: (%d, %d, %d)", inputsz[0], inputsz[1], inputsz[2]);
+    LOG_INF("input size: (%d, %d, %d)", inputsz[0], inputsz[1], inputsz[2]);
     (void)inputsz;
 
     if (info.can_learn())
@@ -88,6 +108,28 @@ int akida_forward(uint8_t *input, uint32_t *input_dims, uint8_t *output,
     if (out && out->size() * sizeof(int) == (size_t)output_size) {
       const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
       memcpy(output, bytes_out, output_size);
+      return SUCCESS;
+    }
+  }
+  return -EFAILURE;
+}
+
+int akida_predict(uint8_t *input, uint32_t *input_dims, float *output,
+                  int output_size_bytes) {
+
+  akida::TensorConstPtr in = akida::Dense::create_view(
+      reinterpret_cast<const char *>(input), akida::TensorType::uint8,
+      {input_dims[0], input_dims[1], input_dims[2]},
+      akida::Dense::Layout::RowMajor);
+
+  auto ret = akd_device.predict({in});
+
+  if (ret.size()) {
+    /** Get output buffer */
+    auto out = akida::Tensor::ensure_dense(std::move(ret[0]));
+    if (out && out->size() * sizeof(float) == (size_t)output_size_bytes) {
+      const unsigned char *bytes_out = (unsigned char *)out->buffer()->data();
+      memcpy(output, bytes_out, output_size_bytes);
       return SUCCESS;
     }
   }
@@ -140,7 +182,7 @@ int akida_fetch(uint8_t *output, int output_size, bool dequantize) {
       memcpy(output, bytes_out, output_size);
     }
   } else {
-    printk("Fetch returned NULL pointer");
+    LOG_ERR("Fetch returned NULL pointer");
     return -EFAILURE;
   }
   return SUCCESS;
@@ -180,7 +222,7 @@ int akida_update_learn_weights(const uint32_t *weights_ptr, uint32_t size) {
 }
 
 int32_t get_inferred_class(int32_t *result, int num_classes, int num_neurons) {
-  int32_t max_val = 0, max_index = -1, n_activations = 0;
+  int32_t max_val = INT32_MIN, max_index = 0, n_activations = 0;
   n_activations = num_classes * num_neurons;
   if (num_neurons > 0) {
     for (int i = 0; i < n_activations; i++) {

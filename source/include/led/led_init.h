@@ -51,6 +51,9 @@ typedef enum {
   LED_STATE_FLASH_WRITE,     /**< Flash write in progress */
   LED_STATE_UPDATE_SUCCESS,  /**< Update completed successfully */
   LED_STATE_UPDATE_FAILED,   /**< Update failed */
+  LED_STATE_LEARN_SPEAK_NOW, /**< Learning: prompting user to speak (Red ON) */
+  LED_STATE_KEYWORD_TRIGGERED, /**< Inference: keyword detected (Red short
+                                  flash) */
 } led_state_t;
 
 /**
@@ -88,6 +91,16 @@ void led_set_state(led_state_t state);
  */
 void led_ind_thread(void *a, void *b, void *c);
 
+void process_led(void);
+
 /* Get current BLE connection status. */
 bool is_ble_connected(void);
+
+/**
+ * @brief Notify the LED subsystem of a BLE connection state change.
+ *
+ * @param connected BLE_CONNECTED or BLE_NOT_CONNECTED
+ */
+void ble_connection_callback(bool connected);
+
 #endif /* _LED_INIT_H */
