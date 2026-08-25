@@ -120,6 +120,33 @@ config SYS_CPU_128MHZ
       (the Zephyr driver clamps SPIM4 to 16 MHz unless HFCLK is DIV1) — so this
       is now default y for the DK too, not just the spark board.
 
+config CURRENT_DEFAULT_RATE_HZ
+    int "Default INA190 current-sense sampler rate (Hz)"
+    default 10
+    depends on SPARK_BOARD
+    help
+      Default rate of the background current/power/energy sampler. Kept low for
+      a stable reading and low overhead; accurate spot values come from
+      `power measure`. Runtime-adjustable via the `power rate` shell command.
+
+choice
+    prompt "INA190 current-sense variant"
+    default INA190_VARIANT_A1
+    depends on SPARK_BOARD
+    help
+      Fitted INA190 amplifier variant. The A1/A3 difference is gain only
+      (A1 = 25 V/V, A3 = 100 V/V); the shunt resistors are board parts. The
+      variant cannot be auto-detected (analog part, no board ID), so the fitted
+      one must be selected here. Runtime-overridable via `power variant`.
+
+config INA190_VARIANT_A1
+    bool "INA190A1RSW (gain 25 V/V)"
+
+config INA190_VARIANT_A3
+    bool "INA190A3RSW (gain 100 V/V)"
+
+endchoice
+
 config AKD_SPI_FREQ_HZ
     int "AKD1500 host SPI clock (Hz)"
     default 8000000

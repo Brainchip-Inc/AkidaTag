@@ -25,4 +25,6 @@ source/external/*
 # local-only working files
 .plans/
 .userguide/
+.helpers/
+*__pycache__*
 scripts/sync.sh

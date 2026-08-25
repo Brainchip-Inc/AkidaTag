@@ -491,20 +491,31 @@ Phone displays the data - The app receives and presents the information to the u
 ## Current Monitoring IC & Battery Status
 This module provides battery charger status monitoring and current sensing capabilities using GPIO status pins and an external current monitoring IC (ADC-based). It enables real-time tracking of battery charging state and current consumption for power management and diagnostics.
 
-1. Current Monitoring IC (ADC)
-The application uses a multi-channel ADC to measure current through a shunt resistor. The ADC is configured for single-ended measurements (AIN0 and AIN1 relative to ground) as defined in the DeviceTree.
+1. Current Monitoring IC (INA190, ADC-based)
+Two INA190 current-sense amplifiers drive the nRF5340 SAADC: U25 senses VDD_1V8 through shunt R117 (0.1 Ω), U26 senses VDD_0V8_AKD through shunt R118 (0.02 Ω). Current is derived as `I(mA) = Vout(mV) / (Rshunt × gain)`.
 
 ## Configuration
 Channels: 2 (1V8_AKD rail on AIN0, 0V8_AKD rail on AIN1)
 Resolution: 12-bit (0-4095)
 Reference: 1800 mV internal
-Gain: 1/3 
+SAADC gain: 1/3
+
+INA190 variant: the A1/A3 part difference is amplifier gain only (A1 = 25 V/V, A3 = 100 V/V); the shunts are unchanged. It cannot be auto-detected, so it is chosen at build time via `CONFIG_INA190_VARIANT` (default A1) and overridable at runtime with `power variant a1|a3`.
 
 Sampling & Averaging:
-Each channel is sampled continuously to obtain stable and reliable current measurements.
-AVG_SAMPLES = 20 samples per averaging window
-Per-channel moving average calculated every 20 samples
-Total combined average printed after all channels report
+- A background sampler reads both rails at `CONFIG_CURRENT_DEFAULT_RATE_HZ` (default 10 Hz, runtime-tunable via `power rate`), averaging 8 back-to-back ADC conversions per rail read.
+- `power read` returns an 8-sample moving average for a stable value; energy integrates the instantaneous per-loop power.
+- `power measure [ms]` runs a synchronous averaged burst over a window, independent of the background rate — the most accurate spot reading. Use it after an `akd_coreclk` change or to bracket an inference.
+
+### `power` shell commands
+| Command | Description |
+|---|---|
+| `power read` | Moving-average current & power for both rails |
+| `power measure [ms]` | Averaged current/power/energy over a window (default 500 ms), both rails |
+| `power rate [hz]` | Get/set the background sampler rate (default 10 Hz) |
+| `power energy` | Accumulated energy & average power since the last reset |
+| `power reset` | Reset the energy accumulator |
+| `power variant [a1\|a3]` | Get/set the fitted INA190 variant (gain) |
 
 2. Battery Charger Status Monitoring
 The battery charger status is monitored using two GPIO input pins (chgr_sts1 and chgr_sts2) connected to the charger IC. These pins provide real-time charging state and fault detection.

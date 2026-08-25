@@ -1,0 +1,78 @@
+name: Lint
+
+# Formatting gate for pull requests.
+#
+# Deliberately a GitHub-hosted job, NOT self-hosted: ci.yml is a
+# hardware-in-the-loop workflow bound to a single physical board and serialised
+# behind the `hil-hardware-test` concurrency group. A formatting check must
+# never queue behind a board flash, nor occupy the board while it runs, so this
+# workflow runs on ubuntu-latest and owns a separate concurrency group.
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+
+    env:
+      # Pinned on purpose. Different clang-format majors format differently, so
+      # an unpinned version becomes a mystery failure the day the runner image
+      # updates. This matches the version present in the repo's own toolchain
+      # image (docker/Dockerfile, built as `spark-ncs` by
+      # scripts/build_docker_image.sh), where clang-format arrives as a pip
+      # dependency of the NCS requirements: `clang-format --version` in that
+      # image reports 22.1.1. Bump this when the toolchain image moves.
+      CLANG_FORMAT_VERSION: "22.1.1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the PR base commit as well, to diff against it.
+          fetch-depth: 0
+
+      - name: Install clang-format ${{ env.CLANG_FORMAT_VERSION }}
+        run: |
+          python3 -m pip install --quiet "clang-format==${CLANG_FORMAT_VERSION}"
+          clang-format --version
+
+      - name: Determine base ref
+        id: base
+        run: |
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            # workflow_dispatch: compare against origin/main.
+            git fetch --no-tags origin main
+            BASE="$(git rev-parse origin/main)"
+          fi
+          git fetch --no-tags origin "$BASE" || true
+          echo "sha=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Check formatting of changed files
+        run: |
+          set -euo pipefail
+          BASE="$(git merge-base "${{ steps.base.outputs.sha }}" HEAD)"
+          echo "Diffing against $BASE"
+
+          # Only added/copied/modified/renamed files; deletions cannot be
+          # formatted. Extension and pruned-directory filtering is NOT repeated
+          # here on purpose: scripts/clang_format.sh is the single owner of
+          # those rules and applies them to any explicit file list it is given.
+          mapfile -t CHANGED < <(git diff --name-only --diff-filter=ACMR "$BASE" HEAD)
+
+          if [ "${#CHANGED[@]}" -eq 0 ]; then
+            echo "No files changed in this pull request."
+            exit 0
+          fi
+
+          printf 'Changed files:\n'
+          printf '  %s\n' "${CHANGED[@]}"
+
+          ./scripts/clang_format.sh check "${CHANGED[@]}"
