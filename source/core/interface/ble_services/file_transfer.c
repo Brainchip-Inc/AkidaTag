@@ -850,14 +850,41 @@ ssize_t file_transfer_write(struct bt_conn *conn,
       }
       LOG_INF("DATA CRC OK (0x%08X)\n", data_crc);
 
+      /* Build the record in RAM, but prove the bytes are really in flash before
+       * committing it.
+       *
+       * The CRC above covers what arrived over the air, which says nothing about
+       * whether the flash took it. A write to a flash that was not reachable
+       * used to be reported as successful, so persisting the record first left a
+       * data meta on disk describing a model that had never been written, and
+       * the mismatch only surfaced later. Read the flash back first, and keep
+       * the record only on a match.
+       *
+       * file_transfer_validate_flash_data() uses sram_upload_buffer as scratch,
+       * which is safe here: the last chunk has already been flushed to flash and
+       * reset_data_buffer() has cleared it, and this transfer still holds
+       * BUF_EVENT_BUSY. */
+      model_data_meta_t dm;
+      dm.data_crc32 = data_crc;
+      dm.first_4_bytes = data_first_4_bytes;
+      dm.data_length = (uint32_t)total_pgm_size;
+      /* model_name is now stored in model_meta_t (file 1), not here */
+
+      if (file_transfer_validate_flash_data(meta_flash_address, &dm) != 0) {
+        led_set_state(LED_STATE_UPDATE_FAILED);
+        LOG_ERR("Flash readback FAILED at 0x%08X; data meta NOT saved\n",
+                meta_flash_address);
+        total_received = 0;
+        app_flash_offset = meta_flash_address;
+        ble_pgm_offset = 0;
+        send_ack_to_host(ACK_CRC_FAIL);
+        k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+        k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+        return len;
+      }
+
       /* --- File 3: write model_data_meta_t to LittleFS --- */
       {
-        model_data_meta_t dm;
-        dm.data_crc32 = data_crc;
-        dm.first_4_bytes = data_first_4_bytes;
-        dm.data_length = (uint32_t)total_pgm_size;
-        /* model_name is now stored in model_meta_t (file 1), not here */
-
         const char *data_path =
             (dyn_app_slot >= 0) ? dyn_data_path : model_data_meta_paths[0];
         struct fs_file_t dm_file;
