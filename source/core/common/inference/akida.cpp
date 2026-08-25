@@ -22,6 +22,15 @@ uint32_t akida_get_clock_counter(void) {
   return akd_device.read_clock_counter();
 }
 
+/* Config-DMA (model-programming) clock counter — a DIFFERENT counter than the
+ * inference one above. read_clock_counter() reads the HRC/event DMA timers
+ * (idle during programming, which is why program time showed 0 cycles);
+ * read_config_clock_counter() reads the config-DMA engine timer, which is what
+ * actually advances while a model is being programmed into the mesh. */
+uint32_t akida_get_config_clock_counter(void) {
+  return akd_device.read_config_clock_counter();
+}
+
 int akida_program(uint8_t *buffer, int size, bool learn_en) {
   if (current_program)
     akd_device.unprogram();

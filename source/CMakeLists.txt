@@ -83,6 +83,11 @@ if(CONFIG_SPARK_BOARD)
         core/interface/battery/battery.c
     )
 endif()
+if(CONFIG_SYS_CPU_128MHZ)
+    target_sources(app PRIVATE
+        core/interface/clock/sys_clock_cfg.c
+    )
+endif()
 
 target_sources(app PRIVATE
     core/common/audio/kissfft/kiss_fft.c
