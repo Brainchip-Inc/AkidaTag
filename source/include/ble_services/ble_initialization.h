@@ -85,11 +85,6 @@ extern uint8_t app_start_flag;
  */
 extern uint8_t current_stream_flag;
 
-/* Semaphore used to signal the current streaming thread to start.
- * The streaming thread waits on this semaphore and begins sending
- * data when the semaphore is given (after a start command).
- */
-extern struct k_sem current_stream_sem;
 /* Access in main.c, and variable changes based on info.yaml */
 extern model_meta_t kws_meta;
 extern model_data_meta_t kws_data_meta;

@@ -1508,6 +1508,13 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
               "dma=%uus",
               confidence * 100.0f, triggered_score * 100.0f,
               chiming_counters[triggered_class], inf_time, dma_time);
+#ifdef CONFIG_SPARK_BOARD
+      current_sense_reading_t pwr;
+      current_sense_get_latest(&pwr);
+      LOG_INF("  power: 1V8=%.1fmW 0V8=%.1fmW",
+              (double)pwr.power_mw[CURRENT_RAIL_1V8],
+              (double)pwr.power_mw[CURRENT_RAIL_0V8]);
+#endif
     }
     /* KWS data is sent only when BLE is connected and the KWS application
      * is deployed */
