@@ -10,11 +10,20 @@
 void akida_toggle_clock_counter(bool enable);
 
 /**
- * Read clock from DMA clock counters
+ * Read clock from DMA clock counters (HRC/event = inference path).
  *
  * @return DMA clock counter value
  */
 uint32_t akida_get_clock_counter();
+
+/**
+ * Read the config-DMA clock counter (model-programming path). This is a
+ * separate counter from akida_get_clock_counter(); use it to time model
+ * programming (the inference counter stays idle during programming).
+ *
+ * @return config-DMA clock counter value
+ */
+uint32_t akida_get_config_clock_counter();
 
 /**
  * Program the model into the mesh network and set learning mode.

@@ -52,9 +52,12 @@ typedef struct {
 
 __aligned(32) float g_mfccdata[SPECTROGRAM_RES]; /* local data structure to hold
                                                     MFCCs computed */
-__aligned(32) int16_t g_mfcc_input[N_BYTES_PER_SAMPLE * BLOCK_SAMPLES *
+/* Sized for the largest supported block (MAX_BLOCK_SAMPLES) so a runtime
+ * `app blkms` change never overruns these buffers. g_mfcc_input additionally
+ * holds one hop of overlap from the previous block. */
+__aligned(32) int16_t g_mfcc_input[N_BYTES_PER_SAMPLE * MAX_BLOCK_SAMPLES *
                                    N_CHANNELS_PER_SAMPLE * N_CAP_PER_BUFF];
-__aligned(32) int16_t orig_buf[N_BYTES_PER_SAMPLE * BLOCK_SAMPLES *
+__aligned(32) int16_t orig_buf[N_BYTES_PER_SAMPLE * MAX_BLOCK_SAMPLES *
                                N_CHANNELS_PER_SAMPLE * N_CAP_PER_BUFF];
 
 static audio_processor_state_t _state;
@@ -122,30 +125,36 @@ static int spectrogram_push(float *data, int spectrogram_index) {
  */
 
 #define MFCC_HOP_SAMPLES CONFIG_MFCC_SAMPLE_COUNT        // 20 ms
-#define MFCC_WINDOW_SAMPLES CONFIG_MFCC_SAMPLE_COUNT * 2 // 40 ms
-#define MFCC_STREAM_SAMPLES CONFIG_MFCC_SAMPLE_COUNT * 3 // 60 ms
+#define MFCC_WINDOW_SAMPLES CONFIG_MFCC_SAMPLE_COUNT * 2 // 40 ms (2 hops)
 
-#define MFCC_PER_BLOCK 3
+/* Number of MFCC frames produced from one DMA block. The block size is chosen
+ * at runtime (audio_set_block_ms) and is always a multiple of the hop, so this
+ * is exact: e.g. 1 frame @20 ms, 2 @40 ms, 3 @60 ms, 4 @80 ms. */
+static inline int mfcc_frames_per_block(void) {
+  return (int)(audio_get_block_samples() / MFCC_HOP_SAMPLES);
+}
 
-static void mfcc_process_input(const int16_t *input, int16_t *mfcc_input) {
+/* Turn one DMA block of `block_samples` PCM samples into MFCC frames.
+ *
+ * mfcc_input layout: [0 .. hop) holds the last hop retained from the previous
+ * block; [hop .. hop+block_samples) holds this block. Each MFCC window is 2
+ * hops wide and steps by one hop, so a block of N hops yields N frames and the
+ * final window ends exactly at the buffer end. The last hop of this block is
+ * then retained as the overlap for the next call. Works for any block size
+ * that is a whole number of hops. */
+static void mfcc_process_input(const int16_t *input, int16_t *mfcc_input,
+                               int block_samples) {
+  const int frames = block_samples / MFCC_HOP_SAMPLES;
 
-  // make sure the mfcc_input pointer should have space for 320+960 samples
-  // 1. Copy NEW 960 samples into the rest of the buffer
-  memcpy(&mfcc_input[MFCC_HOP_SAMPLES], input,
-         MFCC_STREAM_SAMPLES * sizeof(int16_t));
+  memcpy(&mfcc_input[MFCC_HOP_SAMPLES], input, block_samples * sizeof(int16_t));
 
-  // 2. Compute 3 MFCCs
-  // Frame 0: 0-640 (Contains 320 old, 320 new)
-  // Frame 1: 320-960
-  // Frame 2: 640-1280
-  for (int f = 0; f < MFCC_PER_BLOCK; f++) {
+  for (int f = 0; f < frames; f++) {
     mfcc_compute(&mfcc_input[f * MFCC_HOP_SAMPLES], g_mfccdata);
     state->spectrogram_index =
         spectrogram_push(g_mfccdata, state->spectrogram_index);
   }
 
-  // 3. Save the LAST 320 samples of the CURRENT input for the NEXT call
-  memcpy(&mfcc_input[0], &mfcc_input[MFCC_STREAM_SAMPLES],
+  memcpy(&mfcc_input[0], &mfcc_input[block_samples],
          MFCC_HOP_SAMPLES * sizeof(int16_t));
 }
 
@@ -161,13 +170,14 @@ static void mfcc_process_input(const int16_t *input, int16_t *mfcc_input) {
 
 int audio_processor(void) {
 
-  __aligned(32) static int16_t input[MAX_MFCC_LEN];
+  __aligned(32) static int16_t input[MAX_BLOCK_SAMPLES];
 
+  const int block_samples = (int)audio_get_block_samples();
   int min = 128000;
   int max = -128000;
 
   /* Select only one channel */
-  for (int i = 0; i < state->mfcc_len; i++) {
+  for (int i = 0; i < block_samples; i++) {
     if (min > orig_buf[N_CHANNELS_PER_SAMPLE * i])
       min = orig_buf[N_CHANNELS_PER_SAMPLE * i];
     if (max < orig_buf[N_CHANNELS_PER_SAMPLE * i])
@@ -180,11 +190,11 @@ int audio_processor(void) {
     LOG_WRN("CLIP!!!! min %d max %d", min, max);
   }
 
-  mfcc_process_input(input, g_mfcc_input);
+  mfcc_process_input(input, g_mfcc_input, block_samples);
 
   if (verbose_on) {
-    LOG_INF("mfcc: 3 frames computed, buffer %d/%d", state->spectrogram_index,
-            state->spectrogram_len);
+    LOG_INF("mfcc: %d frames computed, buffer %d/%d", mfcc_frames_per_block(),
+            state->spectrogram_index, state->spectrogram_len);
   }
 
   ap_counter++;
@@ -213,9 +223,10 @@ int audio_processor_start(bool single, float *spectrogram_buff,
     LOG_ERR(" invalid parameter  ");
     return EFAILURE;
   }
-  /* for TAG MFCC HOP length is 320 samples and total block size is 960 samples
-  multiply mfcc_hop_len * 3 to get 960 */
-  _state.mfcc_len = mfcc_hop_len * 3;
+  /* MFCC hop length in samples (e.g. 320 = 20 ms). The number of samples the
+   * processor consumes per call now follows the runtime block size
+   * (audio_get_block_samples()), so this field is informational only. */
+  _state.mfcc_len = mfcc_hop_len;
   _state.spectrogram_index = 0;
 
   _state.spectrogram_len = spectrogram_dims[0];
@@ -232,7 +243,13 @@ int audio_processor_start(bool single, float *spectrogram_buff,
   return SUCCESS;
 }
 
-int get_audio_frames_cb(void) { return MFCC_PER_BLOCK * g_inference_period; }
+/* MFCC frames produced between consecutive inference callbacks. Inference fires
+ * every g_inference_period blocks, and each block yields mfcc_frames_per_block()
+ * frames, so this stays exact for any block size (used by the learning path to
+ * copy the most-recent frames from the spectrogram). */
+int get_audio_frames_cb(void) {
+  return mfcc_frames_per_block() * g_inference_period;
+}
 
 int audio_processor_stop() {
 

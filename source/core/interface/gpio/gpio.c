@@ -18,6 +18,7 @@ K_SEM_DEFINE(akd_async_sem, 0, 1);
 #define AKD_0V_ENB_NODE DT_NODELABEL(akd_0v_enb)
 #define CAM_ENB_NODE DT_NODELABEL(cam_enb)
 #define AKD_ASYNC_ENB_NODE DT_NODELABEL(akd_async)
+#define AKD_LP_NODE DT_NODELABEL(akd_lp)
 
 static const struct gpio_dt_spec enable_akd =
     GPIO_DT_SPEC_GET(AKD_ENB_NODE, gpios);
@@ -36,6 +37,9 @@ static const struct gpio_dt_spec enable_camera =
 
 static const struct gpio_dt_spec enable_akd_async =
     GPIO_DT_SPEC_GET(AKD_ASYNC_ENB_NODE, gpios);
+
+/* AKD1500 SLEEP pin (active-high): 1 = low-power (clocks gated, model retained) */
+static const struct gpio_dt_spec akd_lp = GPIO_DT_SPEC_GET(AKD_LP_NODE, gpios);
 
 static struct gpio_callback akd_async_cb;
 
@@ -124,6 +128,10 @@ int gpio_init(void) {
     LOG_ERR("AKD ASYNC enable GPIO not ready");
     return -ENODEV;
   }
+  if (!gpio_is_ready_dt(&akd_lp)) {
+    LOG_ERR("AKD sleep GPIO not ready");
+    return -ENODEV;
+  }
 
   /* --- Configure control pins as output inactive --- */
   err = gpio_pin_configure_dt(&enable_akd, GPIO_OUTPUT_INACTIVE);
@@ -157,6 +165,11 @@ int gpio_init(void) {
   err = gpio_pin_configure_dt(&enable_akd_async, GPIO_INPUT);
   if (err) {
     LOG_ERR("Failed to configure AKD ASYNC enable pin (err %d)", err);
+    return err;
+  }
+  err = gpio_pin_configure_dt(&akd_lp, GPIO_OUTPUT_INACTIVE); /* start awake */
+  if (err) {
+    LOG_ERR("Failed to configure AKD sleep pin (err %d)", err);
     return err;
   }
   gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
@@ -202,6 +215,13 @@ void akd_irq_disable(void) {
     irq_enabled = false;
   }
 }
+/**
+ * @brief Put the AKD1500 into low-power sleep or wake it.
+ *
+ * Drives the active-high SLEEP pin: true gates the internal clocks (state and
+ * programmed model retained), false resumes normal operation.
+ */
+void akd_sleep(bool sleep) { gpio_pin_set_dt(&akd_lp, sleep); }
 /**
  * @brief Enable power for onboard sensors and peripherals on the Spark board.
  *
