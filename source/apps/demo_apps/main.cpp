@@ -64,12 +64,15 @@ extern "C" {
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 #include "imu_h/imu.h"
 #endif
+/* gpio.h guards its own spark-only contents and provides no-op inlines for the
+ * rest (akd_sleep / akd_sleep_get), so it is included for both boards. The
+ * AKD1500 clock and sleep shell commands below call akd_sleep() unguarded. */
+#include "gpio/gpio.h"
 #ifdef CONFIG_SPARK_BOARD
 #include "battery/battery.h"
 #include "ble_services/battery_service.h"
 #include "button/user_button.h"
 #include "current_ic/current_ic.h"
-#include "gpio/gpio.h"
 #endif
 #include "led_init.h"
 #include "littlefs_storage.h"
