@@ -25,6 +25,17 @@ This project works with the following devices:
 
 ---
 
+## Roadmap
+
+Planned work that has not landed yet. For what has already shipped, see
+[CHANGELOG.md](CHANGELOG.md); its `[Unreleased]` section covers changes that
+have landed on `main` but are not yet in a release.
+
+- Secure boot
+- SPI camera inference pipeline
+
+---
+
 # Hardware-in-the-Loop (HIL) Testing
 
 This repository includes an automated **Hardware-in-the-Loop (HIL)
@@ -249,6 +260,8 @@ pipeline** function correctly on the target hardware.
 ├── docs/              # Setup, Architecture and design documentation
 ├── .env/              # Environment related file, signing keys not to be pushed
 ├── .github/           # CI, CODEOWNERS, repo configuration
+├── CHANGELOG.md       # Cumulative change history, source of release notes
 ├── README.md
 ├── CONTRIBUTING.md
 └── LICENSE
+```
