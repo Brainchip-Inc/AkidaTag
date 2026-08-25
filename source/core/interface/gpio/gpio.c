@@ -215,13 +215,29 @@ void akd_irq_disable(void) {
     irq_enabled = false;
   }
 }
+/* Mirrors the last state requested through akd_sleep(). gpio_init() configures
+ * akd_lp as GPIO_OUTPUT_INACTIVE, so the chip starts awake and this starts
+ * false. Tracked here rather than read back off the pin: this is the requested
+ * state, which is what a save/restore around a flash access needs. */
+static bool akd_asleep = false;
+
 /**
  * @brief Put the AKD1500 into low-power sleep or wake it.
  *
  * Drives the active-high SLEEP pin: true gates the internal clocks (state and
  * programmed model retained), false resumes normal operation.
  */
-void akd_sleep(bool sleep) { gpio_pin_set_dt(&akd_lp, sleep); }
+void akd_sleep(bool sleep) {
+  akd_asleep = sleep;
+  gpio_pin_set_dt(&akd_lp, sleep);
+}
+
+/**
+ * @brief Report the last state requested through akd_sleep().
+ *
+ * @return true if the AKD1500 was last asked to sleep, false if awake.
+ */
+bool akd_sleep_get(void) { return akd_asleep; }
 /**
  * @brief Enable power for onboard sensors and peripherals on the Spark board.
  *

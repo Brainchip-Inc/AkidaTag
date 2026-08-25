@@ -4,6 +4,7 @@
 #include "akida/hardware_device.h"
 extern "C" {
 #include "ble_services/file_transfer.h"
+#include "gpio/gpio.h"
 }
 
 #include "io_objects.h"
@@ -431,15 +432,75 @@ void init_akd_1500_spi_flash() {
   akd1500.write(0xfce0003c, rw_data.ucdata, 4);
 }
 
+/* ---------------------------------------------------------------------------
+ * Claiming the AKD1500 flash
+ *
+ * The model flash is not on a bus of the nRF's own: it hangs off the AKD1500 and
+ * is only reachable when akida_config_spi(1) routes the AKD1500's S2M
+ * feedthrough to the host. Two consequences drive everything below.
+ *
+ * 1. The AKD1500 has to be AWAKE. SLEEP is a hardware clock gate, so a sleeping
+ *    chip feeds nothing through and every transaction reads back all-zero
+ *    (AN-002, Sleep and Low-Power Operation: "A sleeping AKD1500 returns
+ *    0x00000000 on register reads. Wake it before any register access or
+ *    inference.") or all-ones when MISO floats. During normal async KWS the
+ *    chip is asleep between inferences, which is its steady state, so any
+ *    caller that is not the inference path finds it asleep. Waking is part of
+ *    preparing the bus, which is why it belongs here next to
+ *    akida_config_spi(1) rather than at each call site: this covers the BLE
+ *    model-update erase, the BLE chunk write, the readback validation and the
+ *    `full_erase` shell command in one place.
+ *
+ * 2. Access has to be SERIALISED. Three threads reach this code (the Bluetooth
+ *    RX thread for a model update, the shell thread for `full_erase`, and the
+ *    KWS inference path for boot validation and readback), a flash operation
+ *    holds the bus in MCU-master mode for hundreds of milliseconds, and the
+ *    save/restore of the sleep state is a read-modify-write of state the KWS
+ *    async loop also writes. Without the mutex the restore below would race a
+ *    concurrent writer and could leave the chip awake or asleep against that
+ *    thread's expectation.
+ * ------------------------------------------------------------------------ */
+K_MUTEX_DEFINE(akd_flash_mutex);
+
+/* Claim the flash for MCU access: serialise, wake, route the bus to the host.
+ * Returns the sleep state to hand back to akd_flash_release(). */
+static bool akd_flash_claim(void) {
+  k_mutex_lock(&akd_flash_mutex, K_FOREVER);
+  const bool was_asleep = akd_sleep_get();
+  if (was_asleep) {
+    akd_sleep(false);
+    /* AN-002 asks for a short settle after de-asserting SLEEP before the first
+     * transaction. See CONFIG_AKD_WAKE_SETTLE_US for how this is sized. */
+    k_busy_wait(CONFIG_AKD_WAKE_SETTLE_US);
+  }
+  akida_config_spi(1);
+  return was_asleep;
+}
+
+/* Release the flash, restoring the sleep state the caller found. Restore rather
+ * than force: the KWS async loop owns its own per-inference duty cycle (wake
+ * before an inference, sleep after), and forcing either state here would fight
+ * it. */
+static void akd_flash_release(bool was_asleep) {
+  akida_config_spi(0);
+  if (was_asleep) {
+    akd_sleep(true);
+  }
+  k_mutex_unlock(&akd_flash_mutex);
+}
+
 /* helper function to read from SPI flash – used by file_transfer.c for CRC */
 extern "C" void spi_flash_read_helper_func(uint8_t *buf, uint32_t offset,
                                            uint32_t size) {
   if (!buf || size == 0) {
     return;
   }
-  akida_config_spi(1);
-  int ret = spi_flash_read(spi_driver, offset, buf, size);
-  akida_config_spi(0);
+  const bool was_asleep = akd_flash_claim();
+  int ret = spi_flash_probe(spi_driver);
+  if (ret == 0) {
+    ret = spi_flash_read(spi_driver, offset, buf, size);
+  }
+  akd_flash_release(was_asleep);
   if (ret != 0) {
     LOG_ERR("spi_flash_read_helper: read failed at 0x%x size=%u (err %d)",
             offset, size, ret);
@@ -453,27 +514,34 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
             (FLASH_MAX_16_MB_SIZE - offset));
     return 1;
   }
-  akida_config_spi(1);
+  const bool was_asleep = akd_flash_claim();
 
   uint64_t s_tick = 0;
-  ;
   uint64_t e_tick = 0;
   uint32_t erase_time = 0;
 
   LOG_INF("Flash erase offset %x and size = %d bytes", offset, size);
 
-  s_tick = time_ms();
-  int ret = spi_flash_erase(spi_driver, offset, size);
-  e_tick = time_ms();
-  erase_time = e_tick - s_tick;
-  LOG_INF("erase time= %u ms", erase_time);
+  /* Confirm something is actually answering before believing the erase. The
+   * status poll inside spi_flash_erase() reads WIP from bit 0, so an unreachable
+   * flash either looks instantly ready (all-zero: erase "succeeds" having done
+   * nothing) or busy forever (all-ones: the full timeout burns per sector).
+   * Neither is a truthful result, so gate on the JEDEC ID instead. */
+  int ret = spi_flash_probe(spi_driver);
+  if (ret == 0) {
+    s_tick = time_ms();
+    ret = spi_flash_erase(spi_driver, offset, size);
+    e_tick = time_ms();
+    erase_time = e_tick - s_tick;
+    LOG_INF("erase time= %u ms", erase_time);
+  }
   if (ret) {
     LOG_PRINTK("Erase failed\n");
   } else {
     LOG_PRINTK("Erase Successful\n");
   }
 
-  akida_config_spi(0);
+  akd_flash_release(was_asleep);
 
   return ret;
 }
@@ -482,18 +550,28 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
  * offset, and size */
 extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
                                             size_t size) {
-  akida_config_spi(1);
+  const bool was_asleep = akd_flash_claim();
 
   uint32_t flash_addr = offset;
 
   uint64_t s_write = 0;
-  ;
   uint64_t e_write = 0;
   uint32_t write_time = 0;
 
-  s_write = time_ms();
-  int ret = spi_flash_write(spi_driver, flash_addr, data, size);
+  /* Same reasoning as the erase: do not report a write that the flash never
+   * saw. See the comment in spi_flash_erase_helper_func. */
+  int ret = spi_flash_probe(spi_driver);
   if (ret != 0) {
+    akd_flash_release(was_asleep);
+    LOG_ERR("Flash write skipped, flash not responding (addr = 0x%x, size = %d)",
+            flash_addr, size);
+    return;
+  }
+
+  s_write = time_ms();
+  ret = spi_flash_write(spi_driver, flash_addr, data, size);
+  if (ret != 0) {
+    akd_flash_release(was_asleep);
     LOG_ERR("Flash write failed with error %d", ret);
     LOG_INF("Flash Address = 0x%x, size = %d", flash_addr, size);
     return;
@@ -509,6 +587,7 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
   // Read back from flash into second half of data[]
   ret = spi_flash_read(spi_driver, flash_addr, read_back_flash, size);
   if (ret != 0) {
+    akd_flash_release(was_asleep);
     LOG_ERR("Flash read failed with error %d", ret);
     return;
   }
@@ -525,7 +604,7 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
 #endif
   if (!ret)
     LOG_INF("Flash Write Successful");
-  akida_config_spi(0);
+  akd_flash_release(was_asleep);
 }
 
 /**
