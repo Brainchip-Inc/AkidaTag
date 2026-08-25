@@ -22,6 +22,14 @@
 LOG_MODULE_REGISTER(pdm_mic, LOG_LEVEL_INF);
 atomic_t is_dmic_start;
 
+/* Active audio block size (ms). Runtime-selectable via audio_set_block_ms();
+ * defaults to CONFIG_AUDIO_BLOCK_MS. The mem-slab below is sized for
+ * AUDIO_MAX_BLOCK_MS, so a runtime change can never overrun it. */
+static uint32_t g_block_ms = AUDIO_BLOCK_MS_DEFAULT;
+
+uint32_t audio_get_block_ms(void) { return g_block_ms; }
+uint32_t audio_get_block_samples(void) { return AUDIO_MS_TO_SAMPLES(g_block_ms); }
+
 K_MEM_SLAB_DEFINE(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 32);
 
 /* Queue holds audio_block descriptors */
@@ -136,12 +144,9 @@ int dmic_start(void) {
   return dmic_trigger(dmic_dev, DMIC_TRIGGER_START);
 }
 
-int dmic_init(void) {
-  if (!device_is_ready(dmic_dev)) {
-    LOG_ERR("DMIC not ready");
-    return -ENODEV;
-  }
-
+/* Program the DMIC/PDM with the current block size. Does NOT start capture, so
+ * it is safe to call while stopped to change the block size. */
+static int dmic_apply_config(void) {
   /* -------- Stream configuration -------- */
   static struct pcm_stream_cfg stream;
   memset(&stream, 0, sizeof(stream));
@@ -149,7 +154,7 @@ int dmic_init(void) {
   stream.pcm_width = SAMPLE_BIT_WIDTH;
   stream.mem_slab = &mem_slab;
   stream.pcm_rate = SAMPLE_RATE;
-  stream.block_size = BLOCK_SIZE(SAMPLE_RATE, 1);
+  stream.block_size = audio_get_block_samples() * BYTES_PER_SAMPLE;
 
   /* -------- DMIC configuration -------- */
   static struct dmic_cfg cfg;
@@ -175,12 +180,49 @@ int dmic_init(void) {
     LOG_ERR("dmic_configure failed: %d", ret);
     return -EFAILURE;
   }
+  return SUCCESS;
+}
+
+int dmic_init(void) {
+  if (!device_is_ready(dmic_dev)) {
+    LOG_ERR("DMIC not ready");
+    return -ENODEV;
+  }
+
+  if (dmic_apply_config() != SUCCESS) {
+    return -EFAILURE;
+  }
   dc_block_init(&dc_state);
   if (dmic_start() < 0) {
     LOG_ERR("DMIC start failed");
     return -EFAILURE;
   }
 
+  return SUCCESS;
+}
+
+int audio_set_block_ms(uint32_t ms) {
+  if (ms < AUDIO_BLOCK_STEP_MS || ms > AUDIO_MAX_BLOCK_MS ||
+      (ms % AUDIO_BLOCK_STEP_MS) != 0) {
+    LOG_ERR("block_ms %u invalid: use a multiple of %u in [%u, %u]", ms,
+            (uint32_t)AUDIO_BLOCK_STEP_MS, (uint32_t)AUDIO_BLOCK_STEP_MS,
+            (uint32_t)AUDIO_MAX_BLOCK_MS);
+    return -EINVAL;
+  }
+
+  /* Stop capture (idempotent) before reconfiguring the DMA. The caller is
+   * responsible for restarting capture afterwards (e.g. `app start`). */
+  stop_dmic();
+  g_block_ms = ms;
+
+  int ret = dmic_apply_config();
+  if (ret != SUCCESS) {
+    LOG_ERR("failed to reconfigure DMIC for %u ms", ms);
+    return ret;
+  }
+  dmic_reset_dc_state();
+  LOG_INF("audio block size = %u ms (%u samples, %u buffers)", ms,
+          audio_get_block_samples(), (uint32_t)BLOCK_COUNT);
   return SUCCESS;
 }
 
@@ -216,11 +258,12 @@ void dmic_capture_thread(void *a, void *b, void *c) {
       memcpy((void *)orig_buf, blk.data, blk.size);
       k_mem_slab_free(&mem_slab, blk.data);
       /*
-       * Signal the LED indication thread every 2 cycles of the DMIC capture
-       * loop. The DMIC thread runs every ~60 ms, so triggering on every second
-       * cycle generates a ~120 ms event used by the LED thread for timing.
+       * Signal the LED indication thread roughly every ~120 ms regardless of
+       * the active block size (the DMIC thread runs once per block). At 60 ms
+       * blocks this is every 2nd cycle, matching the previous behaviour.
        */
-      if (dmic_capture_thread_cntr % 2 == 0) {
+      uint32_t led_every = MAX(1U, 120U / audio_get_block_ms());
+      if (dmic_capture_thread_cntr % led_every == 0) {
         k_sem_give(&led_sem);
       }
       dmic_capture_thread_cntr++;
@@ -346,9 +389,10 @@ static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
       prev_time = now;
 
       LOG_DBG("DMIC data received: %lld ms", diff);
-      // Check if the interval between consecutive DMIC data blocks is within
-      // the expected 50–70 ms range
-      if (diff >= 50 && diff <= 70) {
+      // Check the interval between consecutive DMIC blocks is within +/-10 ms of
+      // the configured block size (e.g. 50-70 ms for a 60 ms block).
+      int64_t expected = (int64_t)audio_get_block_ms();
+      if (diff >= expected - 10 && diff <= expected + 10) {
         valid_cycles++;
         LOG_DBG("Cycle %d OK", valid_cycles);
       } else {

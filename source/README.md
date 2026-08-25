@@ -994,8 +994,8 @@ The `app` command provides runtime configuration for the KWS (Keyword Spotting) 
 | `app speech <ms>` | 1300 | Set speech active timeout (resets to idle if RMS stays low) |
 | `app metrics <0\|1>` | 0 | Enable/disable detailed metrics output (confidence %, timing) |
 | `app show` | — | Print all current parameters with usage |
-| `app start` | — | Resume the KWS pipeline (idempotent: starts the DMIC and re-arms the learning gate) |
-| `app stop` | — | Halt the KWS pipeline (idempotent: stops the DMIC and clears the learning gate) |
+| `app start` | — | Resume the KWS pipeline (starts the DMIC, re-arms the learning gate). On spark, restores the AKD1500 operating clocks (PLL on, 400 MHz core, 8 MHz host) |
+| `app stop` | — | Halt the KWS pipeline (stops the DMIC, clears the learning gate). On spark, drops the AKD1500 to its lowest-power state (PLL off, asleep) |
 | `app reset` | — | Restore all KWS params to compile-time defaults and persist to NVS |
 | `app el <n>` | — | Edge learning commands (mode transitions) |
 
@@ -1038,6 +1038,28 @@ app score 0.70  (higher smoothed score threshold)
 ```
 app debounce 200
 ```
+
+### AKD1500 Clock, SPI & Low-Power
+
+Runtime control of the AKD1500 host SPI, internal clocks, and low-power state. By default the AKD1500 core runs at 400 MHz off the 800 MHz PLL and the host SPI at 8 MHz; the chip is put to sleep between inferences, and `app stop` additionally turns the PLL off for the lowest-power idle. The SLEEP pin and the `app stop` power-down are spark-only; the clock/SPI commands work on both boards.
+
+| Command | Description |
+| --- | --- |
+| `spi_freq <hz>` | Set the host SPI clock (1–32 MHz); the AKD1500 SPI_S core auto-scales to hold the ¼-rule margin |
+| `akd_coreclk <hz>` | Set the AKD1500 core clock (5–400 MHz): divides the 800 MHz PLL, or reprograms the PLL for off-grid targets |
+| `akd_pll <hz>` | Reprogram the PLL output directly (600–800 MHz, 12.5 MHz steps) |
+| `akd_sysdiv <n>` | Set the core divider off the current PLL clock |
+| `akd_clkref <0\|1>` | Clock source: `0` = PLL, `1` = 25 MHz reference (PLL off, lowest power) |
+| `akd_sleep <0\|1>` | AKD1500 hardware SLEEP: `0` = wake, `1` = sleep (clocks gated, model/state retained) |
+| `akd_clkinfo` | Dump the AKD1500 clock/PLL state and the operating host clock |
+
+The clock/PLL/ref/sleep commands refuse while KWS is running (they would race the per-inference sleep) — stop it first with `app stop`. Additional bring-up diagnostics: `akd_probe`, `akd_rdtest`, `akida_rd`/`akida_wr`, `spi_rxdelay`, `akd_pll_on`.
+
+**Configuration (Kconfig):**
+- **`CONFIG_AKD_SPI_FREQ_HZ`** (default `8000000`) — boot host SPI clock; runtime-tunable via `spi_freq`.
+- **`CONFIG_AKD_CORE_CLOCK_HZ`** (default `400000000`) — boot AKD1500 core clock; runtime-tunable via `akd_coreclk`.
+- **`CONFIG_SYS_CPU_128MHZ`** (default `y`) — run the nRF5340 app core at 128 MHz (required for SPIM4 at ≥ 16 MHz).
+
 ### Additional GPIO Configuration
 
 The following GPIOs are added in the board overlay to control **power enabling for onboard sensors and peripherals on the Spark board**.
