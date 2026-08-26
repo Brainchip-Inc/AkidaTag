@@ -411,6 +411,44 @@ static void akd_async_wake_reap_stranded(void) {
             (int)held_ms);
   }
 }
+
+/* Reclaim every outstanding async reference regardless of deadline.
+ *
+ * Sound only on the teardown path. akd_async_thread is the only thing that ever
+ * retires these, so once it has exited no fetch and no reap can hand them back
+ * and they would pin the AKD1500 awake for the rest of the boot session - which
+ * is exactly what a switch to sync mode used to do, since it stops the thread
+ * and creates no replacement. Call only after the thread has been joined:
+ * running this while it is alive would race its own akd_async_wake_give() and
+ * release the same reference twice. */
+static void akd_async_wake_reclaim_all(void) {
+  unsigned int stranded;
+
+  /* Timed rather than K_FOREVER, uniquely among the users of this lock: this is
+   * the one call site that can run after the abort fallback below, and a thread
+   * aborted inside a critical section keeps the mutex. Blocking here would turn
+   * a power leak into a hang of the BLE model-update path that called
+   * akida_init(). Uncontended this takes well under a millisecond. */
+  if (k_mutex_lock(&akd_wake_owner_lock, K_MSEC(100)) != 0) {
+    LOG_ERR("could not reclaim async wake references: akd_wake_owner_lock is "
+            "held; the AKD1500 may not sleep again");
+    return;
+  }
+  stranded = akd_async_wake_tracked + akd_async_wake_untracked;
+  for (unsigned int i = 0; i < stranded; i++) {
+    akd_wake_put();
+  }
+  akd_async_wake_first = 0;
+  akd_async_wake_tracked = 0;
+  akd_async_wake_untracked = 0;
+  k_mutex_unlock(&akd_wake_owner_lock);
+
+  if (stranded) {
+    LOG_WRN("async mode torn down with %u inference wake reference(s) "
+            "outstanding; reclaimed",
+            stranded);
+  }
+}
 #endif
 
 /* Holds a wake reference for a scope. infer() leaves by any of ten paths and
@@ -422,6 +460,10 @@ public:
   AkdWakeScope(const AkdWakeScope &) = delete;
   AkdWakeScope &operator=(const AkdWakeScope &) = delete;
 };
+
+/** Work items for structured learning */
+static struct k_work_delayable learn_speech_end_work;
+static struct k_work learn_process_work;
 
 /* The single writer of cur_kws_edge_state.
  *
@@ -437,22 +479,59 @@ public:
  * Routing every write through here puts the release on the transition itself,
  * where no direct assignment can bypass it.
  *
+ * The write happens UNDER akd_wake_owner_lock, and akd_learn_wake_take() tests
+ * the state under that same lock, so the two cannot interleave: a take either
+ * sees STATE_LEARNING, in which case the release below is guaranteed to find
+ * the reference held, or it sees the state that replaced it and takes nothing.
+ * Without that pairing a take running on the system workqueue could land just
+ * after a transition driven from the BT RX or shell thread, and its reference
+ * would have no route home.
+ *
  * A caller that keeps touching the AKD1500 after the transition must hold a
  * reference of its own: learning_on_user_input() reads the learned weights out
  * of the Akida mesh after switch_mode() returns, which is why it opens an
  * AkdWakeScope for the whole handler. */
 static void kws_set_edge_state(uint32_t next) {
-  const uint32_t prev = cur_kws_edge_state;
+  bool left_learning;
 
+  k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
+  const uint32_t prev = cur_kws_edge_state;
   cur_kws_edge_state = next;
-  if (prev == STATE_LEARNING && next != STATE_LEARNING) {
-    akd_wake_owner_release(&akd_learn_wake_held);
+  left_learning = (prev == STATE_LEARNING && next != STATE_LEARNING);
+  if (left_learning && akd_learn_wake_held) {
+    akd_learn_wake_held = false;
+    akd_wake_put();
+  }
+  k_mutex_unlock(&akd_wake_owner_lock);
+
+  if (left_learning) {
+    /* The session is over, so no queued learning work may still run: without
+     * this, kws_app_stop() left learn_speech_end_work armed and it went on
+     * submitting learn_process_work into a stopped app. Cancelled outside the
+     * lock, and the handlers re-check the state themselves because neither
+     * cancel waits for an instance that is already running. */
+    k_work_cancel_delayable(&learn_speech_end_work);
+    k_work_cancel(&learn_process_work);
   }
 }
 
-/** Work items for structured learning */
-static struct k_work_delayable learn_speech_end_work;
-static struct k_work learn_process_work;
+/* Take the learning session's single wake reference, but only while that
+ * session is still live. Returns true if the reference is held on return.
+ *
+ * The state test shares akd_wake_owner_lock with kws_set_edge_state(), which is
+ * what makes "still live" a decision rather than a guess: see the comment
+ * above. A caller that gets false must not touch the AKD1500, because nothing
+ * is keeping it awake. */
+static bool akd_learn_wake_take(void) {
+  k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
+  const bool live = (cur_kws_edge_state == STATE_LEARNING);
+  if (live && !akd_learn_wake_held) {
+    akd_learn_wake_held = true;
+    akd_wake_get();
+  }
+  k_mutex_unlock(&akd_wake_owner_lock);
+  return live;
+}
 
 /** Forward declarations for structured learning */
 static void learn_speech_end_handler(struct k_work *work);
@@ -1298,13 +1377,21 @@ bool akd_in_learning(void) { return cur_kws_edge_state == STATE_LEARNING; }
 
 void schedule_akd_learning_wq(void) { k_work_submit(&akd_learn_fetch_work); }
 
+/* Set by akida_init() to ask akd_async_thread to leave its loop. See the
+ * teardown in akida_init() for why it is asked rather than aborted. */
+static volatile bool akd_async_stop_requested;
+
 static void akd_async_thread(void *a, void *b, void *c) {
   ARG_UNUSED(a);
   ARG_UNUSED(b);
   ARG_UNUSED(c);
 
-  while (1) {
+  while (!akd_async_stop_requested) {
     int ret = akd_async_sem_take(K_SECONDS(5));
+
+    if (akd_async_stop_requested) {
+      break;
+    }
 
     if (ret == -EAGAIN) {
       akd_async_wake_reap_stranded();
@@ -1364,10 +1451,31 @@ static void akd_async_thread(void *a, void *b, void *c) {
 void akida_init(int mode) {
 #ifdef CONFIG_SPARK_BOARD
 
-  /* Stop existing async thread if running */
+  /* Stop existing async thread if running.
+   *
+   * Asked to leave its loop rather than aborted where it stands: it holds
+   * akd_wake_owner_lock across every akd_wake_put(), and Zephyr does not
+   * release a mutex owned by an aborted thread, so an abort landing inside one
+   * of those critical sections would wedge the lock permanently and every later
+   * take - audio, learning, shell - would block on it forever. Letting it reach
+   * the top of its loop guarantees it owns nothing when it exits. The
+   * semaphore give is what breaks it out of its 5 s wait immediately, so this
+   * costs no extra latency on the model-update path that calls akida_init().
+   */
   if (akd_async_tid != NULL) {
-    k_thread_abort(akd_async_tid);
+    akd_async_stop_requested = true;
+    akd_async_sem_give();
+    if (k_thread_join(akd_async_tid, K_SECONDS(2)) != 0) {
+      LOG_ERR("async thread did not exit; aborting it (akd_wake_owner_lock may "
+              "be left held)");
+      k_thread_abort(akd_async_tid);
+    }
     akd_async_tid = NULL;
+    akd_async_stop_requested = false;
+    /* Only now is the thread definitively gone, so nothing can retire what it
+     * still owned. Reclaiming before the join would race its own
+     * akd_async_wake_give(). */
+    akd_async_wake_reclaim_all();
     LOG_INF("Stopped existing async thread");
   }
 
@@ -1509,11 +1617,11 @@ int main(void) {
   /* Step 2&4: load data meta and validate flash contents */
   int dm_ret = file_transfer_load_data_meta(0, &kws_data_meta);
   if (dm_ret == 0) {
-    /* Step 4: full SPI flash CRC validation */
-    akida_config_spi(1);
+    /* Step 4: full SPI flash CRC validation. Routing is not set here: the
+     * validation reads through spi_flash_read_helper_func(), whose FlashClaim
+     * routes the S2M feedthrough and holds a wake reference per chunk. */
     int val_ret =
         file_transfer_validate_flash_data(kws_flash_addr, &kws_data_meta);
-    akida_config_spi(0);
     if (val_ret != 0) {
       LOG_ERR("Model data validation FAILED will not program Akida");
       kws_model_present = false;
@@ -2271,9 +2379,17 @@ static void learn_process_handler(struct k_work *work) {
   LOG_INF("learn: processing %d augmented inputs for utterance %d/%d",
           learn_state.num_augs, learn_state.current_utterance + 1,
           LEARN_NUM_UTTERANCES);
-  /* Stays awake through the session; handed back when the state machine leaves
-   * STATE_LEARNING (switch_mode), which covers completion and abandonment. */
-  akd_wake_owner_take(&akd_learn_wake_held);
+  /* Stays awake for the rest of the session, and is handed back by
+   * kws_set_edge_state() on the transition out of STATE_LEARNING. This work
+   * item can outlive the session it was queued for - kws_app_stop() and
+   * switch_mode() both reach the transition from other threads - so the take
+   * doubles as the liveness check: if it declines, the session is already over
+   * and there is no reference keeping the chip awake for the enqueues below. */
+  if (!akd_learn_wake_take()) {
+    LOG_WRN("learn: session ended before this utterance was processed, "
+            "dropping it");
+    return;
+  }
 
   if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
     /* Async path: generate aug[0], enqueue, arm first fake ISR */
@@ -2313,6 +2429,13 @@ static void learn_process_handler(struct k_work *work) {
  */
 static void learn_speech_end_handler(struct k_work *work) {
   ARG_UNUSED(work);
+
+  /* This handler re-arms itself, so a cancel alone cannot stop it if the cancel
+   * lands while it is running. Checking the state here is what actually ends
+   * the loop, and it also stops a stopped app being handed new work. */
+  if (cur_kws_edge_state != STATE_LEARNING) {
+    return;
+  }
 
   if (learn_state.sub_state == LEARN_SUB_CAPTURING) {
     /* Speech ended - transition to processing */
@@ -2518,12 +2641,12 @@ extern "C" int infer(int app_index_l) {
   model_data_meta_t infer_data_meta;
   int dm_ret = file_transfer_load_data_meta(app_index_l, &infer_data_meta);
   if (dm_ret == 0) {
-    /* Step 4: full SPI flash CRC validation (part of "model loading") */
+    /* Step 4: full SPI flash CRC validation (part of "model loading"). Routing
+     * is owned per chunk by the FlashClaim inside spi_flash_read_helper_func(),
+     * not by this caller. */
     uint64_t t_val0 = time_ms();
-    akida_config_spi(1);
     int val_ret =
         file_transfer_validate_flash_data(use_flash_addr, &infer_data_meta);
-    akida_config_spi(0);
     validate_ms = (uint32_t)(time_ms() - t_val0);
     if (val_ret != 0) {
       LOG_ERR("Flash data validation FAILED for slot %d", app_index_l);

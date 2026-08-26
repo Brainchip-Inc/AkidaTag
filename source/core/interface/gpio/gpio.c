@@ -58,6 +58,15 @@ int akd_async_sem_take(k_timeout_t timeout) {
 }
 
 /**
+ * @brief Wrapper function to give the Akida async semaphore
+ *
+ * Lets a caller other than the ISR wake the async thread out of its wait, which
+ * is how akida_init() gets it to leave its loop promptly at teardown instead of
+ * waiting out the full timeout.
+ */
+void akd_async_sem_give(void) { k_sem_give(&akd_async_sem); }
+
+/**
  * @brief Interrupt handler for AKD asynchronous GPIO pin.
  *
  * This ISR is triggered on an edge-to-active transition of the AKD async GPIO.
