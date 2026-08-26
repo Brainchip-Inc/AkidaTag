@@ -82,6 +82,69 @@ static void akd_async_isr_handler(const struct device *dev,
     k_sem_give(&akd_async_sem);
   }
 }
+/* ---------------------------------------------------------------------------
+ * AKD1500 wake reference count
+ *
+ * The active-high SLEEP pin gates the AKD1500's internal clocks (state and
+ * programmed model are retained). This file is its ONLY writer: everyone else
+ * takes a wake reference for as long as they need the chip running.
+ *
+ * The count and the pin are guarded by the same spinlock so they can never
+ * disagree, and so the settle below cannot be skipped by a second holder that
+ * arrives while the first is still waiting it out.
+ * ------------------------------------------------------------------------ */
+static struct k_spinlock akd_wake_lock;
+static unsigned int akd_wake_refs;
+
+/**
+ * @brief Take a wake reference; de-asserts SLEEP on the 0->1 transition.
+ */
+void akd_wake_get(void) {
+  k_spinlock_key_t key = k_spin_lock(&akd_wake_lock);
+  if (akd_wake_refs++ == 0) {
+    gpio_pin_set_dt(&akd_lp, 0);
+    /* AN-002 asks for a short settle after de-asserting SLEEP and before the
+     * first transaction; CONFIG_AKD_WAKE_SETTLE_US explains how it is sized.
+     * Deliberately inside the critical section: a second holder that arrives
+     * mid-settle then blocks here rather than returning to a chip whose clocks
+     * have not restarted. It costs that holder the tail of one settle, which is
+     * negligible beside the accesses this protects. */
+    k_busy_wait(CONFIG_AKD_WAKE_SETTLE_US);
+  }
+  k_spin_unlock(&akd_wake_lock, key);
+}
+
+/**
+ * @brief Return a wake reference; asserts SLEEP on the 1->0 transition.
+ *
+ * Returning a reference that was never taken is a programming error (some
+ * holder released twice, or released one it did not own), not a runtime
+ * condition, so it is reported and clamped at zero rather than wrapping the
+ * count and pinning the chip awake forever.
+ */
+void akd_wake_put(void) {
+  k_spinlock_key_t key = k_spin_lock(&akd_wake_lock);
+  if (akd_wake_refs == 0) {
+    k_spin_unlock(&akd_wake_lock, key);
+    LOG_ERR("akd_wake_put() with no reference held");
+    __ASSERT_NO_MSG(false);
+    return;
+  }
+  if (--akd_wake_refs == 0) {
+    gpio_pin_set_dt(&akd_lp, 1);
+  }
+  k_spin_unlock(&akd_wake_lock, key);
+}
+
+/**
+ * @brief Number of outstanding wake references.
+ */
+unsigned int akd_wake_count(void) {
+  k_spinlock_key_t key = k_spin_lock(&akd_wake_lock);
+  unsigned int refs = akd_wake_refs;
+  k_spin_unlock(&akd_wake_lock, key);
+  return refs;
+}
 /**
  * @brief Initialize all GPIO pins and configure AKD async interrupt.
  *
@@ -172,6 +235,13 @@ int gpio_init(void) {
     LOG_ERR("Failed to configure AKD sleep pin (err %d)", err);
     return err;
   }
+  /* The line above leaves the chip AWAKE, so the count has to start at 1 or it
+   * would disagree with the hardware. That initial 1 is the boot path's own
+   * wake reference: boot programs the model over the AKD1500 and needs it
+   * running throughout. main() hands it back (akd_wake_put) once the model is
+   * programmed and the app is idle waiting for its first utterance. It is not a
+   * stray increment - removing it clock-gates the chip mid-boot. */
+  akd_wake_refs = 1;
   gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
                      BIT(enable_akd_async.pin));
   err = gpio_add_callback(enable_akd_async.port, &akd_async_cb);
@@ -215,29 +285,6 @@ void akd_irq_disable(void) {
     irq_enabled = false;
   }
 }
-/* Mirrors the last state requested through akd_sleep(). gpio_init() configures
- * akd_lp as GPIO_OUTPUT_INACTIVE, so the chip starts awake and this starts
- * false. Tracked here rather than read back off the pin: this is the requested
- * state, which is what a save/restore around a flash access needs. */
-static bool akd_asleep = false;
-
-/**
- * @brief Put the AKD1500 into low-power sleep or wake it.
- *
- * Drives the active-high SLEEP pin: true gates the internal clocks (state and
- * programmed model retained), false resumes normal operation.
- */
-void akd_sleep(bool sleep) {
-  akd_asleep = sleep;
-  gpio_pin_set_dt(&akd_lp, sleep);
-}
-
-/**
- * @brief Report the last state requested through akd_sleep().
- *
- * @return true if the AKD1500 was last asked to sleep, false if awake.
- */
-bool akd_sleep_get(void) { return akd_asleep; }
 /**
  * @brief Enable power for onboard sensors and peripherals on the Spark board.
  *

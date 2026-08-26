@@ -445,49 +445,48 @@ void init_akd_1500_spi_flash() {
  *    0x00000000 on register reads. Wake it before any register access or
  *    inference.") or all-ones when MISO floats. During normal async KWS the
  *    chip is asleep between inferences, which is its steady state, so any
- *    caller that is not the inference path finds it asleep. Waking is part of
- *    preparing the bus, which is why it belongs here next to
- *    akida_config_spi(1) rather than at each call site: this covers the BLE
+ *    caller that is not the inference path finds it asleep. Holding a wake
+ *    reference is part of preparing the bus, which is why it belongs here next
+ *    to akida_config_spi(1) rather than at each call site: this covers the BLE
  *    model-update erase, the BLE chunk write, the readback validation and the
- *    `full_erase` shell command in one place.
+ *    `full_erase` shell command in one place. The reference is what keeps the
+ *    KWS duty cycle from clock-gating the chip mid-erase: the inference that
+ *    finishes while we hold the bus returns its own reference, sees ours still
+ *    outstanding, and leaves SLEEP de-asserted.
  *
  * 2. Access has to be SERIALISED. Three threads reach this code (the Bluetooth
  *    RX thread for a model update, the shell thread for `full_erase`, and the
- *    KWS inference path for boot validation and readback), a flash operation
- *    holds the bus in MCU-master mode for hundreds of milliseconds, and the
- *    save/restore of the sleep state is a read-modify-write of state the KWS
- *    async loop also writes. Without the mutex the restore below would race a
- *    concurrent writer and could leave the chip awake or asleep against that
- *    thread's expectation.
+ *    KWS inference path for boot validation and readback) and a flash operation
+ *    holds the bus in MCU-master mode for hundreds of milliseconds. The mutex
+ *    is about the bus alone - akida_config_spi(1) is global state, so two
+ *    concurrent operations would interleave on one S2M feedthrough. It says
+ *    nothing about the sleep state, which the wake count above owns.
  * ------------------------------------------------------------------------ */
 K_MUTEX_DEFINE(akd_flash_mutex);
 
-/* Claim the flash for MCU access: serialise, wake, route the bus to the host.
- * Returns the sleep state to hand back to akd_flash_release(). */
-static bool akd_flash_claim(void) {
-  k_mutex_lock(&akd_flash_mutex, K_FOREVER);
-  const bool was_asleep = akd_sleep_get();
-  if (was_asleep) {
-    akd_sleep(false);
-    /* AN-002 asks for a short settle after de-asserting SLEEP before the first
-     * transaction. See CONFIG_AKD_WAKE_SETTLE_US for how this is sized. */
-    k_busy_wait(CONFIG_AKD_WAKE_SETTLE_US);
-  }
-  akida_config_spi(1);
-  return was_asleep;
-}
+namespace {
 
-/* Release the flash, restoring the sleep state the caller found. Restore rather
- * than force: the KWS async loop owns its own per-inference duty cycle (wake
- * before an inference, sleep after), and forcing either state here would fight
- * it. */
-static void akd_flash_release(bool was_asleep) {
-  akida_config_spi(0);
-  if (was_asleep) {
-    akd_sleep(true);
+/* Scoped claim of the AKD1500 flash: take the bus lock, hold a wake reference
+ * for the whole access, and route the feedthrough to the host. Scoped so that
+ * every exit path out of the helpers below unwinds all three in the reverse
+ * order without each early return having to remember to. */
+class FlashClaim {
+public:
+  FlashClaim() {
+    k_mutex_lock(&akd_flash_mutex, K_FOREVER);
+    akd_wake_get();
+    akida_config_spi(1);
   }
-  k_mutex_unlock(&akd_flash_mutex);
-}
+  ~FlashClaim() {
+    akida_config_spi(0);
+    akd_wake_put();
+    k_mutex_unlock(&akd_flash_mutex);
+  }
+  FlashClaim(const FlashClaim &) = delete;
+  FlashClaim &operator=(const FlashClaim &) = delete;
+};
+
+} // namespace
 
 /* helper function to read from SPI flash – used by file_transfer.c for CRC */
 extern "C" void spi_flash_read_helper_func(uint8_t *buf, uint32_t offset,
@@ -495,12 +494,14 @@ extern "C" void spi_flash_read_helper_func(uint8_t *buf, uint32_t offset,
   if (!buf || size == 0) {
     return;
   }
-  const bool was_asleep = akd_flash_claim();
-  int ret = spi_flash_probe(spi_driver);
-  if (ret == 0) {
-    ret = spi_flash_read(spi_driver, offset, buf, size);
+  int ret;
+  {
+    FlashClaim claim;
+    ret = spi_flash_probe(spi_driver);
+    if (ret == 0) {
+      ret = spi_flash_read(spi_driver, offset, buf, size);
+    }
   }
-  akd_flash_release(was_asleep);
   if (ret != 0) {
     LOG_ERR("spi_flash_read_helper: read failed at 0x%x size=%u (err %d)",
             offset, size, ret);
@@ -514,7 +515,7 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
             (FLASH_MAX_16_MB_SIZE - offset));
     return 1;
   }
-  const bool was_asleep = akd_flash_claim();
+  FlashClaim claim;
 
   uint64_t s_tick = 0;
   uint64_t e_tick = 0;
@@ -535,13 +536,24 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
     erase_time = e_tick - s_tick;
     LOG_INF("erase time= %u ms", erase_time);
   }
+
+  /* `claim` holds a wake reference across the whole erase, so the count cannot
+   * legitimately be zero here. If it ever is, the AKD1500 was clock-gated part
+   * way through and the WIP poll spent the rest of the erase reading a dead
+   * bus, which reports every remaining sector as instantly ready. Cheap enough
+   * to check on every erase, and it turns that into a logged failure instead of
+   * a silent "Erase Successful" for sectors that were never touched. */
+  if (akd_wake_count() == 0) {
+    LOG_ERR("AKD1500 wake reference lost during erase: the chip slept mid-erase "
+            "and the erase result cannot be trusted");
+    ret = -EIO;
+  }
+
   if (ret) {
     LOG_PRINTK("Erase failed\n");
   } else {
     LOG_PRINTK("Erase Successful\n");
   }
-
-  akd_flash_release(was_asleep);
 
   return ret;
 }
@@ -550,7 +562,7 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
  * offset, and size */
 extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
                                             size_t size) {
-  const bool was_asleep = akd_flash_claim();
+  FlashClaim claim;
 
   uint32_t flash_addr = offset;
 
@@ -562,7 +574,6 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
    * saw. See the comment in spi_flash_erase_helper_func. */
   int ret = spi_flash_probe(spi_driver);
   if (ret != 0) {
-    akd_flash_release(was_asleep);
     LOG_ERR("Flash write skipped, flash not responding (addr = 0x%x, size = %d)",
             flash_addr, size);
     return;
@@ -571,7 +582,6 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
   s_write = time_ms();
   ret = spi_flash_write(spi_driver, flash_addr, data, size);
   if (ret != 0) {
-    akd_flash_release(was_asleep);
     LOG_ERR("Flash write failed with error %d", ret);
     LOG_INF("Flash Address = 0x%x, size = %d", flash_addr, size);
     return;
@@ -587,7 +597,6 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
   // Read back from flash into second half of data[]
   ret = spi_flash_read(spi_driver, flash_addr, read_back_flash, size);
   if (ret != 0) {
-    akd_flash_release(was_asleep);
     LOG_ERR("Flash read failed with error %d", ret);
     return;
   }
@@ -604,7 +613,6 @@ extern "C" void spi_flash_write_helper_func(const uint8_t *data, size_t offset,
 #endif
   if (!ret)
     LOG_INF("Flash Write Successful");
-  akd_flash_release(was_asleep);
 }
 
 /**

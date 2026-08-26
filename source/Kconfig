@@ -173,8 +173,9 @@ config AKD_WAKE_SETTLE_US
     int "AKD1500 settle delay after de-asserting SLEEP (us)"
     default 100
     help
-      Busy-wait applied after waking the AKD1500 (akd_sleep(false)) and before
-      the first SPI transaction, but only when the chip was actually asleep.
+      Busy-wait applied after waking the AKD1500 (the 0->1 transition of the
+      akd_wake_get() reference count, which de-asserts SLEEP) and before the
+      first SPI transaction. Only paid when the chip was actually asleep.
 
       AN-002 (Sleep and Low-Power Operation) prescribes a settle here without
       giving a figure: it says "If the first access after wake is unreliable,

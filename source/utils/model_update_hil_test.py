@@ -27,14 +27,50 @@ erase check pairs the duration band with the outcome string, and the run also
 asserts the readback-before-commit ordering and the post-reset boot validation.
 
 The AKD1500 must be left in its normal async KWS duty cycle for this to mean
-anything. Do NOT issue `akd_sleep 0`, `app stop` or any clock command before
-running it: those are exactly the conditions that mask the defect.
+anything. Do NOT issue `app stop` or any clock command before running it: those
+are exactly the conditions that mask the defect.
+
+TWO TRANSFERS, BECAUSE ONE CANNOT PROVE BOTH THINGS
+---------------------------------------------------
+There are two defects to guard and their preconditions are mutually exclusive,
+so the run sends the model twice.
+
+PHASE 1 - quiet. Nothing touches the AKD1500 but the KWS app, so the chip is in
+its asleep steady state when the DATA-phase erase begins. This is the original
+defect: the erase found the flash unreachable behind a sleeping chip.
+
+PHASE 2 - churned. A background thread runs `akd_sleep 0` / `akd_sleep 1` on the
+serial console for the whole transfer. Those take and release a real wake
+reference from the shell thread, which holds neither the flash mutex nor any
+knowledge of the update, so a release landing inside the erase is exactly the
+shape of the second defect: a wake holder that is not the flash path clock-gating
+the chip mid-erase, after which the WIP poll reads a dead bus and calls every
+remaining sector instantly ready. check_wake_churn() proves at least one release
+landed between the "Flash erase offset" and "erase time=" lines, not merely
+somewhere in the run.
+
+The churn cannot be folded into phase 1: to release a reference it must first
+take one, and holding one at the erase start leaves the chip awake, which is
+precisely the condition that hides the phase 1 defect.
+
+WHAT THIS DOES NOT COVER
+------------------------
+The real audio path. The KWS pair is a wake on the audio thread before
+akida_enqueue() and a release on akd_async_thread after the fetch, and neither
+can be driven without an utterance. The shell pair exercises the same primitive
+from a third thread, so it guards the reference count itself; it does not prove
+the audio threads use it correctly. That would need audio injection on the rig.
+
+Phase 2 is also a forward guard only. On the pre-fix build `akd_sleep 1` refuses
+outright while KWS is running, so the churn there cannot release anything and
+phase 2 cannot fail; the pre-fix build is caught by phase 1, which aborts the
+transfer outright.
 
 SCOPE
 -----
-Spark board only. On the DK CONFIG_SPARK_BOARD is n, akd_sleep() compiles to a
-no-op and there is no low-power state to get wrong, so running this against a DK
-proves nothing about the defect.
+Spark board only. On the DK CONFIG_SPARK_BOARD is n, akd_wake_get()/akd_wake_put()
+compile to no-ops and there is no low-power state to get wrong, so running this
+against a DK proves nothing about the defect.
 
 USAGE
 -----
@@ -45,11 +81,12 @@ USAGE
         --yaml source/external/model_files/kws/kws/info.yaml
 
 Sending the model the board already holds keeps the run state-neutral, which is
-what you want on a shared board. Note the trade-off: with an identical model the
-post-reset boot check cannot tell a fresh write from the bytes that were already
-there, so it only has real teeth when the model being sent differs from the one
-installed (as it does on a freshly flashed board in CI). The erase-duration and
-ordering checks discriminate either way.
+what you want on a shared board, and is what makes sending it twice harmless.
+Note the trade-off: with an identical model the post-reset boot check cannot tell
+a fresh write from the bytes that were already there, so it only has real teeth
+when the model being sent differs from the one installed (as it does on a freshly
+flashed board in CI). The erase-duration, ordering and churn-overlap checks
+discriminate either way.
 """
 
 import argparse
@@ -85,6 +122,15 @@ STATUS_POLL_TIMEOUT_MS = 1000
 ERASE_TIME_RE = re.compile(r"erase time=\s*(\d+)\s*ms")
 BOOT_DATA_CRC_RE = re.compile(r"Data CRC OK \(0x[0-9A-Fa-f]+\) over (\d+) bytes")
 
+# Validation failures the firmware reports at boot, straight off the flash.
+# Defined once and reused by both FAILURE_MARKERS and check_boot_validation() so
+# the two cannot drift apart from the firmware's own spelling
+# (file_transfer.c: "First-4-bytes MISMATCH", not "First 4 bytes MISMATCH").
+BOOT_FAILURE_MARKERS = (
+    "First-4-bytes MISMATCH",
+    "Data CRC MISMATCH",
+)
+
 # Strings that mean the flash was not reachable, whichever mask it wore.
 FAILURE_MARKERS = (
     "Erase failed",
@@ -93,10 +139,21 @@ FAILURE_MARKERS = (
     "not responding",
     "Flash write skipped",
     "Flash readback FAILED",
-    "First-4-bytes MISMATCH",
-    "Data CRC MISMATCH",
     "DATA CRC FAIL",
-)
+    # The always-on invariant in spi_flash_erase_helper_func: a wake reference is
+    # held for the whole erase, so the count reaching zero means the chip was
+    # clock-gated mid-erase and the erase verdict is worthless.
+    "wake reference lost during erase",
+) + BOOT_FAILURE_MARKERS
+
+# Emitted by cmd_akd_sleep once per shell wake reference taken or released.
+WAKE_TAKEN_MARKER = "shell wake reference taken"
+WAKE_RELEASED_MARKER = "shell wake reference released"
+
+# Bracket the erase in the console log: the firmware logs the first before it
+# probes the flash and the second once the last sector is done.
+ERASE_START_MARKER = "Flash erase offset"
+ERASE_END_MARKER = "erase time="
 
 
 class SerialMonitor:
@@ -124,6 +181,12 @@ class SerialMonitor:
                 with self._lock:
                     self._lines.append(line)
 
+    def write_line(self, text):
+        """Send one shell command. Reads run on the monitor thread; pyserial
+        does read and write as separate syscalls on the same fd, so this is
+        safe alongside them."""
+        self._ser.write((text + "\r\n").encode())
+
     def mark(self):
         with self._lock:
             return len(self._lines)
@@ -148,6 +211,52 @@ class SerialMonitor:
             self._ser.close()
         except Exception:
             pass
+
+
+class WakeChurn:
+    """Take and release the shell's AKD1500 wake reference, continuously.
+
+    The point is to have a thread that owns none of the update's locks hand a
+    wake reference back while the DATA-phase erase is in flight. Before the fix
+    that release drove the SLEEP pin directly and clock-gated the chip mid-erase;
+    with the reference count it can only give back what the shell itself took, so
+    the erase keeps its own reference and the chip stays awake.
+
+    The period is deliberately much shorter than the ~286 ms erase, so a release
+    lands inside the erase window many times over rather than by luck.
+
+    Only ever used for phase 2: holding a reference at the erase start would
+    leave the chip awake and hide the phase 1 defect.
+    """
+
+    def __init__(self, monitor, period=0.05):
+        self._monitor = monitor
+        self._period = period
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        while not self._stop.is_set():
+            self._monitor.write_line("akd_sleep 0")
+            if self._stop.wait(self._period):
+                return
+            self._monitor.write_line("akd_sleep 1")
+            if self._stop.wait(self._period):
+                return
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join(timeout=5)
+        # Leave the board as we found it: no shell reference outstanding.
+        try:
+            self._monitor.write_line("akd_sleep 1")
+        except Exception:
+            pass
+        return False
 
 
 def reset_board(reset_cmd):
@@ -311,6 +420,61 @@ def check_erase_duration(lines, data_size):
     return ok
 
 
+def check_wake_churn(lines):
+    """Prove the stimulus actually overlapped the erase.
+
+    Without this the run would silently degrade into the quiet-room test it is
+    meant to replace: the churn thread could have died, or the shell could have
+    been too slow, and every other check would still pass.
+    """
+    print("::group::CHECK - wake-reference churn during the erase")
+    ok = True
+
+    taken = sum(1 for l in lines if WAKE_TAKEN_MARKER in l)
+    released = sum(1 for l in lines if WAKE_RELEASED_MARKER in l)
+    print(f"shell wake reference: {taken} taken, {released} released over the run")
+    if taken == 0 or released == 0:
+        print(
+            "FAILED: the churn thread produced no wake-reference traffic. The "
+            "update ran without a competing wake holder, which is the quiet-room "
+            "case that cannot see this defect."
+        )
+        ok = False
+
+    start = next((i for i, l in enumerate(lines) if ERASE_START_MARKER in l), None)
+    end = next((i for i, l in enumerate(lines) if ERASE_END_MARKER in l), None)
+    if start is None or end is None or end <= start:
+        print(
+            "FAILED: could not bracket the erase in the log "
+            f"({ERASE_START_MARKER!r} .. {ERASE_END_MARKER!r}), so overlap "
+            "cannot be established."
+        )
+        print("::endgroup::")
+        return False
+
+    window = lines[start + 1 : end]
+    inside = [l for l in window if WAKE_RELEASED_MARKER in l]
+    print(f"{len(inside)} wake-reference release(s) landed inside the erase window")
+    if not inside:
+        print(
+            "FAILED: no release landed between the erase start and its "
+            "completion, so this run did not exercise the race. Shorten the "
+            "churn period or check that the shell is keeping up."
+        )
+        ok = False
+
+    # A release inside the window must not have gated the chip: every one of
+    # them should still report at least the erase's own reference outstanding.
+    for line in inside:
+        if "0 reference(s) held" in line:
+            print(f"  FAILED, the count reached zero during the erase: {line}")
+            ok = False
+
+    print("PASSED" if ok else "FAILED")
+    print("::endgroup::")
+    return ok
+
+
 def check_markers(lines):
     print("::group::CHECK - transfer markers")
     ok = True
@@ -363,7 +527,7 @@ def check_boot_validation(monitor, reset_cmd, data_size, timeout=30):
                 print(f"FAILED: boot validated {length} bytes, expected {data_size}")
                 print("::endgroup::")
                 return False
-            if "Data CRC MISMATCH" in line or "First 4 bytes MISMATCH" in line:
+            if any(mk.lower() in line.lower() for mk in BOOT_FAILURE_MARKERS):
                 print(f"FAILED: {line}")
                 print("::endgroup::")
                 return False
@@ -371,6 +535,39 @@ def check_boot_validation(monitor, reset_cmd, data_size, timeout=30):
     print("FAILED: no boot validation line within timeout")
     print("::endgroup::")
     return False
+
+
+def run_transfer(monitor, meta, args, fs_name, device_name, churn):
+    """Send the model once and return (completed, console lines for the run)."""
+    label = "churned" if churn else "quiet"
+    print(f"::group::Model transfer over BLE ({label})")
+    mark = monitor.mark()
+    # A regression here surfaces as an ATT error on the aa04 write, which the BLE
+    # stack raises as an exception. Catch it: the serial checks carry the actual
+    # diagnosis, and a stack trace is not one.
+    ok = True
+    try:
+        if churn:
+            with WakeChurn(monitor):
+                asyncio.run(
+                    send_model(monitor, meta, args.info, args.data, fs_name, device_name)
+                )
+        else:
+            asyncio.run(
+                send_model(monitor, meta, args.info, args.data, fs_name, device_name)
+            )
+    except Exception as exc:
+        ok = False
+        print(f"TRANSFER FAILED ({label}): {type(exc).__name__}: {exc}")
+        print(
+            "An 'Unlikely Error' (ATT 0x0E) on the file-size characteristic "
+            "means the firmware refused to prepare its flash. See the erase "
+            "check below."
+        )
+    time.sleep(2.0)
+    lines = monitor.since(mark)
+    print("::endgroup::")
+    return ok, lines
 
 
 def main():
@@ -417,39 +614,42 @@ def main():
             return 1
         time.sleep(2.0)
 
-        print("::group::Model transfer over BLE")
-        mark = monitor.mark()
-        # A regression here surfaces as an ATT error on the aa04 write, which the
-        # BLE stack raises as an exception. Catch it: the serial checks below
-        # carry the actual diagnosis, and a stack trace is not one.
-        transfer_ok = True
-        try:
-            asyncio.run(
-                send_model(monitor, meta, args.info, args.data, fs_name, device_name)
-            )
-        except Exception as exc:
-            transfer_ok = False
-            print(f"TRANSFER FAILED: {type(exc).__name__}: {exc}")
-            print(
-                "An 'Unlikely Error' (ATT 0x0E) on the file-size characteristic "
-                "means the firmware refused to prepare its flash. See the erase "
-                "check below."
-            )
-        time.sleep(2.0)
-        lines = monitor.since(mark)
-        print("::endgroup::")
-        results["transfer completed"] = transfer_ok
+        # --- Phase 1: quiet. The chip must be asleep when the erase starts. ---
+        quiet_ok, quiet_lines = run_transfer(
+            monitor, meta, args, fs_name, device_name, churn=False
+        )
+        results["phase 1 transfer completed"] = quiet_ok
+        results["phase 1 erase duration"] = check_erase_duration(
+            quiet_lines, data_size
+        )
+        results["phase 1 transfer markers"] = check_markers(quiet_lines)
 
-        results["erase duration"] = check_erase_duration(lines, data_size)
-        results["transfer markers"] = check_markers(lines)
-        if transfer_ok:
-            results["boot validation"] = check_boot_validation(
-                monitor, args.reset_cmd, data_size
+        if not quiet_ok:
+            # A half-written flash makes everything after this meaningless, and
+            # the previous model would still boot-validate happily, which would
+            # read as a PASS for a board that just failed to update.
+            print(
+                "SKIPPED phase 2 and boot validation: the quiet transfer did not "
+                "complete"
             )
         else:
-            # The previous model is still in flash and would validate happily,
-            # which would read as a PASS for a board that just failed to update.
-            print("SKIPPED boot validation: the transfer did not complete")
+            # --- Phase 2: a competing wake holder churning throughout. ---
+            churn_ok, churn_lines = run_transfer(
+                monitor, meta, args, fs_name, device_name, churn=True
+            )
+            results["phase 2 transfer completed"] = churn_ok
+            results["phase 2 erase duration"] = check_erase_duration(
+                churn_lines, data_size
+            )
+            results["phase 2 wake churn overlap"] = check_wake_churn(churn_lines)
+            results["phase 2 transfer markers"] = check_markers(churn_lines)
+
+            if churn_ok:
+                results["boot validation"] = check_boot_validation(
+                    monitor, args.reset_cmd, data_size
+                )
+            else:
+                print("SKIPPED boot validation: the churned transfer did not complete")
     finally:
         monitor.close()
 

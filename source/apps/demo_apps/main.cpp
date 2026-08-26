@@ -65,8 +65,9 @@ extern "C" {
 #include "imu_h/imu.h"
 #endif
 /* gpio.h guards its own spark-only contents and provides no-op inlines for the
- * rest (akd_sleep / akd_sleep_get), so it is included for both boards. The
- * AKD1500 clock and sleep shell commands below call akd_sleep() unguarded. */
+ * rest (akd_wake_get / akd_wake_put / akd_wake_count), so it is included for
+ * both boards. infer() and the AKD1500 clock and sleep shell commands below
+ * take wake references unguarded. */
 #include "gpio/gpio.h"
 #ifdef CONFIG_SPARK_BOARD
 #include "battery/battery.h"
@@ -254,6 +255,109 @@ static inline uint8_t clamp_uint8(float v) {
     return 255;
   return (uint8_t)v;
 }
+
+/* ---------------------------------------------------------------------------
+ * AKD1500 wake references held by this application
+ *
+ * gpio.c counts the holders that need the AKD1500 running and drives the SLEEP
+ * pin off that count (see akd_wake_get). Most call sites below take a reference
+ * and hand it straight back on the same path, but three holders cannot pair
+ * theirs by control flow, so each gets a small owner that makes taking and
+ * returning idempotent:
+ *
+ *  - the async KWS inference: taken on the audio thread before akida_enqueue(),
+ *    handed back on akd_async_thread once the matching fetch completes, and
+ *    handed back by that same thread when a fetch never arrives at all;
+ *  - the learning session: taken when an utterance starts processing, handed
+ *    back when the state machine leaves STATE_LEARNING by any route;
+ *  - the shell's debug wake: taken by the clock commands that need the chip
+ *    readable and parked awake afterwards, handed back by `akd_sleep 1`.
+ *
+ * All three are read-modify-written from different threads (audio,
+ * akd_async_thread, the system workqueue, the shell) and each has to decide
+ * whether to touch the gpio.c count, so the decision and the call are made
+ * together under this lock. None of them run in ISR context.
+ * ------------------------------------------------------------------------ */
+K_MUTEX_DEFINE(akd_wake_owner_lock);
+
+/* Take an owner's single reference, or do nothing if it already holds one. */
+static void akd_wake_owner_take(bool *held) {
+  k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
+  if (!*held) {
+    *held = true;
+    akd_wake_get();
+  }
+  k_mutex_unlock(&akd_wake_owner_lock);
+}
+
+/* Hand an owner's reference back, or do nothing if it holds none. */
+static void akd_wake_owner_release(bool *held) {
+  k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
+  if (*held) {
+    *held = false;
+    akd_wake_put();
+  }
+  k_mutex_unlock(&akd_wake_owner_lock);
+}
+
+static bool akd_learn_wake_held;
+static bool akd_dbg_wake_held;
+
+/* One reference per inference handed to akida_enqueue() on the async path.
+ * Counted, not flagged: nothing stops a second utterance being enqueued while
+ * the first is still in flight. */
+static unsigned int akd_async_wake_refs;
+
+static void akd_async_wake_take(void) {
+  k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
+  akd_wake_get();
+  akd_async_wake_refs++;
+  k_mutex_unlock(&akd_wake_owner_lock);
+}
+
+/* Hand back the reference belonging to one completed (or abandoned) inference.
+ * Silent when none is outstanding, so an abort path may call it without having
+ * to know whether the fetch already claimed it. */
+static void akd_async_wake_give(void) {
+  k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
+  if (akd_async_wake_refs > 0) {
+    akd_async_wake_refs--;
+    akd_wake_put();
+  }
+  k_mutex_unlock(&akd_wake_owner_lock);
+}
+
+#ifdef CONFIG_SPARK_BOARD
+/* Hand back every reference still outstanding. akd_async_sem_take() giving up
+ * means the completion interrupt is not coming, so those references have no
+ * other route home: without this the AKD1500 would stay awake for good on the
+ * first dropped fetch. Only akd_async_thread, which owns that timeout, calls
+ * this. */
+static void akd_async_wake_drop_all(void) {
+  k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
+  unsigned int stranded = akd_async_wake_refs;
+  akd_async_wake_refs = 0;
+  for (unsigned int i = 0; i < stranded; i++) {
+    akd_wake_put();
+  }
+  k_mutex_unlock(&akd_wake_owner_lock);
+  if (stranded) {
+    LOG_WRN("async fetch never arrived; released %u stranded AKD1500 wake "
+            "reference(s)",
+            stranded);
+  }
+}
+#endif
+
+/* Holds a wake reference for a scope. infer() leaves by any of ten paths and
+ * every one of them has to hand the reference back. */
+class AkdWakeScope {
+public:
+  AkdWakeScope() { akd_wake_get(); }
+  ~AkdWakeScope() { akd_wake_put(); }
+  AkdWakeScope(const AkdWakeScope &) = delete;
+  AkdWakeScope &operator=(const AkdWakeScope &) = delete;
+};
 
 /** Work items for structured learning */
 static struct k_work_delayable learn_speech_end_work;
@@ -803,6 +907,12 @@ static void switch_mode(int mode) {
       akida_learn_mode(false);
       cur_kws_edge_state = mode;
     }
+    /* The only way out of a learning session, whether it completed or the user
+     * abandoned it, so this is where the session's wake reference goes back.
+     * Last in the case, after the akida_learn_mode() writes above, which need
+     * the chip running. Callers that keep touching the AKD1500 after this
+     * returns hold a reference of their own (learning_on_user_input). */
+    akd_wake_owner_release(&akd_learn_wake_held);
     break;
   default:
     break;
@@ -1107,6 +1217,7 @@ static void akd_async_thread(void *a, void *b, void *c) {
     int ret = akd_async_sem_take(K_SECONDS(5));
 
     if (ret == -EAGAIN) {
+      akd_async_wake_drop_all();
       continue;
     }
 
@@ -1128,7 +1239,7 @@ static void akd_async_thread(void *a, void *b, void *c) {
     } else {
       LOG_ERR("Fetch returned EFAILURE or Error");
     }
-    akd_sleep(true); /* sleep until next inference */
+    akd_async_wake_give(); /* the inference is done with the chip */
   }
 }
 #endif
@@ -1365,7 +1476,9 @@ int main(void) {
 
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
-  akd_sleep(true); /* idle until first utterance */
+  /* Hand back the boot wake reference gpio_init() took: the model is programmed
+   * and the app is now idle until the first utterance. */
+  akd_wake_put();
 
   LOG_INF("data to check : model_size %d, class %d ",
           kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
@@ -1546,7 +1659,7 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
   int ret = 0;
 
   if (kws_api_selection == DEFAULT_API_SELECTION_SYNC) {
-    akd_sleep(false); /* wake for inference */
+    akd_wake_get(); /* wake for inference */
     inference_start_ts = time_ms();
     uint32_t s_dma_cycls = akida_get_clock_counter();
 
@@ -1565,9 +1678,11 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       LOG_ERR("akida_predict failed");
       reset_stale_inference_data();
     }
-    akd_sleep(true); /* sleep after inference */
+    akd_wake_put(); /* done with the chip */
   } else {
-    akd_sleep(false); /* wake for inference */
+    /* Taken once, outside the retry loop, and handed back by akd_async_thread
+     * after the matching fetch. A retried enqueue must not take a second. */
+    akd_async_wake_take();
     uint64_t start_time = time_ms();
     do {
       inference_start_ts = time_ms();
@@ -1585,6 +1700,11 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       // Check timeout
       if ((time_ms() - start_time) > ENQUEUE_TIMEOUT_MS) {
         LOG_ERR("akida_enqueue timeout after %d ms", ENQUEUE_TIMEOUT_MS);
+        if (ret) {
+          /* Nothing was accepted, so no completion interrupt is coming and
+           * akd_async_thread will never hand this reference back for us. */
+          akd_async_wake_give();
+        }
         ret = EFAILURE;
         learn_utterance_complete(); // graceful abort
         break;
@@ -2060,7 +2180,9 @@ static void learn_process_handler(struct k_work *work) {
   LOG_INF("learn: processing %d augmented inputs for utterance %d/%d",
           learn_state.num_augs, learn_state.current_utterance + 1,
           LEARN_NUM_UTTERANCES);
-  akd_sleep(false); /* wake for learning (stays awake through the session) */
+  /* Stays awake through the session; handed back when the state machine leaves
+   * STATE_LEARNING (switch_mode), which covers completion and abandonment. */
+  akd_wake_owner_take(&akd_learn_wake_held);
 
   if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
     /* Async path: generate aug[0], enqueue, arm first fake ISR */
@@ -2205,6 +2327,11 @@ static void learning_on_user_input(int input_type) {
   uint32_t cur_ts;
   uint32_t mesh_mem;
   uint64_t duration_us;
+  /* Both exit paths below call switch_mode() first, which hands the learning
+   * session's wake reference back, and then read the learned weights out of the
+   * Akida mesh. Hold a reference of our own across the whole handler so that
+   * read cannot land on a clock-gated chip and come back as zeros. */
+  AkdWakeScope akd_wake;
   switch (input_type) {
   case USER_INPUT_LP(0):
     switch_mode(STATE_INFERENCE);
@@ -2273,7 +2400,7 @@ extern "C" int infer(int app_index_l) {
     LOG_ERR("Illegal model index %d", app_index_l);
     return -1;
   }
-  akd_sleep(false); /* wake for programming + inference */
+  AkdWakeScope akd_wake; /* awake for programming + inference, every exit path */
 
   /* [bench] app end-to-end starts here (whole infer() call). */
   uint64_t bench_t0 = time_ms();
@@ -2425,7 +2552,6 @@ extern "C" int infer(int app_index_l) {
     akd_irq_enable();
   }
 #endif
-  akd_sleep(true); /* idle after inference */
   return 0;
 }
 
@@ -2533,21 +2659,34 @@ static int cmd_akida_wr(const struct shell *sh, size_t argc, char **argv) {
 }
 
 #ifdef CONFIG_SPARK_BOARD
-/* Toggle AKD1500 low-power sleep: akd_sleep <0|1> (0 = wake, 1 = sleep).
- * Refuse to sleep while KWS is running — it drives sleep per-inference itself,
- * and a manual sleep would race an in-flight inference. Stop it with `app stop`. */
+/* akd_sleep <0|1>: take (0) or release (1) the SHELL'S OWN wake reference.
+ *
+ * It does not drive the SLEEP pin. The pin follows a reference count (see
+ * akd_wake_get in gpio.h) and the shell is one holder among several, so `1`
+ * gives the shell's reference back and the chip sleeps only once every other
+ * holder — a KWS inference, a learning session, an in-progress flash access —
+ * has given theirs back too. The command prints the remaining count so the
+ * difference is visible. Both directions are idempotent, and the AKD1500 clock
+ * commands take this same single reference, which is how they leave the chip
+ * readable for follow-up probes.
+ *
+ * This is why the command no longer refuses while KWS is running: it cannot
+ * fight the per-inference duty cycle any more, because it can only give back
+ * what the shell itself took. */
 static int cmd_akd_sleep(const struct shell *sh, size_t argc, char **argv) {
   if (argc != 2) {
     shell_print(sh, "Usage: akd_sleep <0|1>");
     return -EINVAL;
   }
   bool sleep = strtoul(argv[1], NULL, 0) != 0;
-  if (sleep && kws_app_running) {
-    shell_print(sh, "KWS running — stop it first (app stop)");
-    return -EBUSY;
+  if (sleep) {
+    akd_wake_owner_release(&akd_dbg_wake_held);
+  } else {
+    akd_wake_owner_take(&akd_dbg_wake_held);
   }
-  akd_sleep(sleep);
-  shell_print(sh, "AKD1500 %s", sleep ? "sleeping" : "awake");
+  unsigned int refs = akd_wake_count();
+  shell_print(sh, "shell wake reference %s; %u reference(s) held, AKD1500 %s",
+              sleep ? "released" : "taken", refs, refs ? "awake" : "sleeping");
   return 0;
 }
 #endif
@@ -2559,7 +2698,10 @@ static int cmd_akd_clkinfo(const struct shell *sh, size_t argc, char **argv) {
   if (kws_app_running) {
     kws_app_stop();
   }
-  akd_sleep(false); /* wake, else an asleep chip reads all-0 (misleading decode) */
+  /* Hold the shell's wake reference: an asleep chip reads all-0 (misleading
+   * decode), and the command leaves the chip readable for the follow-up probes
+   * it recommends. `akd_sleep 1` gives the reference back. */
+  akd_wake_owner_take(&akd_dbg_wake_held);
   uint32_t op_hz = akd_spi_get_frequency(); /* the operating host clock */
   akd_spi_set_frequency(1400000);
   (void)akd_reg_rd(AKD_DEVICE_ID_REG); /* flush the pointer-swap reconfigure */
@@ -2653,7 +2795,7 @@ static int cmd_akd_coreclk(const struct shell *sh, size_t argc, char **argv) {
     return -EBUSY;
   }
   uint32_t hz = strtoul(argv[1], NULL, 0);
-  akd_sleep(false);
+  akd_wake_owner_take(&akd_dbg_wake_held);
   int rc = akd_core_clock_set(hz);
   if (rc) {
     shell_error(sh, "akd_coreclk %u failed (err %d)", hz, rc);
@@ -2677,7 +2819,7 @@ static int cmd_akd_pll(const struct shell *sh, size_t argc, char **argv) {
     return -EBUSY;
   }
   uint32_t hz = strtoul(argv[1], NULL, 0);
-  akd_sleep(false);
+  akd_wake_owner_take(&akd_dbg_wake_held);
   int rc = akd_pll_set(hz);
   if (rc) {
     shell_error(sh, "akd_pll %u failed (err %d)", hz, rc);
@@ -2701,7 +2843,7 @@ static int cmd_akd_sysdiv(const struct shell *sh, size_t argc, char **argv) {
     return -EBUSY;
   }
   uint32_t n = strtoul(argv[1], NULL, 0);
-  akd_sleep(false);
+  akd_wake_owner_take(&akd_dbg_wake_held);
   int rc = akd_sys_div_set(n);
   if (rc) {
     shell_error(sh, "akd_sysdiv %u rejected (err %d)", n, rc);
@@ -2725,7 +2867,7 @@ static int cmd_akd_clkref(const struct shell *sh, size_t argc, char **argv) {
     return -EBUSY;
   }
   bool on = strtoul(argv[1], NULL, 0) != 0;
-  akd_sleep(false);
+  akd_wake_owner_take(&akd_dbg_wake_held);
   int rc = akd_clk_use_ref(on);
   uint32_t v = akd_reg_rd(AKD_DEVICE_ID_REG);
   shell_print(sh, "AKD1500 clock: %s; DEVICE_ID 0x%08X (%s) (host @1.4 MHz)",
@@ -2855,17 +2997,17 @@ static int cmd_full_erase(const struct shell *shell, size_t argc, char **argv) {
 #ifdef CONFIG_SPARK_BOARD
 /* `app stop` deep idle: PLL off (25 MHz ref) + sleep. */
 static void kws_enter_low_power(void) {
-  akd_sleep(false);
+  akd_wake_get();
   akd_clk_use_ref(true);
-  akd_sleep(true);
+  akd_wake_put();
 }
 /* `app start` operating state: PLL on (800 MHz, 400 MHz core), host clock
  * restored, asleep until the first inference. */
 static void kws_exit_low_power(void) {
-  akd_sleep(false);
+  akd_wake_get();
   akd_clk_use_ref(false);
   akd_spi_set_clock(CONFIG_AKD_SPI_FREQ_HZ);
-  akd_sleep(true);
+  akd_wake_put();
 }
 #endif
 
@@ -3205,6 +3347,8 @@ SHELL_CMD_REGISTER(akd_probe, NULL,
 SHELL_CMD_REGISTER(spi_rxdelay, NULL, "Set SPIM4 rx-delay: spi_rxdelay <0-7>",
                    cmd_spi_rxdelay);
 #ifdef CONFIG_SPARK_BOARD
-SHELL_CMD_REGISTER(akd_sleep, NULL, "Toggle AKD1500 sleep: akd_sleep <0|1>",
+SHELL_CMD_REGISTER(akd_sleep, NULL,
+                   "AKD1500 wake reference: akd_sleep <0|1> (0 = take, 1 = "
+                   "release; the chip sleeps only when no holder is left)",
                    cmd_akd_sleep);
 #endif
