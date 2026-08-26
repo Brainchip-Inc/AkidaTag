@@ -321,6 +321,8 @@ Firmware Version: "241" (version 2.4.1)
 Chip ID: "AKD1500"
 The manufacturer data is encoded in ASCII text format, allowing phones to display this information directly without needing to convert binary data.
 
+The advertisement deliberately carries no scan response. The permanent hardware serial is never broadcast, because a value that never changes would let a passive scanner track a tag straight through the resolvable private address rotation that `CONFIG_BT_PRIVACY` and `CONFIG_BT_RPA_TIMEOUT` provide. The serial is reported instead in the last frame of the `CMD_DEVICE_INFO` response, over the encrypted and bonded connection, as 16 lowercase hex characters.
+
  The Nordic UART Service (NUS) handles command processing with a sophisticated multi-frame protocol supporting single-frame messages for battery commands and multi-frame fragmentation for larger device information transfers, complete with retry logic and send-state management.
 
 
@@ -354,11 +356,13 @@ MOBILE APP  ◄────────►   BLE STACK   ◄──────�
      │    "CMD_DEVICE_INFO"      │                           │
      │                           │                           ├───Process Command
      │                           │                           │    Gather device data
-     │                           │                           │    "AKIDA,TYPE,5.3,1.2.3"
+     │                           │                           │    "AKIDA,TYPE,5.3,1.2.3,
+     │                           │                           │     f3a1c05b7d29e846"
      │                           │                           │
      │◄──Receive Response────────┼───────────────────────────┤
      │    "DEVICE:AKIDA,TYPE,    │                           │
-     │           5.3,1.2.3"      │                           │
+     │           5.3,1.2.3,      │                           │
+     │      f3a1c05b7d29e846"    │                           │
      │                           │                           │
      ├───Send Command────────────┼────────────────────────────►│
      │    "CMD_APP_INFO"         │                           │
@@ -607,7 +611,7 @@ This flashes both mcuboot and demo_apps application together
 ```
 
 ### Device ID Display via UART CLI
-A CLI command is provided to display the unique Device ID of the SoC via the UART console. The device ID is read from the FICR registers and printed through the shell interface.
+A CLI command is provided to display the unique Device ID of the SoC via the UART console. The device ID is read from the FICR registers and printed through the shell interface. The serial console is a trusted local channel, so the full identifier is printed here even though it is never advertised over the air.
 
 ### FOTA over BLE using nRF Connect Mobile App
 - Copy the updated application image `zephyr.signed.bin` to your mobile device.

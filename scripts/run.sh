@@ -507,6 +507,7 @@ if [[ -n "$APP" ]]; then
       # Overlay selection using USE_AUDIO
       if $DK_OVERLAY; then
         CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=n)
+        CMAKE_EXTRA_ARGS+=("-DEXTRA_CONF_FILE=boards/dk.conf")
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
         CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/spark/source/sysbuild/mcuboot_dk.overlay")
       else

@@ -15,22 +15,54 @@ import sys
 import yaml
 import zlib
 import re
+import glob
+
+DEVICE_NAME_RE = re.compile(r'CONFIG_BT_DEVICE_NAME="(.+)"')
+
+
+def read_device_name(path):
+    """Return CONFIG_BT_DEVICE_NAME from one Kconfig file, or None."""
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                match = DEVICE_NAME_RE.match(line)
+                if match:
+                    return match.group(1)
+    except OSError:
+        return None
+
+    return None
+
 
 def get_device_name():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    prj_file = os.path.abspath(os.path.join(script_dir, "..", "prj.conf"))
+    """Return the name the flashed firmware actually advertises.
 
+    prj.conf carries the spark board's name and boards/dk.conf overrides it for
+    the DK build, so prj.conf on its own reports the wrong name whenever the
+    board on the bench is a DK. The generated Kconfig output of the most recent
+    build is the authority instead, because it is the merged configuration the
+    firmware was compiled from, whichever board it was built for. prj.conf stays
+    as the fallback for a checkout that has not been built here.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    app_dir = os.path.abspath(os.path.join(script_dir, ".."))
+    repo_root = os.path.dirname(app_dir)
+
+    pattern = os.path.join(repo_root, "build*", "**", "zephyr", ".config")
+    built = [
+        (os.path.getmtime(path), path)
+        for path in glob.glob(pattern, recursive=True)
+        if read_device_name(path)
+    ]
+    if built:
+        return read_device_name(max(built)[1])
+
+    prj_file = os.path.join(app_dir, "prj.conf")
     if not os.path.exists(prj_file):
         print("Warning: prj.conf not found")
         return None
 
-    with open(prj_file, "r") as f:
-        for line in f:
-            match = re.match(r'CONFIG_BT_DEVICE_NAME="(.+)"', line)
-            if match:
-                return match.group(1)
-
-    return None
+    return read_device_name(prj_file)
 
 def compute_data_crc32(data_path):
     """CRC32 over raw model data binary file bytes."""
