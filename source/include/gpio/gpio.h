@@ -49,6 +49,7 @@ static inline uint32_t akd_wake_gate_count(void) { return 0; }
 #endif
 int akd_async_sem_take(k_timeout_t timeout);
 void akd_async_sem_give(void);
+void akd_async_sem_reset(void);
 bool akd_in_learning(void);
 void schedule_akd_learning_wq(void);
 #endif /* GPIO_H */

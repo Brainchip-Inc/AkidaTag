@@ -67,6 +67,17 @@ int akd_async_sem_take(k_timeout_t timeout) {
 void akd_async_sem_give(void) { k_sem_give(&akd_async_sem); }
 
 /**
+ * @brief Wrapper function to reset the Akida async semaphore to empty
+ *
+ * The semaphore's count survives the thread that was waiting on it, so a
+ * teardown that gives it to unblock that thread leaves a token behind whenever
+ * the thread happened to be elsewhere. Resetting establishes the invariant a
+ * newly created async thread depends on: it starts with no inherited token, so
+ * its first take blocks rather than firing a fetch against an empty queue.
+ */
+void akd_async_sem_reset(void) { k_sem_reset(&akd_async_sem); }
+
+/**
  * @brief Interrupt handler for AKD asynchronous GPIO pin.
  *
  * This ISR is triggered on an edge-to-active transition of the AKD async GPIO.
@@ -279,13 +290,6 @@ int gpio_init(void) {
     LOG_ERR("Failed to configure AKD sleep pin (err %d)", err);
     return err;
   }
-  /* The line above leaves the chip AWAKE, so the count has to start at 1 or it
-   * would disagree with the hardware. That initial 1 is the boot path's own
-   * wake reference: boot programs the model over the AKD1500 and needs it
-   * running throughout. main() hands it back (akd_wake_put) once the model is
-   * programmed and the app is idle waiting for its first utterance. It is not a
-   * stray increment - removing it clock-gates the chip mid-boot. */
-  akd_wake_refs = 1;
   gpio_init_callback(&akd_async_cb, akd_async_isr_handler,
                      BIT(enable_akd_async.pin));
   err = gpio_add_callback(enable_akd_async.port, &akd_async_cb);
@@ -293,6 +297,18 @@ int gpio_init(void) {
     LOG_ERR("Failed to add AKD ASYNC callback (err %d)", err);
     return err;
   }
+
+  /* The akd_lp configure above leaves the chip AWAKE, so the count has to start
+   * at 1 or it would disagree with the hardware. That initial 1 is the boot
+   * path's own wake reference: boot programs the model over the AKD1500 and
+   * needs it running throughout. It is not a stray increment - removing it
+   * clock-gates the chip mid-boot.
+   *
+   * Taken last, on the success path only, so the contract is exact: this
+   * function returns 0 if and only if the boot reference is held. main() owns
+   * it from there and hands it back however its boot sequence ends; a caller
+   * that sees a non-zero return has nothing to release. */
+  akd_wake_refs = 1;
 
   LOG_INF("GPIO initialized");
   return 0;

@@ -461,6 +461,41 @@ public:
   AkdWakeScope &operator=(const AkdWakeScope &) = delete;
 };
 
+/* Owns the boot wake reference that a successful gpio_init() leaves held, and
+ * hands it back however main()'s boot sequence ends.
+ *
+ * Adopts rather than takes: gpio_init() has to start the count at 1 because it
+ * is what configures akd_lp awake, so by the time main() can hold anything the
+ * reference already exists.
+ *
+ * A single release statement is the wrong shape here. main() leaves by seven
+ * early returns before the app goes idle, and the first of them is taken by a
+ * board with no model in LittleFS - which is precisely the board a BLE model
+ * update exists to serve, so the most common first-use path was the one that
+ * pinned the AKD1500 awake for the rest of the session. A destructor cannot be
+ * bypassed by an eighth early return added later.
+ *
+ * release() exists because main() also returns normally, long after the boot
+ * sequence is over: the success path has to hand the reference back at the
+ * moment the app goes idle, not when main() finally returns. Calling it twice,
+ * or not at all, is safe. */
+class AkdBootWakeScope {
+public:
+  AkdBootWakeScope() = default;
+  ~AkdBootWakeScope() { release(); }
+  void release(void) {
+    if (held) {
+      held = false;
+      akd_wake_put();
+    }
+  }
+  AkdBootWakeScope(const AkdBootWakeScope &) = delete;
+  AkdBootWakeScope &operator=(const AkdBootWakeScope &) = delete;
+
+private:
+  bool held = true;
+};
+
 /** Work items for structured learning */
 static struct k_work_delayable learn_speech_end_work;
 static struct k_work learn_process_work;
@@ -1463,6 +1498,11 @@ void akida_init(int mode) {
    * costs no extra latency on the model-update path that calls akida_init().
    */
   if (akd_async_tid != NULL) {
+    /* Silence the completion interrupt first: it is the other producer of
+     * akd_async_sem, and a token it posts after the reset below would be
+     * inherited by the replacement thread just the same. Re-enabled below for
+     * async mode; akd_irq_enable/disable are idempotent. */
+    akd_irq_disable();
     akd_async_stop_requested = true;
     akd_async_sem_give();
     if (k_thread_join(akd_async_tid, K_SECONDS(2)) != 0) {
@@ -1476,6 +1516,12 @@ void akida_init(int mode) {
      * still owned. Reclaiming before the join would race its own
      * akd_async_wake_give(). */
     akd_async_wake_reclaim_all();
+    /* The give above is only consumed if the thread was actually waiting on it,
+     * and the semaphore's count outlives the thread. Reset so a newly created
+     * async thread starts with no inherited token: otherwise its first take
+     * returns immediately and it fetches against an empty queue, contending for
+     * the AKD1500 SPI bus with whatever the caller is about to program. */
+    akd_async_sem_reset();
     LOG_INF("Stopped existing async thread");
   }
 
@@ -1534,6 +1580,11 @@ int main(void) {
     printf("Battery init failed (err %d)\n", ret);
   }
 #endif
+  /* Declared after gpio_init() so a failure there, which leaves no reference
+   * held, is not followed by a release. Declared outside the board guard
+   * because on the DK the whole wake API is a no-op stub. */
+  AkdBootWakeScope boot_wake;
+
   uart_init();
   start_led_ind();
   led_set_state(LED_STATE_NORMAL_APP);
@@ -1674,9 +1725,12 @@ int main(void) {
 
   initiate_kws_inference(is_el_model);
   is_kws_inference_started = true;
-  /* Hand back the boot wake reference gpio_init() took: the model is programmed
-   * and the app is now idle until the first utterance. */
-  akd_wake_put();
+  /* Hand back the boot wake reference gpio_init() left held: the model is
+   * programmed and the app is now idle until the first utterance. Released here
+   * rather than left to the destructor so the moment is unchanged - main()
+   * returns much later, and the chip must be allowed to sleep as soon as boot
+   * stops needing it. */
+  boot_wake.release();
 
   LOG_INF("data to check : model_size %d, class %d ",
           kws_meta.info_data_len + kws_data_meta.data_length, g_num_classes);
