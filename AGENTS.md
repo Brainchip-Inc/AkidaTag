@@ -27,6 +27,23 @@ its own `style(...)` commit, the way e06eb31 did. Run
 `./scripts/clang_format.sh check <files>` inside the Docker image; clang-format is pinned to
 22.1.1 and is not installed on the host.
 
+## Flashing from macOS
+
+`docs/setup.md` assumes Linux. Docker Desktop on macOS has no USB passthrough, so the `-d`
+flash path never sees the debug probe. Flash on the host instead, pointing the script at the
+container-built tree:
+
+```sh
+BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps   # add _dk for the DK build dir
+```
+
+`-jf` drives `JLinkExe` directly (NET core first, then APP) and needs no west on the host.
+Plain `-f` (`west flash`, nrfjprog) is not usable here: the spark board's debug header reports
+`VTref` around 1.4 V, so nrfjprog aborts with `Low voltage ... detected in target device` even
+though SWD reads and writes are reliable. A re-run that prints
+`Flash download: ... Skipped. Contents already match` for both banks is the cheapest proof the
+device matches the built images.
+
 ## Do not edit
 
 `CHANGELOG.md` and `VERSION` are release-managed. Commit messages are checked by the hook
