@@ -530,23 +530,36 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
    * Neither is a truthful result, so gate on the JEDEC ID instead. */
   int ret = spi_flash_probe(spi_driver);
   if (ret == 0) {
+    /* Bracket the erase with the gpio.c tallies so what follows is a fact the
+     * firmware observed rather than something inferred from the order console
+     * lines happened to arrive in. `releases` is how many wake references other
+     * threads handed back while the erase ran, i.e. how much duty-cycle
+     * contention it actually survived; `gated` is how many times SLEEP was
+     * asserted, which must be zero because `claim` holds a reference throughout.
+     * Unsigned differences, so both stay correct across the UINT32_MAX wrap. */
+    const uint32_t releases_before = akd_wake_release_count();
+    const uint32_t gates_before = akd_wake_gate_count();
+
     s_tick = time_ms();
     ret = spi_flash_erase(spi_driver, offset, size);
     e_tick = time_ms();
     erase_time = e_tick - s_tick;
-    LOG_INF("erase time= %u ms", erase_time);
-  }
 
-  /* `claim` holds a wake reference across the whole erase, so the count cannot
-   * legitimately be zero here. If it ever is, the AKD1500 was clock-gated part
-   * way through and the WIP poll spent the rest of the erase reading a dead
-   * bus, which reports every remaining sector as instantly ready. Cheap enough
-   * to check on every erase, and it turns that into a logged failure instead of
-   * a silent "Erase Successful" for sectors that were never touched. */
-  if (akd_wake_count() == 0) {
-    LOG_ERR("AKD1500 wake reference lost during erase: the chip slept mid-erase "
-            "and the erase result cannot be trusted");
-    ret = -EIO;
+    const uint32_t releases = akd_wake_release_count() - releases_before;
+    const uint32_t gated = akd_wake_gate_count() - gates_before;
+    LOG_INF("erase time= %u ms (wake releases during erase: %u, sleep gated: %u)",
+            erase_time, releases, gated);
+
+    /* A non-zero `gated` means the AKD1500 was clock-gated part way through, so
+     * the WIP poll spent the rest of the erase reading a dead bus and reported
+     * every remaining sector as instantly ready. Cheap enough to check on every
+     * erase, and it turns that into a logged failure instead of a silent
+     * "Erase Successful" for sectors that were never touched. */
+    if (gated != 0) {
+      LOG_ERR("AKD1500 wake reference lost during erase: the chip slept "
+              "mid-erase and the erase result cannot be trusted");
+      ret = -EIO;
+    }
   }
 
   if (ret) {

@@ -45,9 +45,21 @@ reference from the shell thread, which holds neither the flash mutex nor any
 knowledge of the update, so a release landing inside the erase is exactly the
 shape of the second defect: a wake holder that is not the flash path clock-gating
 the chip mid-erase, after which the WIP poll reads a dead bus and calls every
-remaining sector instantly ready. check_wake_churn() proves at least one release
-landed between the "Flash erase offset" and "erase time=" lines, not merely
-somewhere in the run.
+remaining sector instantly ready.
+
+The overlap is established from firmware state, not from console ordering. The
+erase brackets itself with the gpio.c wake tallies and reports two numbers on its
+own completion line:
+
+    erase time= 286 ms (wake releases during erase: 5, sleep gated: 0)
+
+"wake releases during erase" is how many references other threads handed back
+between the first and last sector - the contention the erase actually survived.
+"sleep gated" is how many times SLEEP was asserted in that window, which must be
+zero because the flash claim holds a reference throughout. check_wake_contention()
+asserts on those, so the proof does not depend on the relative arrival order of
+deferred LOG_INF output and shell_print output, which share a UART but not a
+backend and are not synchronised with each other.
 
 The churn cannot be folded into phase 1: to release a reference it must first
 take one, and holding one at the erase start leaves the chip awake, which is
@@ -85,7 +97,7 @@ what you want on a shared board, and is what makes sending it twice harmless.
 Note the trade-off: with an identical model the post-reset boot check cannot tell
 a fresh write from the bytes that were already there, so it only has real teeth
 when the model being sent differs from the one installed (as it does on a freshly
-flashed board in CI). The erase-duration, ordering and churn-overlap checks
+flashed board in CI). The erase-duration, ordering and wake-contention checks
 discriminate either way.
 """
 
@@ -120,6 +132,15 @@ MAX_MS_PER_SECTOR = 60
 STATUS_POLL_TIMEOUT_MS = 1000
 
 ERASE_TIME_RE = re.compile(r"erase time=\s*(\d+)\s*ms")
+
+# The erase's own report of what the wake count did while it ran, emitted by
+# spi_flash_erase_helper_func() from the gpio.c tallies it sampled either side of
+# spi_flash_erase(). Firmware-observed, so it does not depend on the order two
+# different log backends happened to reach the UART in.
+ERASE_CONTENTION_RE = re.compile(
+    r"erase time=\s*\d+\s*ms\s*\(wake releases during erase:\s*(\d+),"
+    r"\s*sleep gated:\s*(\d+)\)"
+)
 BOOT_DATA_CRC_RE = re.compile(r"Data CRC OK \(0x[0-9A-Fa-f]+\) over (\d+) bytes")
 
 # Validation failures the firmware reports at boot, straight off the flash.
@@ -150,10 +171,6 @@ FAILURE_MARKERS = (
 WAKE_TAKEN_MARKER = "shell wake reference taken"
 WAKE_RELEASED_MARKER = "shell wake reference released"
 
-# Bracket the erase in the console log: the firmware logs the first before it
-# probes the flash and the second once the last sector is done.
-ERASE_START_MARKER = "Flash erase offset"
-ERASE_END_MARKER = "erase time="
 
 
 class SerialMonitor:
@@ -222,8 +239,10 @@ class WakeChurn:
     with the reference count it can only give back what the shell itself took, so
     the erase keeps its own reference and the chip stays awake.
 
-    The period is deliberately much shorter than the ~286 ms erase, so a release
-    lands inside the erase window many times over rather than by luck.
+    The period is deliberately much shorter than the ~286 ms erase, so releases
+    land inside the erase window many times over rather than by luck. How many
+    actually did is not guessed from this side: the erase counts them itself and
+    check_wake_contention() asserts on that number.
 
     Only ever used for phase 2: holding a reference at the erase start would
     leave the chip awake and hide the phase 1 defect.
@@ -420,14 +439,27 @@ def check_erase_duration(lines, data_size):
     return ok
 
 
-def check_wake_churn(lines):
-    """Prove the stimulus actually overlapped the erase.
+def check_wake_contention(lines):
+    """Prove, from firmware state, that the churn overlapped the erase.
 
-    Without this the run would silently degrade into the quiet-room test it is
-    meant to replace: the churn thread could have died, or the shell could have
-    been too slow, and every other check would still pass.
+    The firmware samples the gpio.c wake tallies either side of spi_flash_erase()
+    and reports the differences on its own completion line, so both numbers here
+    are facts the erase observed about itself:
+
+      * releases > 0 - other threads handed wake references back while the erase
+        was running. This is what stops the run silently degrading into the
+        quiet-room test it exists to replace: if the churn thread died, or the
+        shell could not keep up, or the update finished before any release
+        landed, the erase saw no contention and this fails.
+      * gated == 0  - SLEEP was never asserted during the erase. The flash claim
+        holds a reference throughout, so any 1->0 transition means the reference
+        count is broken and the erase spent part of its time polling a dead bus.
+
+    Deliberately not inferred from console line ordering: deferred LOG_INF output
+    and shell_print output share the UART but not a backend, so their relative
+    arrival order proves nothing about the order the events happened in.
     """
-    print("::group::CHECK - wake-reference churn during the erase")
+    print("::group::CHECK - wake contention during the erase")
     ok = True
 
     taken = sum(1 for l in lines if WAKE_TAKEN_MARKER in l)
@@ -435,40 +467,47 @@ def check_wake_churn(lines):
     print(f"shell wake reference: {taken} taken, {released} released over the run")
     if taken == 0 or released == 0:
         print(
-            "FAILED: the churn thread produced no wake-reference traffic. The "
-            "update ran without a competing wake holder, which is the quiet-room "
-            "case that cannot see this defect."
+            "FAILED: the churn thread produced no wake-reference traffic at all, "
+            "so the update never had a competing wake holder."
         )
         ok = False
 
-    start = next((i for i, l in enumerate(lines) if ERASE_START_MARKER in l), None)
-    end = next((i for i, l in enumerate(lines) if ERASE_END_MARKER in l), None)
-    if start is None or end is None or end <= start:
+    reports = [
+        (int(m.group(1)), int(m.group(2)))
+        for line in lines
+        for m in [ERASE_CONTENTION_RE.search(line)]
+        if m
+    ]
+    if not reports:
         print(
-            "FAILED: could not bracket the erase in the log "
-            f"({ERASE_START_MARKER!r} .. {ERASE_END_MARKER!r}), so overlap "
-            "cannot be established."
+            "FAILED: the erase did not report its wake contention. Expected an "
+            "'erase time= N ms (wake releases during erase: R, sleep gated: G)' "
+            "line; a build without that instrumentation cannot prove overlap."
         )
         print("::endgroup::")
         return False
 
-    window = lines[start + 1 : end]
-    inside = [l for l in window if WAKE_RELEASED_MARKER in l]
-    print(f"{len(inside)} wake-reference release(s) landed inside the erase window")
-    if not inside:
+    releases_during, gated = reports[-1]
+    print(
+        f"erase observed {releases_during} wake release(s) and {gated} sleep "
+        "gating event(s) while it ran"
+    )
+
+    if releases_during == 0:
         print(
-            "FAILED: no release landed between the erase start and its "
-            "completion, so this run did not exercise the race. Shorten the "
-            "churn period or check that the shell is keeping up."
+            "FAILED: no wake reference was handed back during the erase, so this "
+            "run did not exercise the race. Shorten the churn period or check "
+            "that the shell is keeping up with it."
         )
         ok = False
 
-    # A release inside the window must not have gated the chip: every one of
-    # them should still report at least the erase's own reference outstanding.
-    for line in inside:
-        if "0 reference(s) held" in line:
-            print(f"  FAILED, the count reached zero during the erase: {line}")
-            ok = False
+    if gated != 0:
+        print(
+            f"FAILED: SLEEP was asserted {gated} time(s) during the erase. A "
+            "reference is held for its whole duration, so the count is broken "
+            "and the erase polled a clock-gated chip."
+        )
+        ok = False
 
     print("PASSED" if ok else "FAILED")
     print("::endgroup::")
@@ -641,7 +680,7 @@ def main():
             results["phase 2 erase duration"] = check_erase_duration(
                 churn_lines, data_size
             )
-            results["phase 2 wake churn overlap"] = check_wake_churn(churn_lines)
+            results["phase 2 wake contention"] = check_wake_contention(churn_lines)
             results["phase 2 transfer markers"] = check_markers(churn_lines)
 
             if churn_ok:

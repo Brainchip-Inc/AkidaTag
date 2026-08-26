@@ -25,13 +25,27 @@ void akd_wake_put(void);
 /* Outstanding wake references; 0 means the chip is being allowed to sleep.
  * Diagnostic only - never gate a wake on this, take a reference instead. */
 unsigned int akd_wake_count(void);
+/* Monotonic tallies for holders that need to report what happened to the count
+ * while they held a reference. Sample either side of an operation and take the
+ * unsigned difference (correct across the UINT32_MAX wrap):
+ *   akd_wake_release_count() - references handed back during the operation, a
+ *     direct measure of the duty-cycle contention it survived;
+ *   akd_wake_gate_count() - times SLEEP was asserted. A holder that sees this
+ *     move while it held a reference was clock-gated underneath, which means
+ *     the count is broken and the operation's result cannot be trusted. */
+uint32_t akd_wake_release_count(void);
+uint32_t akd_wake_gate_count(void);
 #else
 static inline void akd_wake_get(void) {}
 static inline void akd_wake_put(void) {}
-/* The DK has no SLEEP pin, so the AKD1500 is permanently running. Report that
- * as one standing reference, so an invariant check of the form "a reference is
- * held for the whole access" reads the same on both boards. */
+/* The DK has no SLEEP pin, so the AKD1500 is permanently running. Report that as
+ * one standing reference: a caller asking "is anything keeping the chip awake"
+ * gets the truthful answer for this board. */
 static inline unsigned int akd_wake_count(void) { return 1; }
+/* Nothing ever releases or gates on a board with no SLEEP pin, so both tallies
+ * stay at zero and every difference a caller takes is zero. */
+static inline uint32_t akd_wake_release_count(void) { return 0; }
+static inline uint32_t akd_wake_gate_count(void) { return 0; }
 #endif
 int akd_async_sem_take(k_timeout_t timeout);
 bool akd_in_learning(void);

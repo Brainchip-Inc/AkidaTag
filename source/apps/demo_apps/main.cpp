@@ -269,7 +269,7 @@ static inline uint8_t clamp_uint8(float v) {
  *    handed back on akd_async_thread once the matching fetch completes, and
  *    handed back by that same thread when a fetch never arrives at all;
  *  - the learning session: taken when an utterance starts processing, handed
- *    back when the state machine leaves STATE_LEARNING by any route;
+ *    back by kws_set_edge_state() on any transition out of STATE_LEARNING;
  *  - the shell's debug wake: taken by the clock commands that need the chip
  *    readable and parked awake afterwards, handed back by `akd_sleep 1`.
  *
@@ -303,48 +303,112 @@ static void akd_wake_owner_release(bool *held) {
 static bool akd_learn_wake_held;
 static bool akd_dbg_wake_held;
 
-/* One reference per inference handed to akida_enqueue() on the async path.
- * Counted, not flagged: nothing stops a second utterance being enqueued while
- * the first is still in flight. */
-static unsigned int akd_async_wake_refs;
+/* One reference per inference handed to akida_enqueue() on the async path,
+ * with the moment it was taken, oldest first. Counted rather than flagged
+ * because nothing stops a second utterance being enqueued while the first is
+ * still in flight, and timestamped because the only safe reason to reclaim one
+ * of these is that THAT enqueue has outlived its own budget.
+ *
+ * The AKD1500 completes enqueued inferences in order, so a fetch retires the
+ * oldest entry. Which physical inference an entry belongs to does not matter -
+ * what has to stay right is the number outstanding, because that is what holds
+ * the pin.
+ *
+ * Sized well above the one or two inferences the audio thread can have in
+ * flight. A reference taken while the ring is full is still taken, because the
+ * chip must stay awake for it, but carries no deadline and so can never be
+ * reclaimed by the timeout path: leaking a reference costs power and shows up
+ * in the wake count, whereas dropping a live one clock-gates the chip
+ * mid-inference and yields a wrong keyword with no error at all. */
+#define AKD_ASYNC_WAKE_MAX 8
+
+/* How long an enqueued inference may go without its completion interrupt before
+ * its wake reference is treated as stranded, measured from that reference's own
+ * timestamp. */
+#define AKD_ASYNC_FETCH_TIMEOUT_MS 5000
+
+static int64_t akd_async_wake_ts[AKD_ASYNC_WAKE_MAX];
+static unsigned int akd_async_wake_first;
+static unsigned int akd_async_wake_tracked;
+static unsigned int akd_async_wake_untracked;
 
 static void akd_async_wake_take(void) {
+  bool overflow = false;
+
   k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
   akd_wake_get();
-  akd_async_wake_refs++;
+  if (akd_async_wake_tracked < AKD_ASYNC_WAKE_MAX) {
+    unsigned int slot =
+        (akd_async_wake_first + akd_async_wake_tracked) % AKD_ASYNC_WAKE_MAX;
+    akd_async_wake_ts[slot] = k_uptime_get();
+    akd_async_wake_tracked++;
+  } else {
+    akd_async_wake_untracked++;
+    overflow = true;
+  }
   k_mutex_unlock(&akd_wake_owner_lock);
+
+  if (overflow) {
+    LOG_ERR("more than %d async inferences in flight; this wake reference has "
+            "no deadline and will only be handed back by a fetch",
+            AKD_ASYNC_WAKE_MAX);
+  }
 }
 
-/* Hand back the reference belonging to one completed (or abandoned) inference.
- * Silent when none is outstanding, so an abort path may call it without having
- * to know whether the fetch already claimed it. */
+/* Hand back the reference belonging to one completed (or abandoned) inference,
+ * retiring the oldest outstanding entry. Silent when none is outstanding, so an
+ * abort path may call it without having to know whether the fetch already
+ * claimed it. */
 static void akd_async_wake_give(void) {
   k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
-  if (akd_async_wake_refs > 0) {
-    akd_async_wake_refs--;
+  if (akd_async_wake_tracked > 0) {
+    akd_async_wake_first = (akd_async_wake_first + 1) % AKD_ASYNC_WAKE_MAX;
+    akd_async_wake_tracked--;
+    akd_wake_put();
+  } else if (akd_async_wake_untracked > 0) {
+    akd_async_wake_untracked--;
     akd_wake_put();
   }
   k_mutex_unlock(&akd_wake_owner_lock);
 }
 
 #ifdef CONFIG_SPARK_BOARD
-/* Hand back every reference still outstanding. akd_async_sem_take() giving up
- * means the completion interrupt is not coming, so those references have no
- * other route home: without this the AKD1500 would stay awake for good on the
- * first dropped fetch. Only akd_async_thread, which owns that timeout, calls
- * this. */
-static void akd_async_wake_drop_all(void) {
-  k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
-  unsigned int stranded = akd_async_wake_refs;
-  akd_async_wake_refs = 0;
-  for (unsigned int i = 0; i < stranded; i++) {
+/* Hand back the reference of any enqueued inference that has outlived its own
+ * AKD_ASYNC_FETCH_TIMEOUT_MS, and only those.
+ *
+ * akd_async_sem_take() timing out is NOT evidence that a completion interrupt
+ * is missing: its window free-runs from the previous loop iteration, so it can
+ * expire microseconds after a perfectly healthy enqueue. Deciding staleness
+ * from the wait rather than from the enqueue is what let a live reference be
+ * dropped, gating the chip mid-inference. So the deadline is per reference,
+ * measured from when that reference was taken, and the entries are ordered
+ * oldest first: once the head is not stale, nothing behind it is either.
+ *
+ * Only akd_async_thread calls this. */
+static void akd_async_wake_reap_stranded(void) {
+  const int64_t now = k_uptime_get();
+
+  for (;;) {
+    int64_t held_ms;
+
+    k_mutex_lock(&akd_wake_owner_lock, K_FOREVER);
+    if (akd_async_wake_tracked == 0) {
+      k_mutex_unlock(&akd_wake_owner_lock);
+      return;
+    }
+    held_ms = now - akd_async_wake_ts[akd_async_wake_first];
+    if (held_ms < AKD_ASYNC_FETCH_TIMEOUT_MS) {
+      k_mutex_unlock(&akd_wake_owner_lock);
+      return;
+    }
+    akd_async_wake_first = (akd_async_wake_first + 1) % AKD_ASYNC_WAKE_MAX;
+    akd_async_wake_tracked--;
     akd_wake_put();
-  }
-  k_mutex_unlock(&akd_wake_owner_lock);
-  if (stranded) {
-    LOG_WRN("async fetch never arrived; released %u stranded AKD1500 wake "
-            "reference(s)",
-            stranded);
+    k_mutex_unlock(&akd_wake_owner_lock);
+
+    LOG_WRN("async fetch never arrived: handed back an AKD1500 wake reference "
+            "held for %d ms",
+            (int)held_ms);
   }
 }
 #endif
@@ -358,6 +422,33 @@ public:
   AkdWakeScope(const AkdWakeScope &) = delete;
   AkdWakeScope &operator=(const AkdWakeScope &) = delete;
 };
+
+/* The single writer of cur_kws_edge_state.
+ *
+ * The learning session's wake reference is taken per utterance in
+ * learn_process_handler() and can only be handed back once the state machine
+ * has actually left STATE_LEARNING. Hanging that release off switch_mode()
+ * alone was wrong: switch_mode() is not the only writer. kws_app_start(),
+ * kws_app_stop() (which the phone reaches through CMD_DEPLOY_STOP, and seven
+ * shell paths reach directly) and initiate_kws_inference() all move the state
+ * themselves, and a learning session cut short by any of them stranded the
+ * reference, so the AKD1500 never slept again with nothing logged to say why.
+ *
+ * Routing every write through here puts the release on the transition itself,
+ * where no direct assignment can bypass it.
+ *
+ * A caller that keeps touching the AKD1500 after the transition must hold a
+ * reference of its own: learning_on_user_input() reads the learned weights out
+ * of the Akida mesh after switch_mode() returns, which is why it opens an
+ * AkdWakeScope for the whole handler. */
+static void kws_set_edge_state(uint32_t next) {
+  const uint32_t prev = cur_kws_edge_state;
+
+  cur_kws_edge_state = next;
+  if (prev == STATE_LEARNING && next != STATE_LEARNING) {
+    akd_wake_owner_release(&akd_learn_wake_held);
+  }
+}
 
 /** Work items for structured learning */
 static struct k_work_delayable learn_speech_end_work;
@@ -755,7 +846,7 @@ extern "C" int kws_app_start(void) {
   }
   reset_stale_inference_data();
   dmic_reset_dc_state();
-  cur_kws_edge_state = STATE_INFERENCE;
+  kws_set_edge_state(STATE_INFERENCE);
   kws_app_running = true;
   kws_config_notify_dmic_started();
   LOG_INF("kws_app: started");
@@ -767,7 +858,7 @@ extern "C" int kws_app_stop(void) {
     return 0;
   }
   kws_config_notify_dmic_stopped();
-  cur_kws_edge_state = STATE_STOPPED;
+  kws_set_edge_state(STATE_STOPPED);
   stop_dmic();
   kws_app_running = false;
   LOG_INF("kws_app: stopped");
@@ -831,7 +922,7 @@ static void switch_learning_delayed(struct k_work *work) {
   ARG_UNUSED(work);
 
   if (cur_kws_edge_state == STATE_LEARN_SELECT) {
-    cur_kws_edge_state = STATE_LEARNING;
+    kws_set_edge_state(STATE_LEARNING);
     /* Started ACK is sent only when BLE is connected and the KWS application is
      * deployed */
     if (is_ble_connected() && event_flag) {
@@ -879,7 +970,7 @@ static void switch_mode(int mode) {
 
       akida_learn_mode(true);
 
-      cur_kws_edge_state = mode;
+      kws_set_edge_state(mode);
     }
     break;
   case STATE_LEARN_SELECT:
@@ -887,7 +978,7 @@ static void switch_mode(int mode) {
       k_work_cancel_delayable(&switch_delayed_work);
       akida_learn_mode(false);
 
-      cur_kws_edge_state = mode;
+      kws_set_edge_state(mode);
     } else if (STATE_LEARNING == mode) {
 
       akida_learn_mode(true);
@@ -901,18 +992,17 @@ static void switch_mode(int mode) {
     /* Restore original VAD timeout */
     speech_active_time_ms = saved_speech_active_time_ms;
     akida_learn_mode(false);
+    /* kws_set_edge_state() hands the session's wake reference back on the
+     * transition itself, which is why both akida_learn_mode() writes sit above
+     * it: they still need the chip running. This is one route out of a learning
+     * session but not the only one, so the release deliberately lives in the
+     * setter rather than here. */
     if (STATE_LEARN_SELECT == mode) {
-      cur_kws_edge_state = mode;
+      kws_set_edge_state(mode);
     } else if (STATE_INFERENCE == mode) {
       akida_learn_mode(false);
-      cur_kws_edge_state = mode;
+      kws_set_edge_state(mode);
     }
-    /* The only way out of a learning session, whether it completed or the user
-     * abandoned it, so this is where the session's wake reference goes back.
-     * Last in the case, after the akida_learn_mode() writes above, which need
-     * the chip running. Callers that keep touching the AKD1500 after this
-     * returns hold a reference of their own (learning_on_user_input). */
-    akd_wake_owner_release(&akd_learn_wake_held);
     break;
   default:
     break;
@@ -1031,7 +1121,7 @@ static int initiate_kws_inference(uint8_t is_el_model_l) {
     read_learn_weights_from_flash();
   }
 
-  cur_kws_edge_state = STATE_INFERENCE;
+  kws_set_edge_state(STATE_INFERENCE);
   /* adding additional 1200ms to last_trigger_time_ms to increase the debouce
    * time at during the initialization to suppress any noise from dmic */
   last_trigger_time_ms = time_ms() + 1200ULL;
@@ -1217,7 +1307,7 @@ static void akd_async_thread(void *a, void *b, void *c) {
     int ret = akd_async_sem_take(K_SECONDS(5));
 
     if (ret == -EAGAIN) {
-      akd_async_wake_drop_all();
+      akd_async_wake_reap_stranded();
       continue;
     }
 
@@ -1701,8 +1791,9 @@ static int32_t inference_on_mfcc_output(uint8_t *input, uint32_t *input_shape) {
       if ((time_ms() - start_time) > ENQUEUE_TIMEOUT_MS) {
         LOG_ERR("akida_enqueue timeout after %d ms", ENQUEUE_TIMEOUT_MS);
         if (ret) {
-          /* Nothing was accepted, so no completion interrupt is coming and
-           * akd_async_thread will never hand this reference back for us. */
+          /* Nothing was accepted, so no completion interrupt is coming for it.
+           * Hand a reference back now rather than leaving it for the timeout
+           * path, which would make the chip wait out a full deadline first. */
           akd_async_wake_give();
         }
         ret = EFAILURE;

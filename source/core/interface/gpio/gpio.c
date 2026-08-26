@@ -96,6 +96,19 @@ static void akd_async_isr_handler(const struct device *dev,
 static struct k_spinlock akd_wake_lock;
 static unsigned int akd_wake_refs;
 
+/* Monotonic tallies of what the count actually did, so a caller that holds a
+ * reference across a long operation can report the contention it survived from
+ * observed state rather than inferring it from console line ordering:
+ *   akd_wake_releases - every reference actually handed back;
+ *   akd_wake_gates    - every 1->0 transition, i.e. every time SLEEP was
+ *                       asserted. A holder that samples this either side of its
+ *                       own operation and sees a change has had the chip
+ *                       clock-gated underneath it, which is a broken refcount.
+ * Both wrap at UINT32_MAX; callers use unsigned differences, which stay correct
+ * across the wrap. */
+static uint32_t akd_wake_releases;
+static uint32_t akd_wake_gates;
+
 /**
  * @brief Take a wake reference; de-asserts SLEEP on the 0->1 transition.
  */
@@ -130,8 +143,10 @@ void akd_wake_put(void) {
     __ASSERT_NO_MSG(false);
     return;
   }
+  akd_wake_releases++;
   if (--akd_wake_refs == 0) {
     gpio_pin_set_dt(&akd_lp, 1);
+    akd_wake_gates++;
   }
   k_spin_unlock(&akd_wake_lock, key);
 }
@@ -144,6 +159,26 @@ unsigned int akd_wake_count(void) {
   unsigned int refs = akd_wake_refs;
   k_spin_unlock(&akd_wake_lock, key);
   return refs;
+}
+
+/**
+ * @brief Monotonic count of wake references handed back.
+ */
+uint32_t akd_wake_release_count(void) {
+  k_spinlock_key_t key = k_spin_lock(&akd_wake_lock);
+  uint32_t releases = akd_wake_releases;
+  k_spin_unlock(&akd_wake_lock, key);
+  return releases;
+}
+
+/**
+ * @brief Monotonic count of 1->0 transitions, i.e. of SLEEP being asserted.
+ */
+uint32_t akd_wake_gate_count(void) {
+  k_spinlock_key_t key = k_spin_lock(&akd_wake_lock);
+  uint32_t gates = akd_wake_gates;
+  k_spin_unlock(&akd_wake_lock, key);
+  return gates;
 }
 /**
  * @brief Initialize all GPIO pins and configure AKD async interrupt.
