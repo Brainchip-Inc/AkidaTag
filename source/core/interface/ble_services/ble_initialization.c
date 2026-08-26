@@ -152,7 +152,9 @@ uint8_t adv_manufacturer_data[] = {
 };
 
 /* Stores the unique 64-bit hardware device ID read from the MCU.
- * Used to uniquely identify the device during runtime or communication.
+ * Never advertised: it is a permanent serial, so putting it on the air would
+ * defeat the rotating resolvable private address. It is reported only over the
+ * encrypted, bonded connection and on the local serial console.
  */
 static device_id_128_t device_id;
 
@@ -163,10 +165,6 @@ static const struct bt_data ad[] = {
     BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
     BT_DATA(BT_DATA_MANUFACTURER_DATA, adv_manufacturer_data,
             sizeof(adv_manufacturer_data)),
-};
-/* BLE scan response data containing the 128-bit UUID of the Device ID */
-static const struct bt_data sd[] = {
-    BT_DATA(BT_DATA_UUID128_ALL, &device_id, sizeof(device_id)),
 };
 
 /**
@@ -1112,7 +1110,7 @@ static void recycled_cb(void) {
   int err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN,
                                             BT_GAP_ADV_FAST_INT_MIN_2,
                                             BT_GAP_ADV_FAST_INT_MAX_2, NULL),
-                            ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+                            ad, ARRAY_SIZE(ad), NULL, 0);
   if (err) {
     LOG_ERR("Advertising restart failed (err %d)\n", err);
   } else {
@@ -1282,7 +1280,7 @@ int ble_init(void)
   err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN,
                                         BT_GAP_ADV_FAST_INT_MIN_2,
                                         BT_GAP_ADV_FAST_INT_MAX_2, NULL),
-                        ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+                        ad, ARRAY_SIZE(ad), NULL, 0);
   if (err) {
     LOG_ERR("Advertising failed to start (err %d)\n", err);
     return -1;
