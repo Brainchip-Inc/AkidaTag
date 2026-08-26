@@ -617,7 +617,9 @@ def main():
     parser.add_argument("--bin", required=True, dest="data", help="*_program_data.bin")
     parser.add_argument("--yaml", required=True, help="info.yaml for the model")
     parser.add_argument("--fs-name", default=None, help="default /model_meta/<prefix>")
-    parser.add_argument("--device-name", default=None, help="default: from prj.conf")
+    parser.add_argument(
+        "--device-name", default=None, help="default: from the last build's Kconfig"
+    )
     parser.add_argument(
         "--reset-cmd",
         default="nrfutil device reset",
