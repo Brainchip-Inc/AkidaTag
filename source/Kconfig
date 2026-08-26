@@ -169,6 +169,26 @@ config AKD_CORE_CLOCK_HZ
       divider (SPI untouched); other values reprogram the PLL. Lower clocks trade
       compute speed for power. Runtime-tunable via `akd_coreclk`.
 
+config AKD_WAKE_SETTLE_US
+    int "AKD1500 settle delay after de-asserting SLEEP (us)"
+    default 100
+    help
+      Busy-wait applied after waking the AKD1500 (the 0->1 transition of the
+      akd_wake_get() reference count, which de-asserts SLEEP) and before the
+      first SPI transaction. Only paid when the chip was actually asleep.
+
+      AN-002 (Sleep and Low-Power Operation) prescribes a settle here without
+      giving a figure: it says "If the first access after wake is unreliable,
+      add a short settle delay after de-asserting SLEEP before the first
+      transaction". No numeric spec is available to us, so this default is
+      reasoned rather than quoted. SLEEP is a pure clock gate and AN-002 states
+      the PLL and dividers stay active through sleep ("Fast wake"), so recovery
+      is a gate release rather than a PLL relock: the settle only has to cover a
+      few cycles of the slowest clock in the path. 100 us is over 2000 cycles of
+      the 25 MHz reference, and is negligible beside the flash operations it
+      precedes (a 14-sector erase measures ~286 ms). Raise it if a first access
+      after wake is ever seen to be unreliable.
+
 config SAMPLING_RATE
     int "Sampling Rate"
     default 16000
