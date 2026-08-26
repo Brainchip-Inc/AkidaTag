@@ -275,7 +275,11 @@ static bool parse_incoming_frame(const char *data, parsed_frame_t *frame) {
  *   Frame 1 (MF_START): Manufacturer
  *   Frame 2 (MF_MID):   Type
  *   Frame 3 (MF_MID):   Version
- *   Frame 4 (MF_LAST):  Firmware
+ *   Frame 4 (MF_MID):   Firmware
+ *   Frame 5 (MF_LAST):  Device serial, 16 lowercase hex chars
+ *
+ * The serial is the permanent hardware ID, so it is reported here over the
+ * encrypted, bonded connection instead of in the advertisement.
  *
  * Updates GATT characteristic with complete info.
  */
@@ -329,9 +333,24 @@ static void send_device_info_response(void) {
   }
   frame_index++;
 
-  /* Frame 4: MF-LAST - Firmware */
+  /* Frame 4: MF-MID - Firmware */
   data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_DEVICE_INFO,
                       device_firmware);
+  snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index,
+           data_len, data_part);
+  LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
+          data_len);
+  err = send_frame(frame);
+  if (err) {
+    LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+    return;
+  }
+  frame_index++;
+
+  /* Frame 5: MF-LAST - Device serial. Only the populated 64-bit half is sent;
+   * device_id.low is always zero padding. */
+  data_len = snprintf(data_part, sizeof(data_part), "%d:%016llx,\r",
+                      CMD_DEVICE_INFO, device_id.high);
   snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_LAST, frame_index,
            data_len, data_part);
   LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part,
