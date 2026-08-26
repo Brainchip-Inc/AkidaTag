@@ -1,22 +1,5 @@
 # --------------------------------------------------
-# Default: ALL code owned by internal core team
-# --------------------------------------------------
-* @BrainChip-Inc/project-spark-core
-
-# --------------------------------------------------
-# Firmware / application code (contractors contribute here)
-# Core team must still approve merges
-# --------------------------------------------------
-firmware/ @BrainChip-Inc/project-spark-core
-app/      @BrainChip-Inc/project-spark-core
-
-# --------------------------------------------------
-# Documentation (optional contractor visibility)
-# --------------------------------------------------
-docs/ @BrainChip-Inc/project-spark-core @BrainChip-Inc/external-project-spark
-
-# --------------------------------------------------
-# CI, security, and repo governance (internal only)
-# --------------------------------------------------
-.github/            @BrainChip-Inc/project-spark-core
-.github/workflows/  @BrainChip-Inc/project-spark-core
+# Default: ALL code owned by BrainChip-Inc.
+# @nikunj95 is required reviewer on all PRs
+# # --------------------------------------------------
+* @nikunj95

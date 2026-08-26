@@ -23,6 +23,77 @@ fresh empty `[Unreleased]` is added above it. Not to be confused with the
 roadmap in README.md, which lists work that has not landed at all.
 -->
 
+## [1.1.1+0] - 2026-08-25
+
+Patch release fixing the two defects that shipped in `v1.1.0+0`, both introduced
+by `628d2a4`: BLE model update never completed, and the DK build did not
+compile.
+
+### Fixed
+
+- **BLE model update:** the DATA-phase erase ran against a sleeping AKD1500. The
+  model flash sits behind the AKD1500 and is reachable only through its S2M
+  feedthrough while the chip is awake, and since `628d2a4` the KWS async loop
+  sleeps the chip between inferences, so asleep is its steady state. The erase's
+  status poll never saw WIP clear, burned its full 1000 ms budget on the first
+  sector and returned an error the phone app reported as a failed write to the
+  file-size characteristic. The flash helpers now take a wake reference and hold
+  the AKD1500 mutex across claim/wake/operate/release, so the BLE erase, the BLE
+  chunk write, the post-write readback and the `full_erase` shell command are all
+  covered. Measured on the Spark board with KWS in its normal async duty cycle,
+  the erase goes from "Erase failed" after 1014 ms to "Erase Successful" in
+  286 ms (#63)
+- **SPI flash:** an unreachable flash reported success having written nothing. WIP
+  is bit 0 of the status register, so the poll alone cannot separate "ready" from
+  "nobody answered": an all-zero read looks instantly ready and an all-ones read
+  looks busy forever. Erase and write are now gated on a part-agnostic JEDEC ID
+  probe, and an all-ones status is rejected as a non-response. All-zero remains
+  accepted by the poll itself, since an idle unprotected flash legitimately reads
+  0x00 (#63)
+- **BLE model update:** metadata for a model that was never written could be
+  committed. The DATA-phase CRC covers the bytes that arrived over the air, which
+  says nothing about whether the flash took them, and the `model_data_meta_t`
+  record was persisted before the readback ran. The record is now built in RAM
+  and validated against the flash first, persisting only on a match; a mismatch
+  NACKs the host with `ACK_CRC_FAIL` and leaves the previous record in place
+  (#63)
+- **Build:** the DK build did not compile. `main.cpp` calls `akd_sleep()` from ten
+  places that are not guarded by `CONFIG_SPARK_BOARD` but included `gpio/gpio.h`
+  only inside such a guard, so the DK build failed with ten "'akd_sleep' was not
+  declared in this scope" errors. `gpio.h` already guards its own Spark-only
+  contents and supplies no-op inlines for the rest, so the include now sits
+  outside the guard (#63)
+
+### Added
+
+- **HIL:** BLE model-update regression test (`model_update_hil_test.py`) covering
+  the sleeping-AKD1500 erase defect. It runs a full INFO+DATA transfer against a
+  board left in its normal async KWS duty cycle and asserts on the serial log,
+  pairing a per-sector erase-duration band with the outcome string so that
+  neither mask of an unreachable flash passes: the ~1014 ms poll timeout or the
+  ~2 ms all-zero status that reports "Erase Successful" having erased nothing. It
+  also asserts that readback validation precedes the metadata commit and that a
+  reset re-validates the model from flash. Verified to exit 1 on `v1.1.0+0` and
+  0 on the fixed build (#63)
+- **Config:** `CONFIG_AKD_WAKE_SETTLE_US` (default 100), the settle delay applied
+  after de-asserting SLEEP and before the first SPI transaction, paid only when
+  the chip was actually asleep (#63)
+
+### Changed
+
+- **AKD1500 wake:** the wake state is now reference-counted (`akd_wake_get()` /
+  `akd_wake_put()`, replacing `akd_sleep()`) rather than saved and restored
+  around an operation. The holders are spread across threads and none can tell
+  whether the chip is still needed by another: the audio thread wakes the chip to
+  enqueue an inference while `akd_async_thread` hands the reference back after
+  the matching fetch, and a BLE model update holds its own reference across a
+  flash access that can overlap an inference. A saved-and-restored boolean lets
+  one holder clock-gate the chip out from under another. `gpio.c` is now the only
+  writer of the SLEEP pin, and exposes `akd_wake_count()` plus monotonic release
+  and gate tallies for diagnostics (#63)
+- **Repository:** CODEOWNERS team and path rules replaced with a single default
+  owner (#62)
+
 ## [1.1.0+0] - 2026-08-25
 
 Second pre-release, building on the v1.0.0 alpha. The focus of this cycle is
