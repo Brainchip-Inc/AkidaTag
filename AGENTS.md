@@ -1,0 +1,40 @@
+# Project agent memory
+
+This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
+
+- Add durable project-specific notes here as they are discovered through real work.
+
+## Build
+
+Everything goes through `scripts/run.sh` in the `spark-ncs` Docker image; `docs/setup.md`
+is the reference. The application app is `demo_apps`, whose source directory is `source/`.
+
+## Both boards share one Zephyr board target
+
+The spark board and the nRF5340 DK are both built for `nrf5340dk/nrf5340/cpuapp`, fixed as
+`BOARD` in `docker/Dockerfile`. A `source/boards/<board>.conf` therefore cannot tell them
+apart, because Zephyr would merge the same file into both builds. What separates the two is
+the set of CMake arguments the `--dk` branch of `scripts/run.sh` selects: the devicetree
+overlay, the mcuboot overlay, `CONFIG_SPARK_BOARD`, and `EXTRA_CONF_FILE=boards/dk.conf`.
+Put any new board-specific Kconfig there rather than in a board-named conf file.
+
+## Formatting
+
+`.clang-format` only started being honoured at commit 362bc45, so most of the tree is still
+formatted against clang-format's LLVM defaults. `.github/workflows/lint.yml` gates only the
+files a pull request changes, so touching a stale file means reformatting the whole file in
+its own `style(...)` commit, the way e06eb31 did. Run
+`./scripts/clang_format.sh check <files>` inside the Docker image; clang-format is pinned to
+22.1.1 and is not installed on the host.
+
+## Do not edit
+
+`CHANGELOG.md` and `VERSION` are release-managed. Commit messages are checked by the hook
+from `scripts/install_git_hooks.sh`; see `CONTRIBUTING.md`.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.
