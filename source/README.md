@@ -1050,10 +1050,10 @@ Runtime control of the AKD1500 host SPI, internal clocks, and low-power state. B
 | `akd_pll <hz>` | Reprogram the PLL output directly (600–800 MHz, 12.5 MHz steps) |
 | `akd_sysdiv <n>` | Set the core divider off the current PLL clock |
 | `akd_clkref <0\|1>` | Clock source: `0` = PLL, `1` = 25 MHz reference (PLL off, lowest power) |
-| `akd_sleep <0\|1>` | AKD1500 hardware SLEEP: `0` = wake, `1` = sleep (clocks gated, model/state retained) |
+| `akd_sleep <0\|1>` | Take (`0`) or release (`1`) the shell's AKD1500 wake reference. SLEEP follows a reference count, so `1` gates the clocks only once every other holder (KWS inference, learning session, an in-progress flash access) has released too; the command reports the remaining count |
 | `akd_clkinfo` | Dump the AKD1500 clock/PLL state and the operating host clock |
 
-The clock/PLL/ref/sleep commands refuse while KWS is running (they would race the per-inference sleep) — stop it first with `app stop`. Additional bring-up diagnostics: `akd_probe`, `akd_rdtest`, `akida_rd`/`akida_wr`, `spi_rxdelay`, `akd_pll_on`.
+The clock/PLL/ref commands refuse while KWS is running (they would race the per-inference duty cycle) — stop it first with `app stop`. `akd_sleep` is exempt: it only takes or releases the shell's own wake reference and so cannot fight that duty cycle. Additional bring-up diagnostics: `akd_probe`, `akd_rdtest`, `akida_rd`/`akida_wr`, `spi_rxdelay`, `akd_pll_on`.
 
 **Configuration (Kconfig):**
 - **`CONFIG_AKD_SPI_FREQ_HZ`** (default `8000000`) — boot host SPI clock; runtime-tunable via `spi_freq`.
