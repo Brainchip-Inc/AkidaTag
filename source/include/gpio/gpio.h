@@ -36,16 +36,24 @@ unsigned int akd_wake_count(void);
 uint32_t akd_wake_release_count(void);
 uint32_t akd_wake_gate_count(void);
 #else
-static inline void akd_wake_get(void) {}
-static inline void akd_wake_put(void) {}
+static inline void akd_wake_get(void) {
+}
+static inline void akd_wake_put(void) {
+}
 /* The DK has no SLEEP pin, so the AKD1500 is permanently running. Report that as
  * one standing reference: a caller asking "is anything keeping the chip awake"
  * gets the truthful answer for this board. */
-static inline unsigned int akd_wake_count(void) { return 1; }
+static inline unsigned int akd_wake_count(void) {
+    return 1;
+}
 /* Nothing ever releases or gates on a board with no SLEEP pin, so both tallies
  * stay at zero and every difference a caller takes is zero. */
-static inline uint32_t akd_wake_release_count(void) { return 0; }
-static inline uint32_t akd_wake_gate_count(void) { return 0; }
+static inline uint32_t akd_wake_release_count(void) {
+    return 0;
+}
+static inline uint32_t akd_wake_gate_count(void) {
+    return 0;
+}
 #endif
 int akd_async_sem_take(k_timeout_t timeout);
 void akd_async_sem_give(void);
