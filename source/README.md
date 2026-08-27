@@ -890,7 +890,7 @@ cd spark
    on the chip until a full chip erase is performed.
 
 ### Application Security
-This project utilizes Secure Boot and Secure DFU (Device Firmware Update) via MCUboot. Security is enforced through an RSA-3072 digital signature.
+This project signs its firmware images and verifies them via MCUboot, both at boot and on DFU (Device Firmware Update). Security is enforced through an RSA-3072 digital signature. Note that secure boot, an immutable first-stage bootloader that verifies MCUboot itself, is not enabled; it is listed on the roadmap.
 The signing_key.pem file contains a Private Key used to cryptographically sign your firmware binaries. During the boot process and OTA updates, the bootloader (MCUboot) uses a corresponding Public Key (embedded in its own code) to verify that the firmware is authentic and has not been tampered with.
 
 To generate this file run

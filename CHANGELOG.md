@@ -364,7 +364,7 @@ has no GitHub release page.
 
 - KWS (Keyword Spotting) demo with Akida inference
 - Edge learning support for the KWS model
-- DFU (Device Firmware Update) with MCUboot and secure boot
+- DFU (Device Firmware Update) with MCUboot and RSA-signed application images
 - PDM microphone driver with DMIC audio acquisition
 - Model CRC integrity checks
 - SPI chip select handling via DeviceTree
