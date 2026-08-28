@@ -38,9 +38,10 @@ have landed on `main` but are not yet in a release.
 
 # Hardware-in-the-Loop (HIL) Testing
 
-This repository includes an automated **Hardware-in-the-Loop (HIL)
-testing pipeline** that validates firmware functionality on real
-hardware using CLI commands and log verification.
+This repository includes a **Hardware-in-the-Loop (HIL) testing
+pipeline** that validates firmware functionality on real hardware using
+CLI commands and log verification. It runs when someone asks for it, not
+on every pull request; see [CI Trigger](#ci-trigger) below.
 
 The tests are executed on a **self-hosted GitHub Actions runner**
 connected to the target hardware.
@@ -211,15 +212,20 @@ If any testcase fails or times out, the **CI pipeline fails**.
 
 # CI Trigger
 
-The Hardware-in-the-Loop (HIL) CI pipeline runs automatically when:
+The Hardware-in-the-Loop (HIL) pipeline does **not** run on its own. A
+run takes minutes of exclusive time on a board that has to be plugged in
+and free, so it is asked for once someone has read the change and decided
+it is worth spending the hardware on:
 
--   A **pull request is opened**
--   A **pull request is updated**
+-   Comment `/dk-test` on the pull request, on its own line.
+-   Or start it from the **Actions** tab, or with
+    `gh workflow run hardware.yml --ref <branch>`.
 
-against the **main branch**.
-
-This ensures firmware changes are validated on **real hardware before
-merging**.
+Only a maintainer of this repository can start a run, and only against a
+branch that lives in this repository rather than a fork. The comment is
+acknowledged with a 👀 reaction, and the outcome comes back as a check
+named `hardware` on the pull request, beside `format` and `lint`. That
+check is not required, so an unplugged board never blocks a merge.
 
 ------------------------------------------------------------------------
 
