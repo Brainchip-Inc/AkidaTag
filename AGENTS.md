@@ -46,8 +46,10 @@ device matches the built images.
 
 ## Do not edit
 
-`CHANGELOG.md` and `VERSION` are release-managed. Commit messages are checked by the hook
-from `scripts/install_git_hooks.sh`; see `CONTRIBUTING.md`.
+`CHANGELOG.md` and `VERSION` are release-managed. Commit subjects and pull request titles are
+checked in CI by `.github/ci-gates/check-subject.sh`, which is the authority on what is
+accepted; see `CONTRIBUTING.md`. The old local `commit-msg` hook is gone, so a stale copy left
+in `.git/hooks/` by the retired installer enforces rules that no longer apply.
 
 ## Maintaining this file
 
