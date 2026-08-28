@@ -14,7 +14,12 @@ env:
 
 jobs:
   build-and-release:
-    if: github.event.pull_request.merged == true
+    # Same-repo only. This job reconstructs the production signing key, pushes a
+    # tag and publishes a release, so it builds from a branch in this repository
+    # or not at all, whatever a fork manages to get merged into `release`.
+    if: >-
+      github.event.pull_request.merged == true
+      && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
 
     steps:
