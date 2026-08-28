@@ -31,9 +31,12 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
-  issues: write
   checks: write
+  # A comment on a pull request is an issue comment that GitHub authorises
+  # against the pull-requests scope, so reacting to one needs both written out.
+  # Neither grants any ability to change code.
+  issues: write
+  pull-requests: write
 
 env:
   # Model parameters live in a per-(app,model) config YAML. It is git-ignored, so
@@ -157,10 +160,14 @@ jobs:
     name: hardware
     needs: [authorize]
     # A manual dispatch is already authorised by whoever started it. A comment
-    # is authorised only once the job above has resolved a commit for it.
+    # is authorised only once the job above has cleared every guard. Requiring
+    # that job to have succeeded outright, rather than merely to have resolved a
+    # commit, keeps the board from running a test whose result has nowhere to be
+    # reported.
     if: >-
       !cancelled()
-      && (github.event_name == 'workflow_dispatch' || needs.authorize.outputs.sha != '')
+      && (github.event_name == 'workflow_dispatch'
+          || (needs.authorize.result == 'success' && needs.authorize.outputs.sha != ''))
     runs-on: self-hosted
     concurrency:
       # There is one board. Queue behind whatever is already on it rather than
