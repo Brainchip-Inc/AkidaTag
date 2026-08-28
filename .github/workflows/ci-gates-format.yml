@@ -1,0 +1,68 @@
+# Rejects a pull request whose title, or whose commits, do not follow
+# `type(scope): concise message`.
+#
+# The title check runs on every pull request. The commit check runs only on
+# pull requests into the default branch, because a release pull request carries
+# every commit already on the default branch, including history from before
+# these gates existed that nobody can go back and rewrite.
+#
+# actions/checkout is GitHub's own first-party action, not a third-party one.
+# It checks out the BASE branch, so the validator that runs is always the copy
+# on the protected branch and never a version edited inside the pull request.
+
+name: ci-gates
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  format:
+    name: format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the validator from the base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Check the pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: .github/ci-gates/check-subject.sh "$PR_TITLE"
+
+      - name: Check every commit subject
+        if: github.event.pull_request.base.ref == github.event.repository.default_branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Merge commits carry a generated subject nobody chose, so they are
+          # skipped. Everything the author actually wrote is checked.
+          mapfile -t subjects < <(
+            gh api "repos/$REPO/pulls/$PR_NUMBER/commits" --paginate \
+              --jq '.[] | select((.parents | length) < 2) | .commit.message | split("\n")[0]'
+          )
+
+          if [ "${#subjects[@]}" -eq 0 ]; then
+            echo "no non-merge commits to check"
+            exit 0
+          fi
+
+          failed=0
+          for subject in "${subjects[@]}"; do
+            .github/ci-gates/check-subject.sh "$subject" || failed=1
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo
+            echo "Rewrite the offending commits with 'git rebase -i' and force push the branch."
+            exit 1
+          fi
