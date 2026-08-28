@@ -1,0 +1,122 @@
+# Lints only the files a pull request actually changed.
+#
+# Each language is skipped unless it is listed in .github/ci-gates/ci-gates.conf
+# and the pull request touched a file of that type, so an untouched language
+# costs a couple of seconds and nothing more.
+#
+# Tools come from the runner image or from a pinned one-line install, never from
+# a third-party action.
+#
+# This repository's copy differs from the shared template in three places, each
+# carrying behaviour that the retired .github/workflows/lint.yml owned before
+# this job absorbed it. They are marked below.
+
+name: ci-gates-lint
+
+on:
+  pull_request:
+    # Main only, deliberately. A release pull request carries every commit on
+    # main since the last release, so linting it would re-check the whole delta,
+    # most of which predates any of these rules. Only the format gate is
+    # required on release.
+    branches: [ main ]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# GitHub-hosted and in its own group, deliberately. ci.yml is a
+# hardware-in-the-loop workflow bound to a single physical board and serialised
+# behind the `hil-hardware-test` group. A lint check must never queue behind a
+# board flash, nor occupy the board while it runs.
+concurrency:
+  group: lint-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: List the changed files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate \
+            --jq '.[] | select(.status != "removed") | .filename' > changed.txt
+          echo "changed files:"
+          sed 's/^/  /' changed.txt
+
+      - name: Read the language list
+        run: |
+          set -euo pipefail
+          conf=.github/ci-gates/ci-gates.conf
+          if [ -f "$conf" ]; then
+            # shellcheck source=/dev/null
+            . "$conf"
+          else
+            LINT_LANGUAGES="python javascript typescript c cpp bash html css"
+          fi
+          echo "LINT_LANGUAGES=$LINT_LANGUAGES" >> "$GITHUB_ENV"
+          echo "linting: $LINT_LANGUAGES"
+
+      # Each step below selects its own files and exits early when there are
+      # none, so an untouched language costs a couple of seconds and nothing more.
+
+      - name: Python
+        if: contains(env.LINT_LANGUAGES, 'python')
+        run: |
+          set -euo pipefail
+          grep -E '\.py$' changed.txt > files.txt || { echo "no python changed"; exit 0; }
+          pipx install ruff >/dev/null
+          xargs -r -a files.txt ruff check
+          xargs -r -a files.txt ruff format --check
+
+      - name: Shell
+        if: contains(env.LINT_LANGUAGES, 'bash')
+        run: |
+          set -euo pipefail
+          grep -E '\.(sh|bash)$' changed.txt > files.txt || { echo "no shell changed"; exit 0; }
+          xargs -r -a files.txt shellcheck
+
+      # Adapted for this repository. The shared template runs clang-format
+      # straight off the runner image; here the version is pinned and the file
+      # list is handed to scripts/clang_format.sh, which is the single owner of
+      # the extension and pruned-directory rules and knows that source/external
+      # and friends are never formatted.
+      - name: C and C++
+        if: contains(env.LINT_LANGUAGES, 'c') || contains(env.LINT_LANGUAGES, 'cpp')
+        env:
+          # Pinned on purpose. Different clang-format majors format differently,
+          # so an unpinned version becomes a mystery failure the day the runner
+          # image updates. This matches the version present in the repo's own
+          # toolchain image (docker/Dockerfile, built as `spark-ncs` by
+          # scripts/build_docker_image.sh), where clang-format arrives as a pip
+          # dependency of the NCS requirements. Bump this when that image moves.
+          CLANG_FORMAT_VERSION: "22.1.1"
+        run: |
+          set -euo pipefail
+          grep -E '\.(c|h|cc|cpp|cxx|hh|hpp|hxx)$' changed.txt > files.txt || { echo "no c or c++ changed"; exit 0; }
+          if [ ! -f .clang-format ]; then
+            echo "::error::.clang-format is missing, so there is no agreed style to check against"
+            exit 1
+          fi
+          python3 -m pip install --quiet "clang-format==${CLANG_FORMAT_VERSION}"
+          clang-format --version
+          xargs -r -a files.txt ./scripts/clang_format.sh check
+
+      - name: JavaScript, TypeScript, HTML and CSS
+        if: contains(env.LINT_LANGUAGES, 'javascript') || contains(env.LINT_LANGUAGES, 'typescript') || contains(env.LINT_LANGUAGES, 'html') || contains(env.LINT_LANGUAGES, 'css')
+        run: |
+          set -euo pipefail
+          grep -E '\.(js|jsx|mjs|cjs|ts|tsx|html|css|scss)$' changed.txt > files.txt || { echo "no web files changed"; exit 0; }
+          xargs -r -a files.txt npx --yes prettier@3 --check

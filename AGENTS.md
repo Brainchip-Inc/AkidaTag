@@ -21,10 +21,10 @@ Put any new board-specific Kconfig there rather than in a board-named conf file.
 ## Formatting
 
 `.clang-format` only started being honoured at commit 362bc45, so most of the tree is still
-formatted against clang-format's LLVM defaults. `.github/workflows/lint.yml` gates only the
-files a pull request changes, so touching a stale file means reformatting the whole file in
-its own `style(...)` commit, the way e06eb31 did. Run
-`./scripts/clang_format.sh check <files>` inside the Docker image; clang-format is pinned to
+formatted against clang-format's LLVM defaults. The `lint` job in
+`.github/workflows/ci-gates-lint.yml` gates only the files a pull request changes, so touching a
+stale file means reformatting the whole file in its own `style(...)` commit, the way e06eb31 did.
+Run `./scripts/clang_format.sh check <files>` inside the Docker image; clang-format is pinned to
 22.1.1 and is not installed on the host.
 
 ## Flashing from macOS
