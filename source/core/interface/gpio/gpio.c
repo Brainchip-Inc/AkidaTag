@@ -6,7 +6,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(gpio, LOG_LEVEL_DBG);
 
-static bool irq_enabled = false;
+static bool irq_enabled     =    false;
 
 /* Semaphore signaled by ISR when Akida asserts its done interrupt */
 K_SEM_DEFINE(akd_async_sem, 0, 1);
