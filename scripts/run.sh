@@ -382,8 +382,8 @@ DOCKER_RUN_BASE=(
     -e CCACHE_DIR="/home/demo/.ccache"
 )
 
-# Add interactive mode only if terminal exists
-if [ -t 1 ]; then
+# Add interactive mode only if a terminal exists and release mode is off
+if [ -t 1 ] && ! $DO_RELEASE; then
     DOCKER_RUN_BASE+=(-it)
 fi
 
