@@ -1563,7 +1563,7 @@ int main(void) {
     if (err_button) {
         LOG_ERR("User button init failed");
     }
-    spark_peripherals_power_enable();
+    akidatag_peripherals_power_enable();
     int ret = battery_init();
     if (ret) {
         printf("Battery init failed (err %d)\n", ret);
