@@ -26,7 +26,7 @@ Run the following script from Project Root To Build The Docker Image.
 ./scripts/build_docker_image.sh -h
 
 # build docker image for ncs v3.1.1
-./scripts/build_docker_image.sh --ncs v3.1.1 --python3.12
+./scripts/build_docker_image.sh --ncs v3.1.1 --python 3.12
 ```
 
 The build will take some time as it downloads ncs sdk.
@@ -294,11 +294,11 @@ Upon this successful test, to check if BLE FOTA is also successful, make a chang
 
 Run script from project root to install the above file
 
-`./script/install-nrfutil.sh`
+`./scripts/install_nrfutil.sh`
 
 Add nrfutil to path - environment variable for further steps 
 
-`source ./script/env.sh`
+`source ./scripts/env.sh`
 
 
 **Install nrfutil sdk-manager and device**
