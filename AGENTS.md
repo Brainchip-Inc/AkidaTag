@@ -11,7 +11,7 @@ is the reference. The application app is `demo_apps`, whose source directory is 
 
 ## Both boards share one Zephyr board target
 
-The AkidaTAG board and the nRF5340 DK are both built for `nrf5340dk/nrf5340/cpuapp`, fixed as
+The AkidaTag board and the nRF5340 DK are both built for `nrf5340dk/nrf5340/cpuapp`, fixed as
 `BOARD` in `docker/Dockerfile`. A `source/boards/<board>.conf` therefore cannot tell them
 apart, because Zephyr would merge the same file into both builds. What separates the two is
 the set of CMake arguments the `--dk` branch of `scripts/run.sh` selects: the devicetree
@@ -43,7 +43,7 @@ BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps   # add _dk for t
 ```
 
 `-jf` drives `JLinkExe` directly (NET core first, then APP) and needs no west on the host.
-Plain `-f` (`west flash`, nrfjprog) is not usable here: the AkidaTAG board's debug header reports
+Plain `-f` (`west flash`, nrfjprog) is not usable here: the AkidaTag board's debug header reports
 `VTref` around 1.4 V, so nrfjprog aborts with `Low voltage ... detected in target device` even
 though SWD reads and writes are reliable. A re-run that prints
 `Flash download: ... Skipped. Contents already match` for both banks is the cheapest proof the

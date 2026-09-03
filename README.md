@@ -1,6 +1,6 @@
-# AkidaTAG – Embedded Firmware
+# AkidaTag – Embedded Firmware
 
-This repository contains the **embedded firmware** for **AkidaTAG**, an ultra-low-power AIoT platform built on Nordic Semiconductor MCUs and BrainChip Akida™ AI acceleration.
+This repository contains the **embedded firmware** for **AkidaTag**, an ultra-low-power AIoT platform built on Nordic Semiconductor MCUs and BrainChip Akida™ AI acceleration.
 
 The firmware is responsible for:
 - Device bring-up and power management
@@ -256,7 +256,7 @@ pipeline** function correctly on the target hardware.
 .
 ├── source/            # Core firmware and app related code
    ├── apps/           # Application related code
-   ├── boards/         # Board overlays and config for the AkidaTAG board and nRF5340 DK
+   ├── boards/         # Board overlays and config for the AkidaTag board and nRF5340 DK
    ├── core/           # CMake scripts, SPI communication, BLE services, boot management, etc
    ├── include/        # Header files
    ├── sysbuild/       # Configuration settings

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Load local tools for AkidaTAG
+# Load local tools for AkidaTag
 
 # This script is sourced, so `return ... || exit ...` is how it stops in both
 # cases; shellcheck reads the exit as dead code.
@@ -111,7 +111,7 @@ case ":$PATH:" in
         ;;
 esac
 
-echo "AkidaTAG environment loaded."
+echo "AkidaTag environment loaded."
 echo "TOOLS_DIR loaded: $TOOLS_DIR"
 
 # ----------------------------------------------------------

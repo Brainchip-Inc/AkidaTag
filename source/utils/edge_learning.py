@@ -1,7 +1,7 @@
 import asyncio
 from bleak import BleakClient, BleakScanner
 
-DEVICE_NAME = "AkidaTAG"
+DEVICE_NAME = "AkidaTag"
 
 CMD_UUID = "f000bb10-0111-9000-c000-000000000000"   # command write char
 ACK_UUID = "f000bb12-0111-9000-c000-000000000000"   # ACK notify char

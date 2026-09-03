@@ -284,7 +284,7 @@ void led_set_state(led_state_t state) {
  * @brief Toggle the run status LED to indicate system is alive
  *
  * Pure LED toggle — no sleep. The caller is responsible for pacing
- * (e.g. a k_msleep in the worker loop). On AkidaTAG this is a no-op since
+ * (e.g. a k_msleep in the worker loop). On AkidaTag this is a no-op since
  * there is no dedicated run status LED.
  */
 void process_led(void) {

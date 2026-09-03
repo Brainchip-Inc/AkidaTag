@@ -138,7 +138,7 @@ jobs:
           echo "Patched prj.conf:"
           grep CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION source/prj.conf
 
-      - name: Build firmware (AkidaTAG board)
+      - name: Build firmware (AkidaTag board)
         run: |
           ./scripts/run.sh \
             -d "$DOCKER_IMAGE" \
@@ -178,7 +178,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "AkidaTAG Firmware ${{ steps.version.outputs.tag }}"
+          name: "AkidaTag Firmware ${{ steps.version.outputs.tag }}"
           prerelease: ${{ steps.release_type.outputs.prerelease }}
           body_path: release-body.md
           files: |

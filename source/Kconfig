@@ -105,9 +105,9 @@ config DK_BOARD
     help
       This enables the DK Board specific initialization.
 config AKIDATAG_BOARD
-    bool "Enable AkidaTAG board specific initialization"
+    bool "Enable AkidaTag board specific initialization"
     help
-      This enables the AkidaTAG board specific initialization.
+      This enables the AkidaTag board specific initialization.
 
 config SYS_CPU_128MHZ
     bool "Run the nRF5340 application core at 128 MHz"
@@ -118,7 +118,7 @@ config SYS_CPU_128MHZ
       dynamic power by roughly 2x. Only the CPU domain is affected; peripheral
       and system-timer clocks are unchanged. REQUIRED for SPIM4 at 32 MHz
       (the Zephyr driver clamps SPIM4 to 16 MHz unless HFCLK is DIV1) — so this
-      is now default y for the DK too, not just the AkidaTAG board.
+      is now default y for the DK too, not just the AkidaTag board.
 
 config CURRENT_DEFAULT_RATE_HZ
     int "Default INA190 current-sense sampler rate (Hz)"

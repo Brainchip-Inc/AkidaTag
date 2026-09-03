@@ -11,7 +11,7 @@
  * OS tick, k_busy_wait() and SPI baud rates are unchanged. Note the ~2x increase
  * in core dynamic power that comes with 128 MHz operation.
  *
- * This lives in the firmware layer so any app targeting the AkidaTAG board can reuse
+ * This lives in the firmware layer so any app targeting the AkidaTag board can reuse
  * it. It is gated by CONFIG_SYS_CPU_128MHZ (CMake only compiles it when enabled).
  */
 #include <zephyr/init.h>

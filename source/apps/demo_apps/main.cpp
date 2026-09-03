@@ -64,7 +64,7 @@ extern "C" {
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 #include "imu_h/imu.h"
 #endif
-/* gpio.h guards its own AkidaTAG-only contents and provides no-op inlines for the
+/* gpio.h guards its own AkidaTag-only contents and provides no-op inlines for the
  * rest (akd_wake_get / akd_wake_put / akd_wake_count), so it is included for
  * both boards. infer() and the AKD1500 clock and sleep shell commands below
  * take wake references unguarded. */
@@ -1463,7 +1463,7 @@ static void akd_async_thread(void* a, void* b, void* c) {
  *   - If an async thread is already running, it is safely stopped before
  * switching modes.
  *
- * - On non-AkidaTAG boards:
+ * - On non-AkidaTag boards:
  *   - Only Sync mode is supported.
  *   - Async mode is not allowed and is ignored.
  *
@@ -1533,7 +1533,7 @@ void akida_init(int mode) {
     }
 
 #else
-    /* Non-AkidaTAG boards: only sync supported */
+    /* Non-AkidaTag boards: only sync supported */
     kws_api_selection = DEFAULT_API_SELECTION_SYNC;
 
     LOG_INF("Akida Sync is initialized");

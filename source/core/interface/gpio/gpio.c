@@ -343,7 +343,7 @@ void akd_irq_disable(void) {
     }
 }
 /**
- * @brief Enable power for onboard sensors and peripherals on the AkidaTAG board.
+ * @brief Enable power for onboard sensors and peripherals on the AkidaTag board.
  *
  * This function enables the required power rails and peripherals in the
  * correct order with appropriate delays to ensure stable startup.

@@ -21,7 +21,7 @@ LOG_MODULE_REGISTER(akd_spi_flash, LOG_LEVEL_DBG);
 #define CONFIG_AKD_CORE_CLOCK_HZ 400000000
 #endif
 
-/* AKD1500 clock/reset controller (base 0xFCE0_1000). The AkidaTAG board straps the
+/* AKD1500 clock/reset controller (base 0xFCE0_1000). The AkidaTag board straps the
  * AKD1500 into Safe Mode (OP_MODE1=1), where the automatic switch of the SPI_S
  * core clock from the 25 MHz reference to the 400 MHz PLL is DISABLED. Until the
  * host performs the switch, the SPI_S core runs on the reference clock and the

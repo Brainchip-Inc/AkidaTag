@@ -113,7 +113,7 @@ int spi_flash_probe(akida::ZephyrSpiDriver spi_flash_driver_) {
      * all-zero (AN-002: "A sleeping AKD1500 returns 0x00000000 on register
      * reads"), and a floating MISO reads all-ones.
      *
-     * Deliberately part-agnostic rather than pinned to one ID: the AkidaTAG board
+     * Deliberately part-agnostic rather than pinned to one ID: the AkidaTag board
      * carries an MT25QU128ABA behind the AKD1500 and the DK an W25Q128, and this
      * has to pass on both. */
     if (id == 0x000000U || id == FLASH_JEDEC_ID_MASK) {
