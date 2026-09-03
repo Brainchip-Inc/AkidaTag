@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Load local tools for Project Spark
 
+# This script is sourced, so `return ... || exit ...` is how it stops in both
+# cases; shellcheck reads the exit as dead code.
+# shellcheck disable=SC2317
+
 # set -e
 
 print_help() {
@@ -120,10 +124,11 @@ if [ "$BUILD" = true ]; then
 
     # source zephyr env
     echo "==> Entering Zephyr dir: $NCS_ZEPHYR_DIR"
-    cd "$NCS_ZEPHYR_DIR"
+    cd "$NCS_ZEPHYR_DIR" || return 1
     echo "==> Sourcing Zephyr env: $ZEPHYR_ENV_SCRIPT"
+    # shellcheck source=/dev/null
     source "$ZEPHYR_ENV_SCRIPT"
-    cd "$PROJECT_ROOT"
+    cd "$PROJECT_ROOT" || return 1
     echo "==> Returned to: $PROJECT_ROOT"
 
     echo "==> Setting environment for build"
