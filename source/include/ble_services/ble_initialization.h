@@ -1,5 +1,10 @@
 #ifndef BLE_INITIALIZATION_H
 #define BLE_INITIALIZATION_H
+
+/* Its own block, and first: lbs.h below uses bool without including
+ * stdbool.h, and clang-format sorts lbs.h ahead of it within a block. */
+#include <stdbool.h>
+
 #include <bluetooth/services/lbs.h>
 #include <bluetooth/services/nus.h>
 #include <dk_buttons_and_leds.h>
