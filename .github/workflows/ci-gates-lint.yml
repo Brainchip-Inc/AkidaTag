@@ -74,10 +74,13 @@ jobs:
 
       - name: Python
         if: contains(env.LINT_LANGUAGES, 'python')
+        env:
+          # Pinned for the same reason as CLANG_FORMAT_VERSION below.
+          RUFF_VERSION: "0.11.11"
         run: |
           set -euo pipefail
           grep -E '\.py$' changed.txt > files.txt || { echo "no python changed"; exit 0; }
-          pipx install ruff >/dev/null
+          pipx install "ruff==${RUFF_VERSION}" >/dev/null
           xargs -r -a files.txt ruff check
           xargs -r -a files.txt ruff format --check
 
