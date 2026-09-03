@@ -96,10 +96,10 @@ jobs:
 
           | File | Purpose |
           |------|---------|
-          | \`spark-$VERSION.signed.hex\` | Signed firmware for JLink flashing |
-          | \`spark-$VERSION.signed.bin\` | Signed firmware for OTA/DFU via BLE |
-          | \`spark-$VERSION-merged.hex\` | MCUboot + app for initial programming |
-          | \`spark-$VERSION-dfu.zip\` | DFU package for nRF Connect mobile app |
+          | \`akidatag-$VERSION.signed.hex\` | Signed firmware for JLink flashing |
+          | \`akidatag-$VERSION.signed.bin\` | Signed firmware for OTA/DFU via BLE |
+          | \`akidatag-$VERSION-merged.hex\` | MCUboot + app for initial programming |
+          | \`akidatag-$VERSION-dfu.zip\` | DFU package for nRF Connect mobile app |
           | \`SHA256SUMS.txt\` | Integrity checksums |
           EOF
 
@@ -138,7 +138,7 @@ jobs:
           echo "Patched prj.conf:"
           grep CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION source/prj.conf
 
-      - name: Build firmware (Spark board)
+      - name: Build firmware (AkidaTAG board)
         run: |
           ./scripts/run.sh \
             -d "$DOCKER_IMAGE" \
@@ -152,13 +152,13 @@ jobs:
           mkdir -p release-artifacts
 
           cp build_docker/demo_apps/source/zephyr/zephyr.signed.hex \
-             "release-artifacts/spark-${VERSION}.signed.hex"
+             "release-artifacts/akidatag-${VERSION}.signed.hex"
           cp build_docker/demo_apps/source/zephyr/zephyr.signed.bin \
-             "release-artifacts/spark-${VERSION}.signed.bin"
+             "release-artifacts/akidatag-${VERSION}.signed.bin"
           cp build_docker/demo_apps/merged.hex \
-             "release-artifacts/spark-${VERSION}-merged.hex"
+             "release-artifacts/akidatag-${VERSION}-merged.hex"
           cp build_docker/demo_apps/dfu_application.zip \
-             "release-artifacts/spark-${VERSION}-dfu.zip"
+             "release-artifacts/akidatag-${VERSION}-dfu.zip"
 
       - name: Generate SHA256 checksums
         run: |
@@ -178,7 +178,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "Spark Firmware ${{ steps.version.outputs.tag }}"
+          name: "AkidaTAG Firmware ${{ steps.version.outputs.tag }}"
           prerelease: ${{ steps.release_type.outputs.prerelease }}
           body_path: release-body.md
           files: |
