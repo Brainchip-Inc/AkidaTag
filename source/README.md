@@ -654,8 +654,8 @@ Both the **application overlay** and the **MCUboot overlay** are selected during
 - **MCUboot overlay:** `sysbuild/mcuboot.overlay`
 
 ### Spark Board
-- **Application overlay:** `boards/nrf5340_cpuapp_spark.overlay`
-- **MCUboot overlay:** `sysbuild/mcuboot_spark.overlay`
+- **Application overlay:** `boards/nrf5340_cpuapp_akidatag.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot_akidatag.overlay`
 
 ### Model Generation and BLE Transfer
 

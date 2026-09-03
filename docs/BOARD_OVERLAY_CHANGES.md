@@ -5,7 +5,7 @@
 This document describes the pin configuration for two board overlays used with the **nRF5340 SoC**:
 
 - **DK Board** (`nrf5340dk_nrf5340_cpuapp.overlay`) — Development kit overlay used for initial firmware bring-up and testing
-- **Spark Board** (`nrf5340_cpuapp_spark.overlay`) — Custom production board overlay with updated pin assignments and additional GPIO definitions
+- **Spark Board** (`nrf5340_cpuapp_akidatag.overlay`) — Custom production board overlay with updated pin assignments and additional GPIO definitions
 
 ---
 

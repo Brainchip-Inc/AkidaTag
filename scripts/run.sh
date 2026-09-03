@@ -512,8 +512,8 @@ if [[ -n "$APP" ]]; then
         CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/source/sysbuild/mcuboot_dk.overlay")
       else
         CMAKE_EXTRA_ARGS+=(-DCONFIG_AKIDATAG_BOARD=y)
-        CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_spark.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/source/sysbuild/mcuboot_spark.overlay")
+        CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_akidatag.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/source/sysbuild/mcuboot_akidatag.overlay")
       fi
       ;;
   esac
