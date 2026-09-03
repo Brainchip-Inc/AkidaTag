@@ -256,7 +256,7 @@ pipeline** function correctly on the target hardware.
 .
 ├── source/            # Core firmware and app related code
    ├── apps/           # Application related code
-   ├── boards/         # Configuration files for nRF5340 DK
+   ├── boards/         # Board overlays and config for the AkidaTAG board and nRF5340 DK
    ├── core/           # CMake scripts, SPI communication, BLE services, boot management, etc
    ├── include/        # Header files
    ├── sysbuild/       # Configuration settings
