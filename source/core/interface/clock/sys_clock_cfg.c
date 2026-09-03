@@ -26,17 +26,16 @@ LOG_MODULE_REGISTER(sys_clock_cfg, LOG_LEVEL_INF);
 extern uint32_t SystemCoreClock;
 extern void SystemCoreClockUpdate(void);
 
-static int sys_cpu_128mhz_init(void)
-{
-	/* Select HCLK = 128 MHz (HFCLKCTRL.HCLK = DIV1); reset default is DIV2 = 64 MHz. */
-	nrf_clock_hfclk_div_set(NRF_CLOCK, NRF_CLOCK_HFCLK_DIV_1);
+static int sys_cpu_128mhz_init(void) {
+    /* Select HCLK = 128 MHz (HFCLKCTRL.HCLK = DIV1); reset default is DIV2 = 64 MHz. */
+    nrf_clock_hfclk_div_set(NRF_CLOCK, NRF_CLOCK_HFCLK_DIV_1);
 
-	/* Refresh the CMSIS SystemCoreClock global so any cycle-based delays use the
-	 * correct frequency. */
-	SystemCoreClockUpdate();
+    /* Refresh the CMSIS SystemCoreClock global so any cycle-based delays use the
+     * correct frequency. */
+    SystemCoreClockUpdate();
 
-	LOG_INF("App core HCLK = DIV1 (128 MHz); SystemCoreClock = %u Hz", SystemCoreClock);
-	return 0;
+    LOG_INF("App core HCLK = DIV1 (128 MHz); SystemCoreClock = %u Hz", SystemCoreClock);
+    return 0;
 }
 
 SYS_INIT(sys_cpu_128mhz_init, PRE_KERNEL_1, 0);
