@@ -64,7 +64,7 @@ extern "C" {
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 #include "imu_h/imu.h"
 #endif
-/* gpio.h guards its own spark-only contents and provides no-op inlines for the
+/* gpio.h guards its own AkidaTAG-only contents and provides no-op inlines for the
  * rest (akd_wake_get / akd_wake_put / akd_wake_count), so it is included for
  * both boards. infer() and the AKD1500 clock and sleep shell commands below
  * take wake references unguarded. */

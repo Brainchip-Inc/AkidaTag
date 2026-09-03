@@ -1,4 +1,4 @@
-"""Hardware regression test for the BLE model-update flash path (spark board).
+"""Hardware regression test for the BLE model-update flash path (AkidaTAG board).
 
 Guards the defect where the DATA-phase erase ran against an AKD1500 that was in
 its normal low-power state, so the flash behind the chip's S2M feedthrough was
@@ -80,7 +80,7 @@ transfer outright.
 
 SCOPE
 -----
-Spark board only. On the DK CONFIG_AKIDATAG_BOARD is n, akd_wake_get()/akd_wake_put()
+AkidaTAG board only. On the DK CONFIG_AKIDATAG_BOARD is n, akd_wake_get()/akd_wake_put()
 compile to no-ops and there is no low-power state to get wrong, so running this
 against a DK proves nothing about the defect.
 

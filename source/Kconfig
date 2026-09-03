@@ -118,7 +118,7 @@ config SYS_CPU_128MHZ
       dynamic power by roughly 2x. Only the CPU domain is affected; peripheral
       and system-timer clocks are unchanged. REQUIRED for SPIM4 at 32 MHz
       (the Zephyr driver clamps SPIM4 to 16 MHz unless HFCLK is DIV1) — so this
-      is now default y for the DK too, not just the spark board.
+      is now default y for the DK too, not just the AkidaTAG board.
 
 config CURRENT_DEFAULT_RATE_HZ
     int "Default INA190 current-sense sampler rate (Hz)"

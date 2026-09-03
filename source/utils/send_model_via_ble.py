@@ -38,7 +38,7 @@ def read_device_name(path):
 def get_device_name():
     """Return the name the flashed firmware actually advertises.
 
-    prj.conf carries the spark board's name and boards/dk.conf overrides it for
+    prj.conf carries the AkidaTAG board's name and boards/dk.conf overrides it for
     the DK build, so prj.conf on its own reports the wrong name whenever the
     board on the bench is a DK. The generated Kconfig output of the most recent
     build is the authority instead, because it is the merged configuration the

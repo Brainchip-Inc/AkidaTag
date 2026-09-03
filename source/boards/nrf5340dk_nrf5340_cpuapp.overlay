@@ -247,8 +247,8 @@ dmic_dev: &pdm0 {
     pinctrl-1 = <&spi4_sleep>;
     pinctrl-names = "default", "sleep";
     /* rx-delay=2 (MISO sample delay). The DK's long jumper wires add round-trip
-     * delay vs the spark PCB, so the sampling eye sits later: HW-swept, 16 & 32
-     * MHz read cleanly (0/500) at rxd 2-3 (spark used 1). NOTE: 4 & 8 MHz show
+     * delay vs the AkidaTAG PCB, so the sampling eye sits later: HW-swept, 16 & 32
+     * MHz read cleanly (0/500) at rxd 2-3 (AkidaTAG used 1). NOTE: 4 & 8 MHz show
      * intermittent first-byte errors on the DK jumper wiring that no rxd fixes —
      * a DK signal-integrity artifact, not a chip limit. Use 16/32 MHz on the DK. */
     rx-delay = <2>;

@@ -66,7 +66,7 @@ typedef enum {
  * part, no board ID), so it is selected: boot default CONFIG_INA190_VARIANT,
  * overridable at runtime. */
 typedef enum {
-    INA190_A1 = 0, /* gain 25 V/V (current Spark board) */
+    INA190_A1 = 0, /* gain 25 V/V (current AkidaTAG board) */
     INA190_A3 = 1, /* gain 100 V/V */
 } ina190_variant_t;
 
