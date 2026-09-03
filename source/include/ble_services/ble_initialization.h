@@ -115,7 +115,7 @@ void send_pcm_wave(const int16_t* samples, uint16_t n_samples);
  * decimation-fallback frame instead.
  */
 bool wave_fallback_active(void);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /**
  * @brief Send current value to phone for real-time monitoring
  * @param data Pointer to string containing current reading

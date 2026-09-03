@@ -15,7 +15,7 @@ The spark board and the nRF5340 DK are both built for `nrf5340dk/nrf5340/cpuapp`
 `BOARD` in `docker/Dockerfile`. A `source/boards/<board>.conf` therefore cannot tell them
 apart, because Zephyr would merge the same file into both builds. What separates the two is
 the set of CMake arguments the `--dk` branch of `scripts/run.sh` selects: the devicetree
-overlay, the mcuboot overlay, `CONFIG_SPARK_BOARD`, and `EXTRA_CONF_FILE=boards/dk.conf`.
+overlay, the mcuboot overlay, `CONFIG_AKIDATAG_BOARD`, and `EXTRA_CONF_FILE=boards/dk.conf`.
 Put any new board-specific Kconfig there rather than in a board-named conf file.
 
 ## Formatting

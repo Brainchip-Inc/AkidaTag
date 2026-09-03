@@ -74,7 +74,7 @@ if(CONFIG_CAMERA_ENABLE_THREAD)
         core/interface/camera/spi_camera.c
     )
 endif()
-if(CONFIG_SPARK_BOARD)
+if(CONFIG_AKIDATAG_BOARD)
     target_sources(app PRIVATE
         core/interface/gpio/gpio.c
         core/interface/button/user_button.c

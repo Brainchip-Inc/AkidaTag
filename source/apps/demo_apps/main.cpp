@@ -69,7 +69,7 @@ extern "C" {
  * both boards. infer() and the AKD1500 clock and sleep shell commands below
  * take wake references unguarded. */
 #include "gpio/gpio.h"
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 #include "battery/battery.h"
 #include "ble_services/battery_service.h"
 #include "button/user_button.h"
@@ -101,7 +101,7 @@ LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 
 void cli_worker_proc_thread(void* a, void* b, void* c);
 
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /* Thread for processing Akida async results */
 #define AKD_ASYNC_STACK_SIZE 2048
 #define AKD_ASYNC_PRIORITY 5
@@ -371,7 +371,7 @@ static void akd_async_wake_give(void) {
     k_mutex_unlock(&akd_wake_owner_lock);
 }
 
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /* Hand back the reference of any enqueued inference that has outlived its own
  * AKD_ASYNC_FETCH_TIMEOUT_MS, and only those.
  *
@@ -747,7 +747,7 @@ struct k_thread imu_thread;
 k_tid_t imu_tid;
 #endif
 
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /* CURRENT thread variables*/
 K_THREAD_STACK_DEFINE(current_stack, CURRENT_STACK_SIZE);
 struct k_thread current_thread;
@@ -796,7 +796,7 @@ static bool kws_model_present = false;
  */
 static void switch_mode(int mode);
 
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /**
  * @brief Restore LED to its default runtime state based on BLE connectivity.
  *        Used to clear transient states like LEARN_SPEAK_NOW.
@@ -1048,7 +1048,7 @@ static void switch_learning_delayed(struct k_work* work) {
         learn_state.augmentations_per_utterance = 2 * g_num_neurons_per_class;
         learn_state.waiting_since_ts = time_ms();
         learn_rng_state = (uint32_t)k_uptime_get();
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
         led_set_state(LED_STATE_LEARN_SPEAK_NOW);
 #endif
 
@@ -1291,7 +1291,7 @@ static int start_led_ind(void) {
     k_thread_start(led_tid);
     return 0;
 }
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 static int start_current_proc(void) {
     current_tid =
         k_thread_create(&current_thread, current_stack, CURRENT_STACK_SIZE, current_data_thread,
@@ -1371,7 +1371,7 @@ static int update_model_params(model_meta_t kws_meta) {
      * the inference path and `kws_mode_get` stay consistent. A manual
      * `kws_mode sync|async` still overrides this at runtime. */
     uint32_t requested_mode = kws_meta.inference_mode; /* 0=sync, 1=async */
-#ifndef CONFIG_SPARK_BOARD
+#ifndef CONFIG_AKIDATAG_BOARD
     if (requested_mode == DEFAULT_API_SELECTION_ASYNC) {
         LOG_WRN(
             "info.yaml requests ASYNC but this board only supports SYNC; "
@@ -1390,7 +1390,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time);
 
 volatile uint32_t inference_start_dma_ts = 0;
 volatile uint64_t inference_start_ts = 0;
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /* Returns true when the system is actively learning (called from ISR context)
  */
 
@@ -1452,7 +1452,7 @@ static void akd_async_thread(void* a, void* b, void* c) {
  * and board configuration.
  *
  * Behavior:
- * - On CONFIG_SPARK_BOARD:
+ * - On CONFIG_AKIDATAG_BOARD:
  *   - Supports both Sync and Async modes.
  *   - If Async mode is selected:
  *       - Enables GPIO interrupt (used for async triggering).
@@ -1463,7 +1463,7 @@ static void akd_async_thread(void* a, void* b, void* c) {
  *   - If an async thread is already running, it is safely stopped before
  * switching modes.
  *
- * - On non-SPARK boards:
+ * - On non-AkidaTAG boards:
  *   - Only Sync mode is supported.
  *   - Async mode is not allowed and is ignored.
  *
@@ -1473,7 +1473,7 @@ static void akd_async_thread(void* a, void* b, void* c) {
  *   - DEFAULT_API_SELECTION_SYNC  : Enables sync mode (blocking execution)
  */
 void akida_init(int mode) {
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 
     /* Stop existing async thread if running.
      *
@@ -1533,7 +1533,7 @@ void akida_init(int mode) {
     }
 
 #else
-    /* Non-SPARK boards: only sync supported */
+    /* Non-AkidaTAG boards: only sync supported */
     kws_api_selection = DEFAULT_API_SELECTION_SYNC;
 
     LOG_INF("Akida Sync is initialized");
@@ -1553,7 +1553,7 @@ int main(void) {
     watchdog_init(&wdt, &wdt_channel_id);
 #endif
 
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
     int err_gpio = gpio_init();
     if (err_gpio) {
         printf("GPIO init failed (err %d)\n", err_gpio);
@@ -1607,7 +1607,7 @@ int main(void) {
     }
 
     init_boot_count();
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
     /* Battery thread runs fuel_gauge_init in the background — boot continues. */
     battery_start();
     start_current_proc();
@@ -1619,7 +1619,7 @@ int main(void) {
                         K_FOREVER  // START SUSPENDED
         );
     k_thread_start(cli_worker_tid);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
     akida_init(DEFAULT_API_SELECTION_ASYNC);
 #else
     akida_init(DEFAULT_API_SELECTION_SYNC);
@@ -1745,7 +1745,7 @@ void cli_worker_proc_thread(void* a, void* b, void* c) {
             wdt_feed(wdt, wdt_channel_id);
         }
 #endif
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
         if (is_ble_connected() && app_start_flag) {
             battery_service_send(CMD_STREAM_STS);
         }
@@ -1871,7 +1871,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
                 "dma=%uus",
                 confidence * 100.0f, triggered_score * 100.0f, chiming_counters[triggered_class],
                 inf_time, dma_time);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
             current_sense_reading_t pwr;
             current_sense_get_latest(&pwr);
             LOG_INF("  power: 1V8=%.1fmW 0V8=%.1fmW", (double)pwr.power_mw[CURRENT_RAIL_1V8],
@@ -1884,7 +1884,7 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
             send_event(CMD_DEPLOY_START, kws_new_tags[triggered_class], confidence * 100.0f);
         }
         last_trigger_time_ms = time_ms();
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
         led_set_state(LED_STATE_KEYWORD_TRIGGERED);
         k_sem_give(&led_sem);
 #endif
@@ -2288,7 +2288,7 @@ static void complete_structured_learning(void) {
     akida_learn_mode(false);
 
     switch_mode(STATE_LEARN_SELECT);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
     restore_default_led_state();
 #endif
 }
@@ -2311,7 +2311,7 @@ static void learn_utterance_complete(void) {
         LOG_INF("learn: say keyword %d/%d", learn_state.current_utterance + 1,
                 LEARN_NUM_UTTERANCES);
         k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
         led_set_state(LED_STATE_LEARN_SPEAK_NOW);
 #endif
     }
@@ -2396,7 +2396,7 @@ static void learn_process_handler(struct k_work* work) {
         LOG_INF("learn: say keyword %d/%d", learn_state.current_utterance + 1,
                 LEARN_NUM_UTTERANCES);
         k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
         led_set_state(LED_STATE_LEARN_SPEAK_NOW);
 #endif
         return;
@@ -2528,7 +2528,7 @@ static void learning_on_spectrogram(int spectrogram_index) {
             learn_state.last_callback_ts = time_ms();
             LOG_INF("learn: speech detected, capturing utterance %d/%d...",
                     learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
             restore_default_led_state();
 #endif
             /* Fall through to capture the first batch of frames */
@@ -2596,7 +2596,7 @@ static void learning_on_user_input(int input_type) {
             }
 
             akida_learn_mode(false);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
             restore_default_led_state();
 #endif
 
@@ -2625,7 +2625,7 @@ static void learning_on_user_input(int input_type) {
             mesh_mem = (k_cycle_get_32() - cur_ts);
             duration_us = k_cyc_to_us_floor64(mesh_mem);
             LOG_INF("mesh_mem = %" PRIu64 " us", duration_us);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
             restore_default_led_state();
 #endif
 
@@ -2730,7 +2730,7 @@ extern "C" int infer(int app_index_l) {
     int class_id = -1;
     uint32_t inp_shap[] = {infer_meta.input_shape[0], infer_meta.input_shape[1],
                            infer_meta.input_shape[2]};
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
     if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
         akd_irq_disable();
     }
@@ -2781,7 +2781,7 @@ extern "C" int infer(int app_index_l) {
     LOG_PRINTK("[bench]  app-e2e    : %u ms   result: class=%d word=%s\n", app_ms, class_id, word);
 
     LOG_PRINTK("APP Inference Completed\n");
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
     if (kws_api_selection == DEFAULT_API_SELECTION_ASYNC) {
         akd_irq_enable();
     }
@@ -2891,7 +2891,7 @@ static int cmd_akida_wr(const struct shell* sh, size_t argc, char** argv) {
     return 0;
 }
 
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /* akd_sleep <0|1>: take (0) or release (1) the SHELL'S OWN wake reference.
  *
  * It does not drive the SLEEP pin. The pin follows a reference count (see
@@ -3224,7 +3224,7 @@ static int cmd_full_erase(const struct shell* shell, size_t argc, char** argv) {
 }
 
 /* shell cli function to invoke erase function */
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /* `app stop` deep idle: PLL off (25 MHz ref) + sleep. */
 static void kws_enter_low_power(void) {
     akd_wake_get();
@@ -3249,11 +3249,11 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
             LOG_INF("verbose_on = %d", verbose_on);
         } else if (!strcmp(argv[1], "stop")) {
             kws_app_stop();
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
             kws_enter_low_power();
 #endif
         } else if (!strcmp(argv[1], "start")) {
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
             kws_exit_low_power();
 #endif
             kws_app_start();
@@ -3458,7 +3458,7 @@ static int cmd_kws_mode(const struct shell* shell, size_t argc, char** argv) {
     }
 
     if (strcmp(argv[1], "async") == 0) {
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
         akida_init(DEFAULT_API_SELECTION_ASYNC);
         shell_print(shell, "Switched to ASYNC mode");
 #else
@@ -3546,7 +3546,7 @@ SHELL_CMD_REGISTER(akd_rdtest, NULL, "Read device-ID N times at current clock: a
 SHELL_CMD_REGISTER(akd_probe, NULL, "Probe reads: akd_probe <hz> <rxdelay 0-7> [count]",
                    cmd_akd_probe);
 SHELL_CMD_REGISTER(spi_rxdelay, NULL, "Set SPIM4 rx-delay: spi_rxdelay <0-7>", cmd_spi_rxdelay);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 SHELL_CMD_REGISTER(akd_sleep, NULL,
                    "AKD1500 wake reference: akd_sleep <0|1> (0 = take, 1 = "
                    "release; the chip sleeps only when no holder is left)",

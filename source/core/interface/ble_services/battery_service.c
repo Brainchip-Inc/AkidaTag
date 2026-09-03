@@ -15,7 +15,7 @@ LOG_MODULE_REGISTER(battery_service, CONFIG_LOG_DEFAULT_LEVEL);
  * @brief Send battery status to mobile app via BLE
  *
  * Formats battery SOC and charger status into a data frame and sends
- * it over BLE. If CONFIG_SPARK_BOARD is defined, it uses real values
+ * it over BLE. If CONFIG_AKIDATAG_BOARD is defined, it uses real values
  * from fuel gauge; otherwise uses dummy values (90% SOC, not charging).
  *
  * The function checks `changed` flag: if no change since last send
@@ -26,7 +26,7 @@ LOG_MODULE_REGISTER(battery_service, CONFIG_LOG_DEFAULT_LEVEL);
  */
 void battery_service_send(command_type_t cmd) {
     char data_part[DATA_PART_SIZE];
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
     battery_status_t sts;
     bool changed;
     battery_get_status(&sts, &changed);

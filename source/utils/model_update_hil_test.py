@@ -80,7 +80,7 @@ transfer outright.
 
 SCOPE
 -----
-Spark board only. On the DK CONFIG_SPARK_BOARD is n, akd_wake_get()/akd_wake_put()
+Spark board only. On the DK CONFIG_AKIDATAG_BOARD is n, akd_wake_get()/akd_wake_put()
 compile to no-ops and there is no low-power state to get wrong, so running this
 against a DK proves nothing about the defect.
 
