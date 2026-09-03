@@ -44,7 +44,7 @@ This flashes both mcuboot and akida_spi_flash_app application together
 
 
 ### Model Loading
-To load a model, execute the Python script from another terminal in the repository root folder (spark).
+To load a model, execute the Python script from another terminal in the repository root folder (AkidaTAG).
 
 Upon execution, the script scans for available Bluetooth devices and displays a list of detected BLE servers.
 Select the index corresponding to `Nordic_LBS` to pair with the device. Once pairing is complete, the client will begin transferring the model to the target device. 

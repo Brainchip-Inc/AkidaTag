@@ -5,7 +5,7 @@
 This document describes the pin configuration for two board overlays used with the **nRF5340 SoC**:
 
 - **DK Board** (`nrf5340dk_nrf5340_cpuapp.overlay`) — Development kit overlay used for initial firmware bring-up and testing
-- **Spark Board** (`nrf5340_cpuapp_akidatag.overlay`) — Custom production board overlay with updated pin assignments and additional GPIO definitions
+- **AkidaTAG Board** (`nrf5340_cpuapp_akidatag.overlay`) — Custom production board overlay with updated pin assignments and additional GPIO definitions
 
 ---
 
@@ -13,7 +13,7 @@ This document describes the pin configuration for two board overlays used with t
 
 ### SPI2 — AKIDA + AKIDA External Flash
 
-| Signal | DK Board (P) | Spark Board (P) | Change |
+| Signal | DK Board (P) | AkidaTAG Board (P) | Change |
 |--------|-------------|----------------|--------|
 | SCK | P0.08 | P0.08 | No change |
 | MOSI | P0.09 | P0.09 | No change |
@@ -21,13 +21,13 @@ This document describes the pin configuration for two board overlays used with t
 | CS0 (AKIDA) | P0.11 | P0.11 | No change |
 | CS1 (AKIDA Flash) | P0.12 | P0.12 | No change |
 
-> **Note (DK):** P1.08 was used for MISO on the DK board because P0.10 is not available on the DK hardware. The Spark custom board routes MISO correctly to P0.10.
+> **Note (DK):** P1.08 was used for MISO on the DK board because P0.10 is not available on the DK hardware. The AkidaTAG custom board routes MISO correctly to P0.10.
 
 ---
 
 ### SPI3 — Camera / NRF External Flash
 
-This is a **major structural change**. On the DK board, the camera and NRF flash are on separate SPI buses (SPI3 and SPI4). On the Spark board, both are consolidated onto **SPI3**.
+This is a **major structural change**. On the DK board, the camera and NRF flash are on separate SPI buses (SPI3 and SPI4). On the AkidaTAG board, both are consolidated onto **SPI3**.
 
 #### DK Board — SPI3 (Camera only)
 
@@ -47,7 +47,7 @@ This is a **major structural change**. On the DK board, the camera and NRF flash
 | MISO | P0.14 | |
 | CS0 (ext_flash) | P0.18 | |
 
-#### Spark Board — SPI3 (Camera + NRF Flash combined)
+#### AkidaTAG Board — SPI3 (Camera + NRF Flash combined)
 
 | Signal | Pin | Notes |
 |--------|-----|-------|
@@ -57,13 +57,13 @@ This is a **major structural change**. On the DK board, the camera and NRF flash
 | CS0 (Camera) | P0.25 | |
 | CS1 (ext_flash) | P0.18 | Flash moved from SPI4 to SPI3 index 1 |
 
-> **Breaking Change:** `spi4` is completely removed on the Spark board. The `ext_flash` node moves from `spi4` (reg=0) to `spi3` (reg=1).
+> **Breaking Change:** `spi4` is completely removed on the AkidaTAG board. The `ext_flash` node moves from `spi4` (reg=0) to `spi3` (reg=1).
 
 ---
 
 ### SPI Bus Summary
 
-| Bus | DK Board | Spark Board |
+| Bus | DK Board | AkidaTAG Board |
 |-----|----------|-------------|
 | SPI2 | AKIDA + AKIDA Flash | AKIDA + AKIDA Flash (same) |
 | SPI3 | Camera only (alt pins) | Camera + NRF Flash (production pins) |
@@ -75,7 +75,7 @@ This is a **major structural change**. On the DK board, the camera and NRF flash
 
 No changes between boards.
 
-| Signal | DK Board | Spark Board |
+| Signal | DK Board | AkidaTAG Board |
 |--------|----------|-------------|
 | TX | P0.29 | P0.29 |
 | RX | P1.04 | P1.04 |
@@ -87,7 +87,7 @@ No changes between boards.
 
 No changes between boards.
 
-| Signal | DK Board | Spark Board |
+| Signal | DK Board | AkidaTAG Board |
 |--------|----------|-------------|
 | PDM CLK | P1.09 | P1.09 |
 | PDM DIN | P1.10 | P1.10 |
@@ -99,7 +99,7 @@ No changes between boards.
 
 No changes between boards.
 
-| Signal | DK Board | Spark Board |
+| Signal | DK Board | AkidaTAG Board |
 |--------|----------|-------------|
 | SCL | P1.03 | P1.03 |
 | SDA | P1.02 | P1.02 |
@@ -110,11 +110,11 @@ No changes between boards.
 
 ## 5. GPIO — Control & Enable Pins
 
-The DK board defines only basic LED GPIOs. The Spark board adds full power-enable and control GPIO definitions.
+The DK board defines only basic LED GPIOs. The AkidaTAG board adds full power-enable and control GPIO definitions.
 
-### Power Enable Pins (New on Spark board)
+### Power Enable Pins (New on AkidaTAG board)
 
-| Alias | Node | Pin | Direction | Active | DK Board | Spark Board |
+| Alias | Node | Pin | Direction | Active | DK Board | AkidaTAG Board |
 |-------|------|-----|-----------|--------|----------|-------------|
 | `akd-enb` | `akd_enb` | P0.19 | Output | HIGH |  Not defined |  Added |
 | `acc-enb` | `acc_enb` | P0.20 | Output | HIGH |  Not defined |  Added |
@@ -126,7 +126,7 @@ The DK board defines only basic LED GPIOs. The Spark board adds full power-enabl
 
 ### Control GPIOs
 
-| Alias | Node | Pin | DK Board | Spark Board |
+| Alias | Node | Pin | DK Board | AkidaTAG Board |
 |-------|------|-----|----------|-------------|
 | `akdsleep` | `akdsleep` | P0.23 |  Defined |  Defined |
 | `akdreset` | `akdreset` | P1.13 |  Defined |  Defined |
@@ -140,7 +140,7 @@ The DK board defines only basic LED GPIOs. The Spark board adds full power-enabl
 
 ## 6. User Button
 
-| Property | DK Board | Spark Board |
+| Property | DK Board | AkidaTAG Board |
 |----------|----------|-------------|
 | Node | Not defined | `user_btn` |
 | Pin | — | P0.26 |
@@ -154,7 +154,7 @@ The DK board defines only basic LED GPIOs. The Spark board adds full power-enabl
 
 ## 7. DFU Button
 
-| Property | DK Board | Spark Board |
+| Property | DK Board | AkidaTAG Board |
 |----------|----------|-------------|
 | Node | Not defined | `dfu_button` |
 | Pin | — | P1.01 |
@@ -165,7 +165,7 @@ The DK board defines only basic LED GPIOs. The Spark board adds full power-enabl
 
 ## 8. LED Configuration
 
-| LED | Pin | DK Board | Spark Board |
+| LED | Pin | DK Board | AkidaTAG Board |
 |-----|-----|----------|-------------|
 | `led_red` | P0.28 |  Defined |  Defined |
 | `led_green` | P0.27 |  Defined |  Defined |
@@ -176,7 +176,7 @@ Both boards define the same LED pins. Default DK board LEDs (`led0`–`led3`) ar
 
 ## 9. External Flash Node Location Change
 
-| Property | DK Board | Spark Board |
+| Property | DK Board | AkidaTAG Board |
 |----------|----------|-------------|
 | Node label | `ext_flash` | `ext_flash` |
 | Parent bus | `spi4` | `spi3` |
@@ -213,7 +213,7 @@ Both overlays disable the following DK-specific peripherals to avoid conflicts:
 
 ## 12. Full Pin Map Reference
 
-| Function | Signal | DK Board Pin | Spark Board Pin | Changed |
+| Function | Signal | DK Board Pin | AkidaTAG Board Pin | Changed |
 |----------|--------|-------------|----------------|---------|
 | SPI2 SCK | AKIDA/Flash CLK | P0.08 | P0.08 | — |
 | SPI2 MOSI | AKIDA/Flash MOSI | P0.09 | P0.09 | — |

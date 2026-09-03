@@ -1,6 +1,6 @@
-# Project Spark – Embedded Firmware
+# AkidaTAG – Embedded Firmware
 
-This repository contains the **embedded firmware** for **Project Spark**, an ultra-low-power AIoT platform built on Nordic Semiconductor MCUs and BrainChip Akida™ AI acceleration.
+This repository contains the **embedded firmware** for **AkidaTAG**, an ultra-low-power AIoT platform built on Nordic Semiconductor MCUs and BrainChip Akida™ AI acceleration.
 
 The firmware is responsible for:
 - Device bring-up and power management
