@@ -651,7 +651,7 @@ Both the **application overlay** and the **MCUboot overlay** are selected during
 
 ### DK Board
 - **Application overlay:** `boards/nrf5340dk_nrf5340_cpuapp.overlay`
-- **MCUboot overlay:** `sysbuild/mcuboot.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot_dk.overlay`
 
 ### AkidaTAG Board
 - **Application overlay:** `boards/nrf5340_cpuapp_akidatag.overlay`
