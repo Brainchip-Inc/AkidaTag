@@ -14,7 +14,7 @@ VERSION="1.0.0"
 # -----------------------------
 print_help() {
     cat <<EOF
-Usage: ./scripts/env.sh [OPTIONS]
+Usage: ./scripts/build_docker_image.sh [OPTIONS]
 
 Options:
   --ncs         NCS_VERSION        default: $NCS_VERSION
