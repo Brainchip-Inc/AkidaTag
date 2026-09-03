@@ -27,6 +27,11 @@ stale file means reformatting the whole file in its own `style(...)` commit, the
 Run `./scripts/clang_format.sh check <files>` inside the Docker image; clang-format is pinned to
 22.1.1 and is not installed on the host.
 
+The same job gates python with `ruff check` plus `ruff format --check` and shell with
+`shellcheck`, and the tree is stale against both too, so touching a `.py` or a `.sh` file
+drags the same whole-file cleanup. `ruff` lives in the Docker image; `shellcheck` is in
+neither the image nor the host, so run it from `koalaman/shellcheck:stable`.
+
 ## Flashing from macOS
 
 `docs/setup.md` assumes Linux. Docker Desktop on macOS has no USB passthrough, so the `-d`
