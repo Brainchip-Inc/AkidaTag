@@ -21,7 +21,7 @@ Options:
   --generate_info    | (str)  | Generate app-specific info.yaml from the given config YAML + the converted shapes sidecar
   --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (separate step; cannot be combined with --fetch_model)
   -d, --docker       | (str)  | Run build/flash using Docker
-                     |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
+                     |        | AND provide docker image name   (default:akidatag-ncs:v3.1.1-py3.12)
   -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
   -m, --minicom      | (str)  | Run minicom inside Docker (default: ttyUSB0).
                      |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
@@ -147,7 +147,7 @@ DK_OVERLAY=false
 DO_INFER_TEST=false
 
 DOCKER=false
-DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
+DOCKER_IMAGE="akidatag-ncs:v3.1.1-py3.12"
 DO_SHELL=false
 
 DO_MINICOM=false
@@ -374,8 +374,8 @@ fi
 
 DOCKER_RUN_BASE=(
     docker run --rm --privileged
-    -v "$PWD":/spark
-    -w /spark
+    -v "$PWD":/akidatag
+    -w /akidatag
     -e USER_NAME=demo
     -e USER_UID="$HOST_UID"
     -e USER_GID="$HOST_GID"
@@ -509,11 +509,11 @@ if [[ -n "$APP" ]]; then
         CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=n)
         CMAKE_EXTRA_ARGS+=("-DEXTRA_CONF_FILE=boards/dk.conf")
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/spark/source/sysbuild/mcuboot_dk.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/source/sysbuild/mcuboot_dk.overlay")
       else
         CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=y)
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_spark.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/spark/source/sysbuild/mcuboot_spark.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/source/sysbuild/mcuboot_spark.overlay")
       fi
       ;;
   esac

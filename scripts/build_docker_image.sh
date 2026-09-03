@@ -6,7 +6,7 @@
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NCS_VERSION="v3.1.1"
 PYTHON_VERSION="3.12"
-IMAGE="spark-ncs"
+IMAGE="akidatag-ncs"
 VERSION="1.0.0"
 
 # -----------------------------
@@ -47,7 +47,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --image)
             if [[ -z "$2" || "$2" == -* ]]; then
-                echo "Error: --image requires an argument (e.g. spark)" >&2
+                echo "Error: --image requires an argument (e.g. akidatag-ncs)" >&2
                 exit 1
             fi
             IMAGE="$2"

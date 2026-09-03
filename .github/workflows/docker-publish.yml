@@ -42,4 +42,4 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
-          tags: ghcr.io/brainchip-inc/spark-ncs:${{ inputs.ncs_version }}-py${{ inputs.python_version }}
+          tags: ghcr.io/brainchip-inc/akidatag-ncs:${{ inputs.ncs_version }}-py${{ inputs.python_version }}

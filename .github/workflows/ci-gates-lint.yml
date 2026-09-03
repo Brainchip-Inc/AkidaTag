@@ -99,7 +99,7 @@ jobs:
           # Pinned on purpose. Different clang-format majors format differently,
           # so an unpinned version becomes a mystery failure the day the runner
           # image updates. This matches the version present in the repo's own
-          # toolchain image (docker/Dockerfile, built as `spark-ncs` by
+          # toolchain image (docker/Dockerfile, built as `akidatag-ncs` by
           # scripts/build_docker_image.sh), where clang-format arrives as a pip
           # dependency of the NCS requirements. Bump this when that image moves.
           CLANG_FORMAT_VERSION: "22.1.1"

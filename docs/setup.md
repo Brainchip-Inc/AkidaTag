@@ -35,9 +35,9 @@ Based on the scripts you ran, following images should be build and seen. See bel
 
 `docker images`
 
-| IMAGE                   | ID           | DISK USAGE |
-|-------------------------|--------------|------------|
-| spark-ncs:v3.1.1-py3.12 | 7d2f06ee0930 | 17.6GB     |
+| IMAGE                      | ID           | DISK USAGE |
+|----------------------------|--------------|------------|
+| akidatag-ncs:v3.1.1-py3.12 | 7d2f06ee0930 | 17.6GB     |
 
 ---
 
