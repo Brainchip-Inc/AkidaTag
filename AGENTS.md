@@ -24,8 +24,9 @@ Put any new board-specific Kconfig there rather than in a board-named conf file.
 formatted against clang-format's LLVM defaults. The `lint` job in
 `.github/workflows/ci-gates-lint.yml` gates only the files a pull request changes, so touching a
 stale file means reformatting the whole file in its own `style(...)` commit, the way e06eb31 did.
-Run `./scripts/clang_format.sh check <files>` inside the Docker image; clang-format is pinned to
-22.1.1 and is not installed on the host.
+Run `./scripts/clang_format.sh check <files>` inside the Docker image; clang-format is not
+installed on the host. The version CI uses is `CLANG_FORMAT_VERSION` in that workflow, and it
+has to track the image, which picks clang-format up as an unpinned NCS pip dependency.
 
 The same job gates python with `ruff check` plus `ruff format --check` and shell with
 `shellcheck`, and the tree is stale against both too, so touching a `.py` or a `.sh` file
