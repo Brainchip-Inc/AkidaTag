@@ -31,7 +31,18 @@ EOF
 # Defaults
 # ----------------------------------------------------------
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Only the sourcing shell knows which file is being sourced: bash reports it in
+# BASH_SOURCE and zsh in the %x prompt escape, which eval hides from bash.
+if [ -n "${ZSH_VERSION:-}" ]; then
+    eval 'ENV_SCRIPT=${(%):-%x}'
+elif [ -n "${BASH_SOURCE[0]:-}" ]; then
+    ENV_SCRIPT="${BASH_SOURCE[0]}"
+else
+    echo "Error: cannot locate scripts/env.sh in this shell; source it from bash or zsh" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+PROJECT_ROOT="$(cd "$(dirname "$ENV_SCRIPT")/.." && pwd)"
 TOOLS_DIR="$PROJECT_ROOT/tools"
 
 BOARD="nrf5340dk/nrf5340/cpuapp"
