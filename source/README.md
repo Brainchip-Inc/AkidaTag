@@ -617,7 +617,7 @@ A CLI command is provided to display the unique Device ID of the SoC via the UAR
 - Copy the updated application image `zephyr.signed.bin` to your mobile device.
 - Install and open the nRF Connect Mobile app.
 	- Ensure Bluetooth is enabled on your phone.
-- Connect to the device NORDIC_LBS.
+- Connect to the device by the name it advertises (`CONFIG_BT_DEVICE_NAME`).
 - Tap the DFU icon in the top-right corner of the app.
 - Browse and select the zephyr.signed.bin file.
 - Perform a `Test and Confirm` upload of the application image.
