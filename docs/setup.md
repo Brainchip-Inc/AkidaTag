@@ -187,7 +187,7 @@ This app will confirm there model can be stored in Akida External Flash and then
 After flashing, run the following through the host where BLE is present and model is present. 
 
 ```
-./scripts/run.sh -d --app akida_spi_flash_app --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin
+python samples/akida_spi_flash_app/utils/send_model_via_ble.py --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin
 ```
 
 Upon running the script, it will scan for BLE devices.Write the index number for the Nordic Device from the list of devices it prints. 

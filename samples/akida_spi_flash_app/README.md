@@ -50,11 +50,11 @@ Upon execution, the script scans for available Bluetooth devices and displays a 
 Select the index corresponding to `Nordic_LBS` to pair with the device. Once pairing is complete, the client will begin transferring the model to the target device. 
 
 For loading `KWS` model:
-`python sample/akida_spi_flash_app/utils/send_model_via_ble.py --bin sample/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin`
+`python samples/akida_spi_flash_app/utils/send_model_via_ble.py --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin`
 
 
 For loading `MNIST` model:
-`python send_model_via_ble.py --bin sample/akida_spi_flash_app/external/model_files/mnist/mnist_program_data.bin`
+`python send_model_via_ble.py --bin samples/akida_spi_flash_app/external/model_files/mnist/mnist_program_data.bin`
 
 
 ### Console Logging Information
