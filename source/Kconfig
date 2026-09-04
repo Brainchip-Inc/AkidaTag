@@ -6,7 +6,7 @@
 
 source "Kconfig.zephyr"
 
-menu "Akida Tag Application"
+menu "AkidaTag Application"
 
 config SRAM_BUFFER_SIZE
     int "Allocate SRAM for BLE or raw audio sample capture"

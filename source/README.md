@@ -1,5 +1,5 @@
-# Project Akida Tag Source
-This is Akida Tag complete application source code. This project includes all the necessary configurations to build the MCUboot bootloader, the network core image, and the application core image. The MCUboot secondary image slot is located in external serial flash.
+# Project AkidaTag Source
+This is AkidaTag complete application source code. This project includes all the necessary configurations to build the MCUboot bootloader, the network core image, and the application core image. The MCUboot secondary image slot is located in external serial flash.
 
 The application uses the LittleFS file system and also keeps track of the number of system restarts the device has undergone.
 

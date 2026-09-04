@@ -1577,7 +1577,7 @@ int main(void) {
     uart_init();
     start_led_ind();
     led_set_state(LED_STATE_NORMAL_APP);
-    LOG_INF("Akida TAG Application");
+    LOG_INF("AkidaTag Application");
     confirm_image_if_needed();
     init_setting_sub_system();
     kws_config_init();
