@@ -44,17 +44,17 @@ This flashes both mcuboot and akida_spi_flash_app application together
 
 
 ### Model Loading
-To load a model, execute the Python script from another terminal in the repository root folder (spark).
+To load a model, execute the Python script from another terminal in the repository root folder (AkidaTag).
 
 Upon execution, the script scans for available Bluetooth devices and displays a list of detected BLE servers.
 Select the index corresponding to `Nordic_LBS` to pair with the device. Once pairing is complete, the client will begin transferring the model to the target device. 
 
 For loading `KWS` model:
-`python sample/akida_spi_flash_app/utils/send_model_via_ble.py --bin sample/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin`
+`python samples/akida_spi_flash_app/utils/send_model_via_ble.py --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin`
 
 
 For loading `MNIST` model:
-`python send_model_via_ble.py --bin sample/akida_spi_flash_app/external/model_files/mnist/mnist_program_data.bin`
+`python send_model_via_ble.py --bin samples/akida_spi_flash_app/external/model_files/mnist/mnist_program_data.bin`
 
 
 ### Console Logging Information

@@ -1,4 +1,4 @@
-"""Hardware regression test for the BLE model-update flash path (spark board).
+"""Hardware regression test for the BLE model-update flash path (AkidaTag board).
 
 Guards the defect where the DATA-phase erase ran against an AKD1500 that was in
 its normal low-power state, so the flash behind the chip's S2M feedthrough was
@@ -80,7 +80,7 @@ transfer outright.
 
 SCOPE
 -----
-Spark board only. On the DK CONFIG_SPARK_BOARD is n, akd_wake_get()/akd_wake_put()
+AkidaTag board only. On the DK CONFIG_AKIDATAG_BOARD is n, akd_wake_get()/akd_wake_put()
 compile to no-ops and there is no low-power state to get wrong, so running this
 against a DK proves nothing about the defect.
 
@@ -170,7 +170,6 @@ FAILURE_MARKERS = (
 # Emitted by cmd_akd_sleep once per shell wake reference taken or released.
 WAKE_TAKEN_MARKER = "shell wake reference taken"
 WAKE_RELEASED_MARKER = "shell wake reference released"
-
 
 
 class SerialMonitor:
@@ -384,7 +383,9 @@ def check_erase_duration(lines, data_size):
     * "Erase Successful" and in band    -> the sectors were really erased.
     """
     print("::group::CHECK - erase duration")
-    times = [int(m.group(1)) for line in lines for m in [ERASE_TIME_RE.search(line)] if m]
+    times = [
+        int(m.group(1)) for line in lines for m in [ERASE_TIME_RE.search(line)] if m
+    ]
     if not times:
         print("FAILED: no 'erase time=' line seen; the DATA phase never erased")
         print("::endgroup::")
@@ -419,9 +420,7 @@ def check_erase_duration(lines, data_size):
         )
         ok = False
     elif erase_ms > hi:
-        print(
-            f"FAILED: {erase_ms} ms is far too slow for {sectors} sectors."
-        )
+        print(f"FAILED: {erase_ms} ms is far too slow for {sectors} sectors.")
         ok = False
 
     # Diagnostic, not a verdict on its own: the status poll gives up after
@@ -462,8 +461,8 @@ def check_wake_contention(lines):
     print("::group::CHECK - wake contention during the erase")
     ok = True
 
-    taken = sum(1 for l in lines if WAKE_TAKEN_MARKER in l)
-    released = sum(1 for l in lines if WAKE_RELEASED_MARKER in l)
+    taken = sum(1 for line in lines if WAKE_TAKEN_MARKER in line)
+    released = sum(1 for line in lines if WAKE_RELEASED_MARKER in line)
     print(f"shell wake reference: {taken} taken, {released} released over the run")
     if taken == 0 or released == 0:
         print(
@@ -526,8 +525,10 @@ def check_markers(lines):
 
     # The readback validation has to land BEFORE the metadata is committed,
     # otherwise a model that never reached flash still leaves a record behind.
-    saved = next((i for i, l in enumerate(lines) if "Data meta saved" in l), None)
-    validated = next((i for i, l in enumerate(lines) if "First 4 bytes OK" in l), None)
+    saved = next((i for i, line in enumerate(lines) if "Data meta saved" in line), None)
+    validated = next(
+        (i for i, line in enumerate(lines) if "First 4 bytes OK" in line), None
+    )
     if saved is None:
         print("  MISSING: Data meta saved")
         ok = False
@@ -538,7 +539,7 @@ def check_markers(lines):
         print("  ordering OK: readback validated before the data meta was saved")
 
     for marker in FAILURE_MARKERS:
-        hits = [l for l in lines if marker.lower() in l.lower()]
+        hits = [line for line in lines if marker.lower() in line.lower()]
         if hits:
             print(f"  FAILED, saw {marker!r}: {hits[0]}")
             ok = False
@@ -589,7 +590,9 @@ def run_transfer(monitor, meta, args, fs_name, device_name, churn):
         if churn:
             with WakeChurn(monitor):
                 asyncio.run(
-                    send_model(monitor, meta, args.info, args.data, fs_name, device_name)
+                    send_model(
+                        monitor, meta, args.info, args.data, fs_name, device_name
+                    )
                 )
         else:
             asyncio.run(
@@ -660,9 +663,7 @@ def main():
             monitor, meta, args, fs_name, device_name, churn=False
         )
         results["phase 1 transfer completed"] = quiet_ok
-        results["phase 1 erase duration"] = check_erase_duration(
-            quiet_lines, data_size
-        )
+        results["phase 1 erase duration"] = check_erase_duration(quiet_lines, data_size)
         results["phase 1 transfer markers"] = check_markers(quiet_lines)
 
         if not quiet_ok:

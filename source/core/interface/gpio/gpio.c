@@ -343,7 +343,7 @@ void akd_irq_disable(void) {
     }
 }
 /**
- * @brief Enable power for onboard sensors and peripherals on the Spark board.
+ * @brief Enable power for onboard sensors and peripherals on the AkidaTag board.
  *
  * This function enables the required power rails and peripherals in the
  * correct order with appropriate delays to ensure stable startup.
@@ -355,7 +355,7 @@ void akd_irq_disable(void) {
  * 4. Enable PDM microphone
  * 5. Enable camera module
  */
-void spark_peripherals_power_enable(void) {
+void akidatag_peripherals_power_enable(void) {
     gpio_pin_set_dt(&enable_akd_0V, GPIO_ENABLE);
     gpio_pin_set_dt(&enable_akd, GPIO_ENABLE);
     gpio_pin_set_dt(&enable_acc, GPIO_ENABLE);

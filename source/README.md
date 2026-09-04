@@ -1,5 +1,5 @@
-# Project Akida Tag Source
-This is Akida Tag complete application source code. This project includes all the necessary configurations to build the MCUboot bootloader, the network core image, and the application core image. The MCUboot secondary image slot is located in external serial flash.
+# Project AkidaTag Source
+This is AkidaTag complete application source code. This project includes all the necessary configurations to build the MCUboot bootloader, the network core image, and the application core image. The MCUboot secondary image slot is located in external serial flash.
 
 The application uses the LittleFS file system and also keeps track of the number of system restarts the device has undergone.
 
@@ -71,8 +71,8 @@ This allows the LED logic to operate in two modes:
 | FLASH_WRITE / FLASH FULL_ERASE    | Green ON, Red ON |
 | UPDATE_SUCCESS  | Both LEDs blink 3 times, then restore runtime state based on BLE status |
 | UPDATE_FAILED   | Green OFF, Red ON |
-| EL_SPEAK_PROMPT (Spark board)  | Red LED solid ON during each "speak now" prompt window in the edge-learning 5-utterance flow; cleared as soon as speech is detected or the flow is aborted/completed. Green LED behavior preserved. |
-| INFERENCE_TRIGGER (Spark board)| Red LED flashes ~500 ms on every keyword prediction in inference mode for at-a-glance trigger confirmation. |
+| EL_SPEAK_PROMPT (AkidaTag board)  | Red LED solid ON during each "speak now" prompt window in the edge-learning 5-utterance flow; cleared as soon as speech is detected or the flow is aborted/completed. Green LED behavior preserved. |
+| INFERENCE_TRIGGER (AkidaTag board)| Red LED flashes ~500 ms on every keyword prediction in inference mode for at-a-glance trigger confirmation. |
 
 ### PDM MIC 
 This application uses the DMIC (PDM microphone) interface with PDM_CLK on P1.9 and PDM_DIN on P1.10.
@@ -582,7 +582,7 @@ MOBILE APP                    BLE STACK                    FIRMWARE
      │    [CMD=3] Select Next Class │                             │
      │                              │                             │
 
-### Build the demo_apps Sample with spark board overlay file.
+### Build the demo_apps Sample with AkidaTag board overlay file.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
 
@@ -617,7 +617,7 @@ A CLI command is provided to display the unique Device ID of the SoC via the UAR
 - Copy the updated application image `zephyr.signed.bin` to your mobile device.
 - Install and open the nRF Connect Mobile app.
 	- Ensure Bluetooth is enabled on your phone.
-- Connect to the device NORDIC_LBS.
+- Connect to the device by the name it advertises (`CONFIG_BT_DEVICE_NAME`).
 - Tap the DFU icon in the top-right corner of the app.
 - Browse and select the zephyr.signed.bin file.
 - Perform a `Test and Confirm` upload of the application image.
@@ -645,24 +645,24 @@ Added DeviceTree configuration for the external flash (ext_flash) to enable acce
 
 ## Board-specific Overlay Configuration
 
-Different pin configurations are used for the DK board and the Spark board due to pin availability and hardware connections.
+Different pin configurations are used for the DK board and the AkidaTag board due to pin availability and hardware connections.
 
 Both the **application overlay** and the **MCUboot overlay** are selected during the build using the `--dk` flag.
 
 ### DK Board
 - **Application overlay:** `boards/nrf5340dk_nrf5340_cpuapp.overlay`
-- **MCUboot overlay:** `sysbuild/mcuboot.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot_dk.overlay`
 
-### Spark Board
-- **Application overlay:** `boards/nrf5340_cpuapp_spark.overlay`
-- **MCUboot overlay:** `sysbuild/mcuboot_spark.overlay`
+### AkidaTag Board
+- **Application overlay:** `boards/nrf5340_cpuapp_akidatag.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot_akidatag.overlay`
 
 ### Model Generation and BLE Transfer
 
 ### Python Setup
 
 ```bash
-cd spark
+cd AkidaTag
 pip install -r scripts/requirements.txt
 ```
 
@@ -747,7 +747,7 @@ back to `models.conf`) and converts it into the binary + C++ artifacts. It does 
 `info.yaml` — that is Step 2.
 
 ```bash
-cd spark
+cd AkidaTag
 
 # Regular KWS model → bins/cpp in model_files/kws (akida SDK lives in Docker, so use -d via run.sh)
 python source/utils/fetch_model.py --config .env/demo_apps/kws.yaml
@@ -774,7 +774,7 @@ Step 1 ran in Docker. The profile is taken from the config's `app:` key (only `d
 today); it decides which fields `info.yaml` carries.
 
 ```bash
-cd spark
+cd AkidaTag
 
 # Regular KWS model
 python source/utils/generate_info.py --config .env/demo_apps/kws.yaml
@@ -795,7 +795,7 @@ model's normalisation scalar — use the value your model was trained with.
 ### Step 3 – Transfer via BLE
 
 ```bash
-cd spark
+cd AkidaTag
 
 # Recommended: pass info.yaml as the metadata source
 python source/utils/send_model_via_ble.py \
@@ -821,7 +821,7 @@ python source/utils/send_model_via_ble.py \
 `run.sh` wraps the steps above: `--fetch_model <config>` runs Step 1 (fetch + convert) and `--generate_info <config>` runs Step 2 (write `info.yaml`). Each takes its per-(app, model) YAML config (`.env/<app>/<model>.yaml`) as its argument. They are separate flags but can be combined (name the config on each); `--send_ble` (Step 3) is separate. Add `-d` to run the fetch step inside Docker (where the Akida SDK lives).
 
 ```bash
-cd spark
+cd AkidaTag
 
 # Step 1: Fetch + convert only (bins/cpp, no info.yaml)
 ./scripts/run.sh -d --fetch_model .env/demo_apps/kws.yaml
@@ -856,7 +856,7 @@ Output files are written to the directory given by the config's `output_dir`.
 Run the steps as independent commands — useful when the Akida SDK is only available inside Docker but BLE hardware is on the host. `--generate_info` needs no SDK, so it can run on the host too.
 
 ```bash
-cd spark
+cd AkidaTag
 
 # Step 1+2: Fetch, convert, and generate info.yaml for an edge-learning model inside Docker
 ./scripts/run.sh -d \
@@ -998,8 +998,8 @@ The `app` command provides runtime configuration for the KWS (Keyword Spotting) 
 | `app speech <ms>` | 1300 | Set speech active timeout (resets to idle if RMS stays low) |
 | `app metrics <0\|1>` | 0 | Enable/disable detailed metrics output (confidence %, timing) |
 | `app show` | — | Print all current parameters with usage |
-| `app start` | — | Resume the KWS pipeline (starts the DMIC, re-arms the learning gate). On spark, restores the AKD1500 operating clocks (PLL on, 400 MHz core, 8 MHz host) |
-| `app stop` | — | Halt the KWS pipeline (stops the DMIC, clears the learning gate). On spark, drops the AKD1500 to its lowest-power state (PLL off, asleep) |
+| `app start` | — | Resume the KWS pipeline (starts the DMIC, re-arms the learning gate). On AkidaTag, restores the AKD1500 operating clocks (PLL on, 400 MHz core, 8 MHz host) |
+| `app stop` | — | Halt the KWS pipeline (stops the DMIC, clears the learning gate). On AkidaTag, drops the AKD1500 to its lowest-power state (PLL off, asleep) |
 | `app reset` | — | Restore all KWS params to compile-time defaults and persist to NVS |
 | `app el <n>` | — | Edge learning commands (mode transitions) |
 
@@ -1045,7 +1045,7 @@ app debounce 200
 
 ### AKD1500 Clock, SPI & Low-Power
 
-Runtime control of the AKD1500 host SPI, internal clocks, and low-power state. By default the AKD1500 core runs at 400 MHz off the 800 MHz PLL and the host SPI at 8 MHz; the chip is put to sleep between inferences, and `app stop` additionally turns the PLL off for the lowest-power idle. The SLEEP pin and the `app stop` power-down are spark-only; the clock/SPI commands work on both boards.
+Runtime control of the AKD1500 host SPI, internal clocks, and low-power state. By default the AKD1500 core runs at 400 MHz off the 800 MHz PLL and the host SPI at 8 MHz; the chip is put to sleep between inferences, and `app stop` additionally turns the PLL off for the lowest-power idle. The SLEEP pin and the `app stop` power-down are AkidaTag-only; the clock/SPI commands work on both boards.
 
 | Command | Description |
 | --- | --- |
@@ -1066,7 +1066,7 @@ The clock/PLL/ref commands refuse while KWS is running (they would race the per-
 
 ### Additional GPIO Configuration
 
-The following GPIOs are added in the board overlay to control **power enabling for onboard sensors and peripherals on the Spark board**.
+The following GPIOs are added in the board overlay to control **power enabling for onboard sensors and peripherals on the AkidaTag board**.
 
 | GPIO Label   | Pin   | Description |
 |---------------|-------|-------------|
@@ -1081,7 +1081,7 @@ The following GPIOs are added in the board overlay to control **power enabling f
 | `chgr_sts1`   | P0.23 | Read pin for battery status |
 | `chgr_sts2`   | P0.24 | Read pin for battery status  |
 
-These GPIOs are defined in the **DeviceTree overlay** and are used to manage power enabling of onboard components in the Spark board.
+These GPIOs are defined in the **DeviceTree overlay** and are used to manage power enabling of onboard components in the AkidaTag board.
 
 ### Inference Pipeline
 

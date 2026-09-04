@@ -74,10 +74,13 @@ jobs:
 
       - name: Python
         if: contains(env.LINT_LANGUAGES, 'python')
+        env:
+          # Pinned for the same reason as CLANG_FORMAT_VERSION below.
+          RUFF_VERSION: "0.11.11"
         run: |
           set -euo pipefail
           grep -E '\.py$' changed.txt > files.txt || { echo "no python changed"; exit 0; }
-          pipx install ruff >/dev/null
+          pipx install "ruff==${RUFF_VERSION}" >/dev/null
           xargs -r -a files.txt ruff check
           xargs -r -a files.txt ruff format --check
 
@@ -99,10 +102,10 @@ jobs:
           # Pinned on purpose. Different clang-format majors format differently,
           # so an unpinned version becomes a mystery failure the day the runner
           # image updates. This matches the version present in the repo's own
-          # toolchain image (docker/Dockerfile, built as `spark-ncs` by
+          # toolchain image (docker/Dockerfile, built as `akidatag-ncs` by
           # scripts/build_docker_image.sh), where clang-format arrives as a pip
           # dependency of the NCS requirements. Bump this when that image moves.
-          CLANG_FORMAT_VERSION: "22.1.1"
+          CLANG_FORMAT_VERSION: "23.1.0"
         run: |
           set -euo pipefail
           grep -E '\.(c|h|cc|cpp|cxx|hh|hpp|hxx)$' changed.txt > files.txt || { echo "no c or c++ changed"; exit 0; }

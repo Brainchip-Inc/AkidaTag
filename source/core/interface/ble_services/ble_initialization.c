@@ -417,7 +417,7 @@ void send_pcm_wave(const int16_t* samples, uint16_t n_samples) {
         clean_frames = 0;
     }
 }
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /**
  * @brief Send current value data to phone for real-time monitoring
  *
@@ -1056,7 +1056,7 @@ static void disconnected_ble(struct bt_conn* conn, uint8_t reason) {
     send_in_progress = false;
     pdm_stream_flag = FLAG_DISABLE;
     event_flag = FLAG_DISABLE;
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
     battery_service_on_disconnect();
 #endif
 }

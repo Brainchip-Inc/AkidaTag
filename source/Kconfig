@@ -6,7 +6,7 @@
 
 source "Kconfig.zephyr"
 
-menu "Akida Tag Application"
+menu "AkidaTag Application"
 
 config SRAM_BUFFER_SIZE
     int "Allocate SRAM for BLE or raw audio sample capture"
@@ -104,10 +104,10 @@ config DK_BOARD
     depends on BT
     help
       This enables the DK Board specific initialization.
-config SPARK_BOARD
-    bool "Enable spark Board specific initialization"
+config AKIDATAG_BOARD
+    bool "Enable AkidaTag board specific initialization"
     help
-      This enables the spark Board specific initialization.
+      This enables the AkidaTag board specific initialization.
 
 config SYS_CPU_128MHZ
     bool "Run the nRF5340 application core at 128 MHz"
@@ -118,12 +118,12 @@ config SYS_CPU_128MHZ
       dynamic power by roughly 2x. Only the CPU domain is affected; peripheral
       and system-timer clocks are unchanged. REQUIRED for SPIM4 at 32 MHz
       (the Zephyr driver clamps SPIM4 to 16 MHz unless HFCLK is DIV1) — so this
-      is now default y for the DK too, not just the spark board.
+      is now default y for the DK too, not just the AkidaTag board.
 
 config CURRENT_DEFAULT_RATE_HZ
     int "Default INA190 current-sense sampler rate (Hz)"
     default 10
-    depends on SPARK_BOARD
+    depends on AKIDATAG_BOARD
     help
       Default rate of the background current/power/energy sampler. Kept low for
       a stable reading and low overhead; accurate spot values come from
@@ -132,7 +132,7 @@ config CURRENT_DEFAULT_RATE_HZ
 choice
     prompt "INA190 current-sense variant"
     default INA190_VARIANT_A1
-    depends on SPARK_BOARD
+    depends on AKIDATAG_BOARD
     help
       Fitted INA190 amplifier variant. The A1/A3 difference is gain only
       (A1 = 25 V/V, A3 = 100 V/V); the shunt resistors are board parts. The

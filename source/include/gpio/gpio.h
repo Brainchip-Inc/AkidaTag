@@ -5,10 +5,10 @@
 typedef enum { GPIO_DISABLE = 0, GPIO_ENABLE = 1 } device_state_t;
 
 int gpio_init(void);
-void spark_peripherals_power_enable(void);
+void akidatag_peripherals_power_enable(void);
 void akd_irq_enable(void);
 void akd_irq_disable(void);
-#ifdef CONFIG_SPARK_BOARD
+#ifdef CONFIG_AKIDATAG_BOARD
 /* Refcounted AKD1500 wake. gpio.c owns the SLEEP pin and is its only writer:
  * a caller that needs the chip running takes a reference and hands it back when
  * it is done, and the pin follows the count.
