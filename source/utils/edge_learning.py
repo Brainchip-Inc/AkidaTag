@@ -11,6 +11,9 @@ ack_event = asyncio.Event()
 def find_matching_devices(devices):
     """Return the discovered devices whose advertised name carries the product name.
 
+    The comparison is case-insensitive, so a board still running pre-rename
+    firmware, which advertises AkidaTAG, is listed rather than silently hidden.
+
     Args:
         devices: Devices returned by a BleakScanner discovery.
 
@@ -19,7 +22,9 @@ def find_matching_devices(devices):
         stable, and the caller selects by number, so the listing has to be.
     """
     matches = [
-        device for device in devices if device.name and NAME_MATCH in device.name
+        device
+        for device in devices
+        if device.name and NAME_MATCH.lower() in device.name.lower()
     ]
 
     return sorted(matches, key=lambda device: (device.name, device.address))
@@ -45,7 +50,9 @@ def choose_device(devices):
         if answer == "q":
             return None
 
-        if not answer.isdigit() or not 1 <= int(answer) <= len(devices):
+        is_ascii_digits = answer.isascii() and answer.isdigit()
+
+        if not is_ascii_digits or not 1 <= int(answer) <= len(devices):
             print("Enter a number from the list, or q to quit.")
             continue
 
