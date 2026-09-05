@@ -22,10 +22,12 @@ def _load_shapes(output_dir, prefix):
         )
     with open(path) as f:
         d = json.load(f)
-    input_shape  = list(d.get("input_shape", []))
+    input_shape = list(d.get("input_shape", []))
     output_shape = list(d.get("output_shape", []))
     is_el = bool(d.get("is_el", False))
-    print(f"Loaded shapes from {path}: input={input_shape} output={output_shape} is_el={is_el}")
+    print(
+        f"Loaded shapes from {path}: input={input_shape} output={output_shape} is_el={is_el}"
+    )
     return input_shape, output_shape, is_el
 
 
@@ -33,8 +35,10 @@ def _build_demo_apps(args, input_shape, output_shape, is_el):
     """Build the demo_apps info.yaml metadata dict (consumed by send_model_via_ble.py
     and the firmware at upload time)."""
     if str(args.inference_mode).lower() not in ("sync", "async"):
-        sys.exit(f"Error: inference_mode must be 'sync' or 'async', got "
-                 f"'{args.inference_mode}'")
+        sys.exit(
+            f"Error: inference_mode must be 'sync' or 'async', got "
+            f"'{args.inference_mode}'"
+        )
     npc = int(args.neurons_per_class) if args.neurons_per_class else 1
     num_classes = 0
     if output_shape:
@@ -44,19 +48,19 @@ def _build_demo_apps(args, input_shape, output_shape, is_el):
             num_classes = int(output_shape[-1])
 
     return {
-        "app":           args.prefix,
+        "app": args.prefix,
         "flash_address": str(args.flash_address),
-        "input_shape":   list(input_shape)  if input_shape  else [],
-        "output_shape":  list(output_shape) if output_shape else [],
-        "mfcc_fs":       float(args.mfcc_fs),
+        "input_shape": list(input_shape) if input_shape else [],
+        "output_shape": list(output_shape) if output_shape else [],
+        "mfcc_fs": float(args.mfcc_fs),
         "silence_class": int(args.silence_class),
         "unknown_class": int(args.unknown_class),
         "inference_mode": args.inference_mode,
         "edge_learning": {
-            "enabled":        is_el,
-            "num_classes":    num_classes,
+            "enabled": is_el,
+            "num_classes": num_classes,
             "num_el_classes": int(args.num_el_classes) if is_el else 0,
-            "num_neurons":    npc,
+            "num_neurons": npc,
         },
     }
 
@@ -67,8 +71,15 @@ def _build_demo_apps(args, input_shape, output_shape, is_el):
 # different fields, hardcode values, or not be needed at all.
 APP_PROFILES = {
     "demo_apps": {
-        "required": ["flash_address", "neurons_per_class", "num_el_classes",
-                     "mfcc_fs", "silence_class", "unknown_class", "inference_mode"],
+        "required": [
+            "flash_address",
+            "neurons_per_class",
+            "num_el_classes",
+            "mfcc_fs",
+            "silence_class",
+            "unknown_class",
+            "inference_mode",
+        ],
         "builder": _build_demo_apps,
     },
 }
@@ -77,13 +88,16 @@ APP_PROFILES = {
 def generate_info(args):
     profile = APP_PROFILES.get(args.app)
     if profile is None:
-        sys.exit(f"Error: unknown app '{args.app}'. "
-                 f"Available: {', '.join(sorted(APP_PROFILES))}")
+        sys.exit(
+            f"Error: unknown app '{args.app}'. "
+            f"Available: {', '.join(sorted(APP_PROFILES))}"
+        )
 
     # Validate the args this app profile requires (parsed as optional above so the
     # required set can differ per app). int args default to None, so 0 is allowed.
-    missing = [f"--{name}" for name in profile["required"]
-               if getattr(args, name, None) is None]
+    missing = [
+        f"--{name}" for name in profile["required"] if getattr(args, name, None) is None
+    ]
     if missing:
         sys.exit(f"Error: app '{args.app}' requires: {' '.join(missing)}")
 
@@ -101,28 +115,31 @@ def generate_info(args):
 # None so the per-profile `required` validation reports any missing config keys.
 # The profile is selected by the config's `app` key.
 _CONFIG_SCHEMA = {
-    "app":               ("app",               None),
-    "output_dir":        ("output_dir",        None),
-    "prefix":            ("model_name",        None),
-    "flash_address":     ("flash_address",     None),
+    "app": ("app", None),
+    "output_dir": ("output_dir", None),
+    "prefix": ("model_name", None),
+    "flash_address": ("flash_address", None),
     "neurons_per_class": ("neurons_per_class", None),
-    "num_el_classes":    ("num_el_classes",    None),
-    "mfcc_fs":           ("mfcc_fs",           None),
-    "silence_class":     ("silence_class",     None),
-    "unknown_class":     ("unknown_class",     None),
-    "inference_mode":    ("inference_mode",    None),
+    "num_el_classes": ("num_el_classes", None),
+    "mfcc_fs": ("mfcc_fs", None),
+    "silence_class": ("silence_class", None),
+    "unknown_class": ("unknown_class", None),
+    "inference_mode": ("inference_mode", None),
 }
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate an app-specific info.yaml from a converted model's "
-                    "shapes sidecar (produced by fetch_model.py). No Akida SDK required. "
-                    "All parameters (including the app profile) come from --config; "
-                    "see .env/<app>/<model>.yaml (schema in src/README.md)."
+        "shapes sidecar (produced by fetch_model.py). No Akida SDK required. "
+        "All parameters (including the app profile) come from --config; "
+        "see .env/<app>/<model>.yaml (schema in src/README.md)."
     )
-    parser.add_argument("--config", required=True,
-                        help="Path to the model config YAML (.env/<app>/<model>.yaml)")
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to the model config YAML (.env/<app>/<model>.yaml)",
+    )
     args = parser.parse_args()
 
     cfg = load_model_config(args.config)

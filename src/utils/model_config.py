@@ -20,9 +20,12 @@ def load_model_config(path):
     currently) don't pay for the dependency.
     """
     if not path or not os.path.exists(path):
-        sys.exit(f"Error: config file not found: {path}\n"
-                 f"Create it under .env/<app>/<model>.yaml (schema in src/README.md).")
+        sys.exit(
+            f"Error: config file not found: {path}\n"
+            f"Create it under .env/<app>/<model>.yaml (schema in src/README.md)."
+        )
     import yaml  # lazy import
+
     with open(path) as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
@@ -34,8 +37,9 @@ def require_keys(cfg, path, keys):
     """Exit listing any required keys missing from cfg (so errors name them)."""
     missing = [k for k in keys if cfg.get(k) is None]
     if missing:
-        sys.exit(f"Error: config '{path}' is missing required keys: "
-                 f"{', '.join(missing)}")
+        sys.exit(
+            f"Error: config '{path}' is missing required keys: {', '.join(missing)}"
+        )
 
 
 def resolve_args(cfg, schema):

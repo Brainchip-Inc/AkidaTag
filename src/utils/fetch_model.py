@@ -21,11 +21,14 @@ def _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el=False
     (and so re-runs can skip regeneration) without re-loading the Akida model."""
     path = _shapes_json_path(output_dir, prefix)
     with open(path, "w") as f:
-        json.dump({
-            "input_shape": list(input_shape),
-            "output_shape": list(output_shape),
-            "is_el": bool(is_el),
-        }, f)
+        json.dump(
+            {
+                "input_shape": list(input_shape),
+                "output_shape": list(output_shape),
+                "is_el": bool(is_el),
+            },
+            f,
+        )
     print(f"Shapes saved to {path}")
 
 
@@ -109,10 +112,14 @@ def fetch_and_convert(args):
         array_to_cpp(output_dir + "/", program, f"{prefix}_model")
 
         if program_parts.program_info is not None:
-            array_to_cpp(output_dir + "/", program_parts.program_info, f"{prefix}_program_info")
+            array_to_cpp(
+                output_dir + "/", program_parts.program_info, f"{prefix}_program_info"
+            )
 
         if program_parts.program_data is not None:
-            array_to_cpp(output_dir + "/", program_parts.program_data, f"{prefix}_program_data")
+            array_to_cpp(
+                output_dir + "/", program_parts.program_data, f"{prefix}_program_data"
+            )
 
         # Generate binary files
         if program_parts.program_data is not None:
@@ -159,25 +166,28 @@ def fetch_and_convert(args):
 # model and prefix both come from the model_name; model_path comes from model_url
 # (optional — falls back to .env/models.conf when absent).
 _CONFIG_SCHEMA = {
-    "model":             ("model_name",        None),
-    "prefix":            ("model_name",        None),
-    "output_dir":        ("output_dir",        None),
-    "model_path":        ("model_url",         None),
-    "map_mode":          ("map_mode",          1),
+    "model": ("model_name", None),
+    "prefix": ("model_name", None),
+    "output_dir": ("output_dir", None),
+    "model_path": ("model_url", None),
+    "map_mode": ("map_mode", 1),
     "neurons_per_class": ("neurons_per_class", 1),
-    "akida_version":     ("akida_version",     "v1"),
+    "akida_version": ("akida_version", "v1"),
 }
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Fetch an Akida .fbz model and convert it into program_info/"
-                    "program_data bin + C++ files (info.yaml is generated separately "
-                    "by generate_info.py). All parameters come from --config; see "
-                    ".env/<app>/<model>.yaml (schema in src/README.md)."
+        "program_data bin + C++ files (info.yaml is generated separately "
+        "by generate_info.py). All parameters come from --config; see "
+        ".env/<app>/<model>.yaml (schema in src/README.md)."
     )
-    parser.add_argument("--config", required=True,
-                        help="Path to the model config YAML (.env/<app>/<model>.yaml)")
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to the model config YAML (.env/<app>/<model>.yaml)",
+    )
     args = parser.parse_args()
 
     cfg = load_model_config(args.config)
