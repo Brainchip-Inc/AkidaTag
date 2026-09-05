@@ -9,6 +9,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 Everything goes through `scripts/run.sh` in the `akidatag-ncs` Docker image; `docs/setup.md`
 is the reference. The application app is `demo_apps`, whose source directory is `src/`.
 
+Every build signs, so a build with no `.env/signing_key.pem` dies in CMake configure with
+`west sign can't find file`, naming the path `${APP_DIR}/../.env/signing_key.pem` from
+`src/sysbuild.conf` rather than anything about the app. That directory is git-ignored, so a
+fresh clone or worktree never has one; generate an RSA key there before the first build.
+
 ## Both boards share one Zephyr board target
 
 The AkidaTag board and the nRF5340 DK are both built for `nrf5340dk/nrf5340/cpuapp`, fixed as
@@ -32,6 +37,10 @@ The same job gates python with `ruff check` plus `ruff format --check` and shell
 `shellcheck`, and the tree is stale against both too, so touching a `.py` or a `.sh` file
 drags the same whole-file cleanup. `ruff` lives in the Docker image; `shellcheck` is in
 neither the image nor the host, so run it from `koalaman/shellcheck:stable`.
+
+"Changed" means content changed: the job's jq filter keeps only files with `changes > 0`, so
+moving a file drags no cleanup with it. Editing one still does, however many files move
+alongside it.
 
 ## Flashing from macOS
 
