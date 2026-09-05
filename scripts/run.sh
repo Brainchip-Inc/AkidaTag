@@ -36,12 +36,12 @@ Options:
 Run the script from project root.
 
 How to use script - Examples runs:
-(eg. app - blinky, demo_apps)
+(eg. app - demo_apps)
 
   # Build locally
-  $SCRIPT_INVOCATION -b --app blinky
+  $SCRIPT_INVOCATION -b --app demo_apps
 
-  # Build akida_spi_flash_app inside Docker
+  # Build demo_apps inside Docker
   $SCRIPT_INVOCATION -d -b --app demo_apps
 
   # Build demo_apps with dk board overlay file inside Docker
@@ -78,7 +78,7 @@ How to use script - Examples runs:
       --yaml source/external/model_files/kws/info.yaml
 
   # If there is a custom docker image then provide docker image name with -d
-  $SCRIPT_INVOCATION -d custom_docker_image -b --app akida_spi_flash_app  
+  $SCRIPT_INVOCATION -d custom_docker_image -b --app demo_apps
 
   # Minicom on /dev/ttyACM0 locally
   $SCRIPT_INVOCATION -m /dev/ttyACM0
@@ -109,16 +109,10 @@ How to use script - Examples runs:
   
 There is a BUILD_DIR env variable that can be set to override the default build
 directory location. For example:
-  BUILD_DIR=custom_build_dir $SCRIPT_INVOCATION -b --app blinky
+  BUILD_DIR=custom_build_dir $SCRIPT_INVOCATION -b --app demo_apps
 
 ###################################################################################################
 Following Apps are available:
-    The following apps are available for testing connections:
-    - blinky
-    - akida_simple_app
-    - akida_spi_flash_app
-
-    The following apps are available as default:
     - demo_apps
 
 EOF
@@ -180,11 +174,7 @@ get_jlink_jobs() {
   local build_dir="$2"   # e.g. build_docker/demo_apps
 
   case "$app" in
-    blinky)
-      # blinky only has merged.hex (APP)
-      printf '%s|%s\n' "NRF5340_XXAA_APP" "$PWD/$build_dir/merged.hex"
-      ;;
-    akida_simple_app|akida_spi_flash_app|demo_apps)
+    demo_apps)
       # two images: NET then APP (same order as west flash output)
       printf '%s|%s\n' \
         "NRF5340_XXAA_NET" "$PWD/$build_dir/merged_CPUNET.hex" \
@@ -485,12 +475,9 @@ BUILD_CMD=""
 FLASH_CMD=""
 
 if [[ -n "$APP" ]]; then
-  APP_SRC_DIR="samples/$APP"
-
   # Build-time "extra CMake args" (only appended when set)
   declare -a CMAKE_EXTRA_ARGS=()
 
-  # Overrides for non-standard layouts
   case "$APP" in
     demo_apps)
       APP_SRC_DIR="source"
@@ -515,6 +502,9 @@ if [[ -n "$APP" ]]; then
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_akidatag.overlay")
         CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/source/sysbuild/mcuboot_akidatag.overlay")
       fi
+      ;;
+    *)
+      die "Unknown app: $APP (available: demo_apps)"
       ;;
   esac
 
