@@ -1,5 +1,4 @@
 # ignore folder
-samples/*
 zephyrproject
 tools/*
 build*
