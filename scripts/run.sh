@@ -51,13 +51,13 @@ How to use script - Examples runs:
   $SCRIPT_INVOCATION -f --app demo_apps
 
   # Flash locally using Jlink
-  $SCRIPT_INVOCATION -d -f -jl --app demo_apps
+  $SCRIPT_INVOCATION -f -jf --app demo_apps
 
   # Flash inside Docker
   $SCRIPT_INVOCATION -d -f --app demo_apps
 
   # Flash using Jlink inside Docker
-  $SCRIPT_INVOCATION -d -f -jl --app demo_apps
+  $SCRIPT_INVOCATION -d -f -jf --app demo_apps
 
   # Fetch + convert only, on the host → bins/cpp (no info.yaml). All params from the config.
   $SCRIPT_INVOCATION --fetch_model .env/demo_apps/kws.yaml
