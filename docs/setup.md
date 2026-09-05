@@ -4,9 +4,9 @@
 
 Follow the pin connections as shown below:
 
-![Pin Connections](./images_and_videos/images_and_videos/Pin-Connection-nRF-AK.jpg)
+![Pin Connections](./images_and_videos/Pin-Connection-nRF-AK.jpg)
 
-![Pin Connections](./images_and_videos/images_and_videos/Pin-Connection-nRF-UART.jpg)
+![Pin Connections](./images_and_videos/Pin-Connection-nRF-UART.jpg)
 
 
 ---
