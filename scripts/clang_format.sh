@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Usage:
-#   ./clang_format.sh check                 # check every eligible file under source/
-#   ./clang_format.sh apply                 # reformat every eligible file under source/
+#   ./clang_format.sh check                 # check every eligible file under src/
+#   ./clang_format.sh apply                 # reformat every eligible file under src/
 #   ./clang_format.sh check  file [file...] # check only the given files
 #   ./clang_format.sh apply  file [file...] # reformat only the given files
 #
@@ -13,7 +13,7 @@
 #
 # The style config lives at the repository root (.clang-format) so that
 # clang-format's `--style=file` upward search finds it from any file in the
-# tree. Do not move it back under scripts/: from a file in source/ the search
+# tree. Do not move it back under scripts/: from a file in src/ the search
 # would never reach it and clang-format would silently fall back to its
 # built-in LLVM defaults.
 
@@ -27,26 +27,26 @@ if [[ "$MODE" != "check" && "$MODE" != "apply" ]]; then
 fi
 shift || true
 
-# 1. Resolve absolute path of the script and its sibling 'source' folder
+# 1. Resolve absolute path of the script and its sibling 'src' folder
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-SOURCE_ROOT="$PROJECT_ROOT/source"
+SRC_ROOT="$PROJECT_ROOT/src"
 
-if [ ! -d "$SOURCE_ROOT" ]; then
-    echo "Error: Source directory not found at $SOURCE_ROOT"
+if [ ! -d "$SRC_ROOT" ]; then
+    echo "Error: src directory not found at $SRC_ROOT"
     exit 1
 fi
 
-# Directories under source/ that are never formatted, and the extensions that are.
+# Directories under src/ that are never formatted, and the extensions that are.
 PRUNED_DIRS=(external build_docker samples docs docker)
 EXTENSIONS=(c h cpp hpp cc hh cxx hxx)
 
-# collect_all: every eligible file under source/, NUL separated.
+# collect_all: every eligible file under src/, NUL separated.
 collect_all() {
     local find_args=()
     local dir
     for dir in "${PRUNED_DIRS[@]}"; do
-        find_args+=(-path "$SOURCE_ROOT/$dir" -prune -o)
+        find_args+=(-path "$SRC_ROOT/$dir" -prune -o)
     done
 
     local name_args=()
@@ -56,11 +56,11 @@ collect_all() {
     done
     name_args=("${name_args[@]:1}")  # drop the leading -o
 
-    find "$SOURCE_ROOT" "${find_args[@]}" -type f \( "${name_args[@]}" \) -print0
+    find "$SRC_ROOT" "${find_args[@]}" -type f \( "${name_args[@]}" \) -print0
 }
 
 # collect_given: the caller's files, minus anything the full-tree walk would
-# have skipped (wrong extension, outside source/, or inside a pruned dir).
+# have skipped (wrong extension, outside src/, or inside a pruned dir).
 # Deleted files are dropped too, so a PR that removes a file still passes.
 collect_given() {
     local file abs rel ext dir keep
@@ -70,7 +70,7 @@ collect_given() {
         abs="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
 
         case "$abs" in
-            "$SOURCE_ROOT"/*) rel="${abs#"$SOURCE_ROOT"/}" ;;
+            "$SRC_ROOT"/*) rel="${abs#"$SRC_ROOT"/}" ;;
             *) continue ;;
         esac
 
@@ -95,7 +95,7 @@ if [ "$#" -gt 0 ]; then
     SCOPE="the $# path(s) given on the command line"
     collect() { collect_given "$@"; }
 else
-    SCOPE="$SOURCE_ROOT"
+    SCOPE="$SRC_ROOT"
     collect() { collect_all; }
 fi
 

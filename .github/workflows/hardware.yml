@@ -41,9 +41,9 @@ permissions:
 env:
   # Model parameters live in a per-(app,model) config YAML. It is git-ignored, so
   # CI writes it from the MODEL_CONFIG_DEMO_APPS_KWS repo secret (full YAML) into
-  # the path below before fetch. See source/README.md for the schema.
+  # the path below before fetch. See src/README.md for the schema.
   MODEL_CONFIG: .env/demo_apps/kws.yaml
-  MODEL_DIR: source/external/model_files/kws
+  MODEL_DIR: src/external/model_files/kws
   MODEL_NAME: kws
 
 jobs:
@@ -221,7 +221,7 @@ jobs:
       - name: Upload Model
         timeout-minutes: 4
         run: |
-          "${HOME}/.conda/envs/akidatag/bin/python" source/utils/send_model_via_ble.py \
+          "${HOME}/.conda/envs/akidatag/bin/python" src/utils/send_model_via_ble.py \
           --info "${MODEL_DIR}/${MODEL_NAME}_program_info.bin" \
           --bin "${MODEL_DIR}/${MODEL_NAME}_program_data.bin" \
           --yaml "${MODEL_DIR}/info.yaml"

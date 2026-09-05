@@ -7,12 +7,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 ## Build
 
 Everything goes through `scripts/run.sh` in the `akidatag-ncs` Docker image; `docs/setup.md`
-is the reference. The application app is `demo_apps`, whose source directory is `source/`.
+is the reference. The application app is `demo_apps`, whose source directory is `src/`.
 
 ## Both boards share one Zephyr board target
 
 The AkidaTag board and the nRF5340 DK are both built for `nrf5340dk/nrf5340/cpuapp`, fixed as
-`BOARD` in `docker/Dockerfile`. A `source/boards/<board>.conf` therefore cannot tell them
+`BOARD` in `docker/Dockerfile`. A `src/boards/<board>.conf` therefore cannot tell them
 apart, because Zephyr would merge the same file into both builds. What separates the two is
 the set of CMake arguments the `--dk` branch of `scripts/run.sh` selects: the devicetree
 overlay, the mcuboot overlay, `CONFIG_AKIDATAG_BOARD`, and `EXTRA_CONF_FILE=boards/dk.conf`.

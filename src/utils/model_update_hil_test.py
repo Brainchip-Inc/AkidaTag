@@ -86,11 +86,11 @@ against a DK proves nothing about the defect.
 
 USAGE
 -----
-    python source/utils/model_update_hil_test.py \
+    python src/utils/model_update_hil_test.py \
         --port /dev/ttyUSB0 \
-        --info source/external/model_files/kws/kws/kws_program_info.bin \
-        --bin  source/external/model_files/kws/kws/kws_program_data.bin \
-        --yaml source/external/model_files/kws/kws/info.yaml
+        --info src/external/model_files/kws/kws/kws_program_info.bin \
+        --bin  src/external/model_files/kws/kws/kws_program_data.bin \
+        --yaml src/external/model_files/kws/kws/info.yaml
 
 Sending the model the board already holds keeps the run state-neutral, which is
 what you want on a shared board, and is what makes sending it twice harmless.

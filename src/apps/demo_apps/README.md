@@ -17,7 +17,7 @@ This README contains specific commands related to demo_apps
   - After cleaning the file, run the Python script to generate the WAV file:
   
   ```
-  python source/utils/pcm_to_wav.py <input_pcm.txt> <output_name>
+  python src/utils/pcm_to_wav.py <input_pcm.txt> <output_name>
   ```
 
 	

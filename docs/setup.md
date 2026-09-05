@@ -88,7 +88,7 @@ A passing run ends with `ALL TESTCASES PASSED`.
 **3. Send A Model Over BLE And Infer**
 
 Fetch and convert the kws model, then send it to the Akida external flash over BLE.
-[source/README.md](../source/README.md) covers the model workflow and its config
+[src/README.md](../src/README.md) covers the model workflow and its config
 files in full.
 
 ```
@@ -99,9 +99,9 @@ files in full.
 
 # send the model over BLE from the host
 ./scripts/run.sh --send_ble \
-    --info source/external/model_files/kws/kws_program_info.bin \
-    --bin  source/external/model_files/kws/kws_program_data.bin \
-    --yaml source/external/model_files/kws/info.yaml
+    --info src/external/model_files/kws/kws_program_info.bin \
+    --bin  src/external/model_files/kws/kws_program_data.bin \
+    --yaml src/external/model_files/kws/info.yaml
 ```
 
 Once the transfer completes, run the inference test to confirm the model loads from
@@ -121,7 +121,7 @@ To check that a firmware update over BLE also works, make a change to the app an
 rebuild it, then find `dfu_application.zip` in the build directory
 (`build_docker/demo_apps/` for a Docker build). Upload it to the board with the
 nRF Connect Mobile App; the FOTA section of
-[source/README.md](../source/README.md) walks through the app.
+[src/README.md](../src/README.md) walks through the app.
 
 *Tip: A simple change that I make is adding a print statement in main.cpp*
 

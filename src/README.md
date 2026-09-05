@@ -723,7 +723,7 @@ self-hosted runner.
 # .env/demo_apps/kws.yaml
 app: demo_apps                                   # generate_info profile
 model_name: kws                                  # file prefix for bins/cpp/.h + shapes sidecar
-output_dir: source/external/model_files/kws      # converted artifacts + info.yaml are written here
+output_dir: src/external/model_files/kws      # converted artifacts + info.yaml are written here
 model_url: http://<internal-host>/path/to/akida_model.fbz   # .fbz to download (VPN required)
 map_mode: 2                                      # Akida MapMode (optional, default 1)
 neurons_per_class: 1                             # regular kws: 1, edge-learning: e.g. 10
@@ -750,10 +750,10 @@ back to `models.conf`) and converts it into the binary + C++ artifacts. It does 
 cd AkidaTag
 
 # Regular KWS model → bins/cpp in model_files/kws (akida SDK lives in Docker, so use -d via run.sh)
-python source/utils/fetch_model.py --config .env/demo_apps/kws.yaml
+python src/utils/fetch_model.py --config .env/demo_apps/kws.yaml
 
 # Edge-learning KWS model → its own dir
-python source/utils/fetch_model.py --config .env/demo_apps/kws_edge_learning.yaml
+python src/utils/fetch_model.py --config .env/demo_apps/kws_edge_learning.yaml
 ```
 
 The config keys read here are `model_name`, `output_dir`, `model_url`, `map_mode`,
@@ -777,10 +777,10 @@ today); it decides which fields `info.yaml` carries.
 cd AkidaTag
 
 # Regular KWS model
-python source/utils/generate_info.py --config .env/demo_apps/kws.yaml
+python src/utils/generate_info.py --config .env/demo_apps/kws.yaml
 
 # Edge-learning KWS model
-python source/utils/generate_info.py --config .env/demo_apps/kws_edge_learning.yaml
+python src/utils/generate_info.py --config .env/demo_apps/kws_edge_learning.yaml
 ```
 
 The config keys read here (for the `demo_apps` profile) are `app`, `model_name`, `output_dir`,
@@ -798,15 +798,15 @@ model's normalisation scalar — use the value your model was trained with.
 cd AkidaTag
 
 # Recommended: pass info.yaml as the metadata source
-python source/utils/send_model_via_ble.py \
-    --info source/external/model_files/kws/kws_program_info.bin \
-    --bin  source/external/model_files/kws/kws_program_data.bin \
-    --yaml source/external/model_files/kws/info.yaml
+python src/utils/send_model_via_ble.py \
+    --info src/external/model_files/kws/kws_program_info.bin \
+    --bin  src/external/model_files/kws/kws_program_data.bin \
+    --yaml src/external/model_files/kws/info.yaml
 
 # Legacy: explicit CLI args (still supported, override YAML values)
-python source/utils/send_model_via_ble.py \
-    --info source/external/model_files/kws/kws_program_info.bin \
-    --bin  source/external/model_files/kws/kws_program_data.bin \
+python src/utils/send_model_via_ble.py \
+    --info src/external/model_files/kws/kws_program_info.bin \
+    --bin  src/external/model_files/kws/kws_program_data.bin \
     --flash_address 0x101000 \
     --input_shape 49,10,1 \
     --output_shape 1,1,12
@@ -870,9 +870,9 @@ cd AkidaTag
 
 # Step 3: Send pre-generated files via BLE on the host (no Docker)
 ./scripts/run.sh --send_ble \
-    --info source/external/model_files/kws/kws_program_info.bin \
-    --bin  source/external/model_files/kws/kws_program_data.bin \
-    --yaml source/external/model_files/kws/info.yaml
+    --info src/external/model_files/kws/kws_program_info.bin \
+    --bin  src/external/model_files/kws/kws_program_data.bin \
+    --yaml src/external/model_files/kws/info.yaml
 ```
 ### UICR Configuration: nfct-pins-as-gpios
  This setting repurposes the NFC antenna pins (P0.02 and P0.03) as GPIOs.

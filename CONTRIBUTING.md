@@ -72,7 +72,7 @@ Two checks are required before a pull request can merge into `main`:
   subject you wrote. Merge commits are skipped.
 - **lint** runs ruff, shellcheck, clang-format and prettier over only the files the pull
   request changed. C and C++ go through `scripts/clang_format.sh`, so `.clang-format` is the
-  agreed style and `source/external` is never checked.
+  agreed style and `src/external` is never checked.
 
 Pull requests into `release` require **format** only.
 
