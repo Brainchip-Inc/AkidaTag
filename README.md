@@ -261,7 +261,6 @@ pipeline** function correctly on the target hardware.
    ├── include/        # Header files
    ├── sysbuild/       # Configuration settings
    ├── utils/          # Utilities for BLE communication, models, etc
-├── samples/           # Samples builds for quick tests
 ├── scripts/           # Build, flash, and utility scripts
 ├── docs/              # Setup, Architecture and design documentation
 ├── .env/              # Environment related file, signing keys not to be pushed
