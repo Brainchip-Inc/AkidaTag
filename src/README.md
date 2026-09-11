@@ -723,7 +723,7 @@ self-hosted runner.
 # .env/demo_apps/kws.yaml
 app: demo_apps                                   # generate_info profile
 model_name: kws                                  # file prefix for bins/cpp/.h + shapes sidecar
-output_dir: src/external/model_files/kws      # everything Steps 1 and 2 write goes here; its basename names the bundle
+output_dir: models/kws                           # everything Steps 1 and 2 write goes here; its basename names the bundle
 model_url: http://<internal-host>/path/to/akida_model.fbz   # .fbz to download (VPN required)
 map_mode: 2                                      # Akida MapMode (optional, default 1)
 neurons_per_class: 1                             # regular kws: 1, edge-learning: e.g. 10
@@ -749,7 +749,7 @@ back to `models.conf`) and converts it into the binary + C++ artifacts. It does 
 ```bash
 cd AkidaTag
 
-# Regular KWS model → bins/cpp in model_files/kws (akida SDK lives in Docker, so use -d via run.sh)
+# Regular KWS model → bins/cpp in models/kws (akida SDK lives in Docker, so use -d via run.sh)
 python src/utils/fetch_model.py --config .env/demo_apps/kws.yaml
 
 # Edge-learning KWS model → its own dir
@@ -792,7 +792,8 @@ model's normalisation scalar — use the value your model was trained with.
 **Outputs** (in the config's `output_dir`):
 - `info.yaml` – the app-specific metadata
 - `<output_dir basename>.zip` – the model bundle: a single directory named after `output_dir`
-  holding `info.yaml`, `<prefix>_program_info.bin` and `<prefix>_program_data.bin`
+  holding `info.yaml`, `<prefix>_program_info.bin` and `<prefix>_program_data.bin`. For the
+  configs above that is `models/kws/kws.zip` and `models/kws_edge_learning/kws_edge_learning.zip`
 
 The bundle is what BrainChip Connect expects when you hand it a model: it unzips the archive,
 descends into the single root directory, and looks the three files up by name. Note that the
@@ -810,14 +811,14 @@ cd AkidaTag
 
 # Recommended: pass info.yaml as the metadata source
 python src/utils/send_model_via_ble.py \
-    --info src/external/model_files/kws/kws_program_info.bin \
-    --bin  src/external/model_files/kws/kws_program_data.bin \
-    --yaml src/external/model_files/kws/info.yaml
+    --info models/kws/kws_program_info.bin \
+    --bin  models/kws/kws_program_data.bin \
+    --yaml models/kws/info.yaml
 
 # Legacy: explicit CLI args (still supported, override YAML values)
 python src/utils/send_model_via_ble.py \
-    --info src/external/model_files/kws/kws_program_info.bin \
-    --bin  src/external/model_files/kws/kws_program_data.bin \
+    --info models/kws/kws_program_info.bin \
+    --bin  models/kws/kws_program_data.bin \
     --flash_address 0x101000 \
     --input_shape 49,10,1 \
     --output_shape 1,1,12
@@ -881,9 +882,9 @@ cd AkidaTag
 
 # Step 3: Send pre-generated files via BLE on the host (no Docker)
 ./scripts/run.sh --send_ble \
-    --info src/external/model_files/kws/kws_program_info.bin \
-    --bin  src/external/model_files/kws/kws_program_data.bin \
-    --yaml src/external/model_files/kws/info.yaml
+    --info models/kws/kws_program_info.bin \
+    --bin  models/kws/kws_program_data.bin \
+    --yaml models/kws/info.yaml
 ```
 ### UICR Configuration: nfct-pins-as-gpios
  This setting repurposes the NFC antenna pins (P0.02 and P0.03) as GPIOs.
