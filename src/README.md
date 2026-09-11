@@ -723,7 +723,7 @@ self-hosted runner.
 # .env/demo_apps/kws.yaml
 app: demo_apps                                   # generate_info profile
 model_name: kws                                  # file prefix for bins/cpp/.h + shapes sidecar
-output_dir: src/external/model_files/kws      # converted artifacts + info.yaml are written here
+output_dir: src/external/model_files/kws      # everything Steps 1 and 2 write goes here; its basename names the bundle
 model_url: http://<internal-host>/path/to/akida_model.fbz   # .fbz to download (VPN required)
 map_mode: 2                                      # Akida MapMode (optional, default 1)
 neurons_per_class: 1                             # regular kws: 1, edge-learning: e.g. 10
@@ -766,10 +766,11 @@ The config keys read here are `model_name`, `output_dir`, `model_url`, `map_mode
 
 ---
 
-### Step 2 – Generate info.yaml (per app)
+### Step 2 – Generate info.yaml and the model bundle (per app)
 
 `generate_info.py --config <file>` builds an **app-specific** `info.yaml` from the shapes sidecar
-written in Step 1. It needs **no Akida SDK**, so it can run anywhere — e.g. on the host even when
+written in Step 1, then packs it together with the two `.bin` files into the model bundle `.zip`
+the phone app reads. It needs **no Akida SDK**, so it can run anywhere — e.g. on the host even when
 Step 1 ran in Docker. The profile is taken from the config's `app:` key (only `demo_apps` exists
 today); it decides which fields `info.yaml` carries.
 
@@ -788,7 +789,17 @@ The config keys read here (for the `demo_apps` profile) are `app`, `model_name`,
 `unknown_class`, `inference_mode`. The script reports any missing keys by name. `mfcc_fs` is the
 model's normalisation scalar — use the value your model was trained with.
 
-**Output:** `info.yaml` in the config's `output_dir`.
+**Outputs** (in the config's `output_dir`):
+- `info.yaml` – the app-specific metadata
+- `<output_dir basename>.zip` – the model bundle: a single directory named after `output_dir`
+  holding `info.yaml`, `<prefix>_program_info.bin` and `<prefix>_program_data.bin`
+
+The bundle is what BrainChip Connect expects when you hand it a model: it unzips the archive,
+descends into the single root directory, and looks the three files up by name. Note that the
+directory name and the file prefix come from different config keys — the directory is the basename
+of `output_dir`, the files keep their `model_name` prefix — so the edge-learning bundle is
+`kws_edge_learning/kws_program_*.bin`. Both `info.yaml` and the bundle are rewritten on every run,
+unlike the Step 1 conversion, which skips when its outputs already exist.
 
 ---
 
@@ -818,7 +829,7 @@ python src/utils/send_model_via_ble.py \
 
 ### Using run.sh (build + flash + model workflow)
 
-`run.sh` wraps the steps above: `--fetch_model <config>` runs Step 1 (fetch + convert) and `--generate_info <config>` runs Step 2 (write `info.yaml`). Each takes its per-(app, model) YAML config (`.env/<app>/<model>.yaml`) as its argument. They are separate flags but can be combined (name the config on each); `--send_ble` (Step 3) is separate. Add `-d` to run the fetch step inside Docker (where the Akida SDK lives).
+`run.sh` wraps the steps above: `--fetch_model <config>` runs Step 1 (fetch + convert) and `--generate_info <config>` runs Step 2 (write `info.yaml` and the model bundle `.zip`). Each takes its per-(app, model) YAML config (`.env/<app>/<model>.yaml`) as its argument. They are separate flags but can be combined (name the config on each); `--send_ble` (Step 3) is separate. Add `-d` to run the fetch step inside Docker (where the Akida SDK lives).
 
 ```bash
 cd AkidaTag
@@ -826,10 +837,10 @@ cd AkidaTag
 # Step 1: Fetch + convert only (bins/cpp, no info.yaml)
 ./scripts/run.sh -d --fetch_model .env/demo_apps/kws.yaml
 
-# Step 2: Generate the app-specific info.yaml for the converted model
+# Step 2: Generate the app-specific info.yaml + bundle .zip for the converted model
 ./scripts/run.sh --generate_info .env/demo_apps/kws.yaml
 
-# Both steps in one invocation (fetch runs first, then info.yaml)
+# Both steps in one invocation (fetch runs first, then info.yaml + bundle .zip)
 ./scripts/run.sh -d \
     --fetch_model .env/demo_apps/kws.yaml \
     --generate_info .env/demo_apps/kws.yaml
@@ -840,7 +851,7 @@ cd AkidaTag
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--fetch_model <config>` | off | Step 1: fetch `.fbz` + convert to bins/cpp (no `info.yaml`). Arg is the per-(app, model) YAML (`.env/<app>/<model>.yaml`) |
-| `--generate_info <config>` | off | Step 2: write the app-specific `info.yaml` from the shapes sidecar. Arg is the same YAML config |
+| `--generate_info <config>` | off | Step 2: write the app-specific `info.yaml` from the shapes sidecar, then the model bundle `.zip`. Arg is the same YAML config |
 | `--send_ble` | off | Step 3: send model via BLE; requires `--info`, `--bin`, and `--yaml` (separate step; cannot be combined with `--fetch_model`) |
 | `--app <name>` | `demo_apps` | Build/flash app (the `info.yaml` profile now comes from the config's `app:` key) |
 | `--info <path>` | — | Path to `_program_info.bin` (use with `--send_ble`) |
@@ -858,7 +869,7 @@ Run the steps as independent commands — useful when the Akida SDK is only avai
 ```bash
 cd AkidaTag
 
-# Step 1+2: Fetch, convert, and generate info.yaml for an edge-learning model inside Docker
+# Step 1+2: Fetch, convert, and generate info.yaml + bundle .zip for an edge-learning model inside Docker
 ./scripts/run.sh -d \
     --fetch_model .env/demo_apps/kws_edge_learning.yaml \
     --generate_info .env/demo_apps/kws_edge_learning.yaml
