@@ -96,7 +96,7 @@ Fetch and convert the kws model, then send it to the Akida external flash over B
 files in full.
 
 ```
-# fetch, convert and generate info.yaml
+# fetch, convert, generate info.yaml and the model bundle .zip
 ./scripts/run.sh -d \
     --fetch_model .env/demo_apps/kws.yaml \
     --generate_info .env/demo_apps/kws.yaml

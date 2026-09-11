@@ -18,7 +18,7 @@ Options:
   --bin              | (str)  | Path to program_data .bin file (use with --send_ble)
   --yaml             | (str)  | Path to info.yaml metadata file (use with --send_ble)
   --fetch_model      | (str)  | Fetch + convert the model from the given config YAML (.env/<app>/<model>.yaml); bins/cpp/.h, no info.yaml
-  --generate_info    | (str)  | Generate app-specific info.yaml from the given config YAML + the converted shapes sidecar
+  --generate_info    | (str)  | Generate app-specific info.yaml from the given config YAML + the converted shapes sidecar, then bundle it with the bins into the model .zip
   --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (separate step; cannot be combined with --fetch_model)
   -d, --docker       | (str)  | Run build/flash using Docker
                      |        | AND provide docker image name   (default:akidatag-ncs:v3.1.1-py3.12)
@@ -62,10 +62,10 @@ How to use script - Examples runs:
   # Fetch + convert only, on the host → bins/cpp (no info.yaml). All params from the config.
   $SCRIPT_INVOCATION --fetch_model .env/demo_apps/kws.yaml
 
-  # Generate the app-specific info.yaml for a previously-converted model (no Akida SDK needed)
+  # Generate the app-specific info.yaml + model bundle .zip for a previously-converted model (no Akida SDK needed)
   $SCRIPT_INVOCATION --generate_info .env/demo_apps/kws.yaml
 
-  # Fetch + convert + generate info.yaml in one go inside Docker (akida SDK lives in the container)
+  # Fetch + convert + generate info.yaml + bundle .zip in one go inside Docker (akida SDK lives in the container)
   $SCRIPT_INVOCATION -d --fetch_model .env/demo_apps/kws.yaml --generate_info .env/demo_apps/kws.yaml
 
   # Edge-learning kws model (its config points at .../kws_edge_learning, 10 neurons/class, 3 novel classes)
@@ -577,7 +577,8 @@ if $DO_FETCH_MODEL; then
   FETCH_MODEL_CMD="python src/utils/fetch_model.py --config \"${FETCH_CONFIG}\""
 fi
 
-# --generate_info: write the app-specific info.yaml from the shapes sidecar (no Akida SDK).
+# --generate_info: write the app-specific info.yaml from the shapes sidecar, then
+# bundle it with the two bins into the .zip the phone app reads (no Akida SDK).
 # Profile and all info.yaml params come from the config YAML passed as its argument.
 GENERATE_INFO_CMD=""
 if $DO_GENERATE_INFO; then

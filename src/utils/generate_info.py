@@ -5,6 +5,7 @@ import sys
 
 import yaml
 
+from model_bundle import write_bundle_zip
 from model_config import load_model_config, require_keys, resolve_args
 
 
@@ -131,9 +132,10 @@ _CONFIG_SCHEMA = {
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate an app-specific info.yaml from a converted model's "
-        "shapes sidecar (produced by fetch_model.py). No Akida SDK required. "
-        "All parameters (including the app profile) come from --config; "
-        "see .env/<app>/<model>.yaml (schema in src/README.md)."
+        "shapes sidecar (produced by fetch_model.py), then bundle it with the "
+        "two bin files into the .zip the phone app reads. No Akida SDK "
+        "required. All parameters (including the app profile) come from "
+        "--config; see .env/<app>/<model>.yaml (schema in src/README.md)."
     )
     parser.add_argument(
         "--config",
@@ -144,4 +146,7 @@ if __name__ == "__main__":
 
     cfg = load_model_config(args.config)
     require_keys(cfg, args.config, ["app", "model_name", "output_dir"])
-    generate_info(resolve_args(cfg, _CONFIG_SCHEMA))
+    resolved = resolve_args(cfg, _CONFIG_SCHEMA)
+    generate_info(resolved)
+    zip_path = write_bundle_zip(resolved.output_dir, resolved.prefix)
+    print(f"Model bundle written to {zip_path}")
