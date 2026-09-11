@@ -38,6 +38,16 @@ conversion pipeline. It no longer decides what the firmware runs, but a model
 converted by one version and executed by another is not supported, so move the
 two together.
 
+`engine/devices/` is committed but never compiled: the engine's own CMake globs
+only `src/*.cpp`, and nothing in the firmware references its three files. One of
+them, `devices/akd1500/akd1500_spi_driver.cpp`, is the vendor's reference
+implementation of the `Akd1500SpiDriver` declared in
+`engine/api/akd1500/akd1500_spi_driver.h`. This repository forked it into
+`src/core/interface/akd_spi_flash/akd1500_spi_driver_nrf.cpp`, which drives the
+device at the transaction level rather than the SPI low level, and that fork is
+what the firmware links. So an upgrade means re-reading that reference for
+changes, not only reading the diff of what is compiled.
+
 **Pruned:** `engine/test/`, by `.gitignore`. `akida engine deploy` has no flag to
 skip it, and no build compiles it. It is 10 MB, of which
 `test/akd1000/test_fnp2/program.cpp` alone is 9.3 MB of fixtures for the AKD1000,
