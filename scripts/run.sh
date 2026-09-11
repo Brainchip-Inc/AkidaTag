@@ -73,9 +73,9 @@ How to use script - Examples runs:
 
   # Send pre-generated model files via BLE using info.yaml (separate step; no Docker needed)
   $SCRIPT_INVOCATION --send_ble \
-      --info src/external/model_files/kws/kws_program_info.bin \
-      --bin src/external/model_files/kws/kws_program_data.bin \
-      --yaml src/external/model_files/kws/info.yaml
+      --info models/kws/kws_program_info.bin \
+      --bin models/kws/kws_program_data.bin \
+      --yaml models/kws/info.yaml
 
   # If there is a custom docker image then provide docker image name with -d
   $SCRIPT_INVOCATION -d custom_docker_image -b --app demo_apps

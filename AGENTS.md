@@ -20,6 +20,13 @@ The model workflow has the same shape of gap: the per-model configs it reads liv
 recreate them. The schema is in the "Model build config" section of `src/README.md`, and the
 `model_url` they name is an internal host, so the fetch needs VPN.
 
+Those configs also decide where the output lands, via `output_dir`. It is
+`models/<model>/` at the repository root, git-ignored, and deliberately outside the
+firmware tree so renaming that tree cannot break the pipeline. The catch is that
+`.github/workflows/hardware.yml` rebuilds the same config verbatim from the
+`MODEL_CONFIG_DEMO_APPS_KWS` repository secret, so `output_dir` lives partly outside the
+repository: changing it means rotating that secret, which no pull request can do.
+
 ## Both boards share one Zephyr board target
 
 The AkidaTag board and the nRF5340 DK are both built for `nrf5340dk/nrf5340/cpuapp`, fixed as

@@ -103,9 +103,9 @@ files in full.
 
 # send the model over BLE from the host
 ./scripts/run.sh --send_ble \
-    --info src/external/model_files/kws/kws_program_info.bin \
-    --bin  src/external/model_files/kws/kws_program_data.bin \
-    --yaml src/external/model_files/kws/info.yaml
+    --info models/kws/kws_program_info.bin \
+    --bin  models/kws/kws_program_data.bin \
+    --yaml models/kws/info.yaml
 ```
 
 Once the transfer completes, run the inference test to confirm the model loads from
