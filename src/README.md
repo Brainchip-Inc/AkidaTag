@@ -793,7 +793,7 @@ model's normalisation scalar — use the value your model was trained with.
 - `info.yaml` – the app-specific metadata
 - `<output_dir basename>.zip` – the model bundle: a single directory named after `output_dir`
   holding `info.yaml`, `<prefix>_program_info.bin` and `<prefix>_program_data.bin`. For the
-  configs above that is `models/kws/kws.zip` and `models/kws_edge_learning/kws_edge_learning.zip`
+  `.env/demo_apps/kws.yaml` config above that is `models/kws/kws.zip`
 
 The bundle is what BrainChip Connect expects when you hand it a model: it unzips the archive,
 descends into the single root directory, and looks the three files up by name. Note that the
