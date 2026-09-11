@@ -33,6 +33,12 @@ macro(setup_akida_engine)
 	# Link akida_engine to the main Zephyr app
 	target_link_libraries(app PRIVATE akida_engine)
 
+	# The engine's CMakeLists.txt creates a plain static library, which does not
+	# otherwise see the architecture flags and headers Zephyr carries on this
+	# interface target. Without them the archive is built for a different ABI
+	# than the app and the linker rejects the members it pulls in.
+	target_link_libraries(akida_engine PRIVATE zephyr_interface)
+
 	# Some engine headers are not exported properly → fix locally
 	target_include_directories(akida_engine PUBLIC
 		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/api
@@ -41,38 +47,4 @@ macro(setup_akida_engine)
 		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/devices/akd1500
 	)
 
-	# Collect all source files from src and devices/akd1500 directories
-	zephyr_library_sources(
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/dense.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/device_programmer.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/dma_config_ops.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/dma_desc_ops.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/dma_engine.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/dma_events_ops.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/dma_image_ops.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/external_mem_mgr.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/hardware_device.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/hw_version.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/hardware_device_impl.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/memory_mgr.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/memory_utils.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/multipass_memory.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/program_info.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/program_memory_info.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/reset_nps.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/sparse.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/tensor.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/version.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/input_conversion.cpp
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/dma_config_mem_rw.cpp	
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src/skipdma_ops.cpp
-	)
-
-
-	#
-	# -------------------------------------------------------------
-	#  DEFINITIONS
-	# -------------------------------------------------------------
-	#
-	add_definitions(-DAKIDA_VERSION=\"2.17.0\")
 endmacro()
