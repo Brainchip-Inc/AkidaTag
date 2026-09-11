@@ -59,7 +59,7 @@ How to use script - Examples runs:
   # Flash using Jlink inside Docker
   $SCRIPT_INVOCATION -d -f -jf --app demo_apps
 
-  # Fetch + convert only, on the host → bins/cpp (no info.yaml). All params from the config.
+  # Fetch + convert only, on the host → bins/cpp (no info.yaml, so no .zip bundle either). All params from the config.
   $SCRIPT_INVOCATION --fetch_model .env/demo_apps/kws.yaml
 
   # Generate the app-specific info.yaml + model bundle .zip for a previously-converted model (no Akida SDK needed)

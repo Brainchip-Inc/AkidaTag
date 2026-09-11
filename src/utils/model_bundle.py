@@ -44,8 +44,9 @@ def write_bundle_zip(output_dir, prefix):
 
     zip_path = os.path.join(output_dir, f"{bundle_name}.zip")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as bundle:
-        # An explicit directory entry keeps the wrapper directory visible to
-        # extractors that only create the directories they are told about.
+        # The explicit directory entry mirrors the original bundles the
+        # BrainChip-Connect app is known to accept. Its extractor cannot be
+        # tested from this repository, so keep the entry.
         wrapper = zipfile.ZipInfo(f"{bundle_name}/")
         wrapper.external_attr = (0o40755 << 16) | 0x10
         bundle.writestr(wrapper, b"")
