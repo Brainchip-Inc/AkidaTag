@@ -1,10 +1,10 @@
 
-macro(setup_akida_engine path)
-
-	include(${path}/AkidaEngine.cmake)
-
-
-	deploy_akida_engine()
+# The engine under deps/akida is tracked in this repository rather than
+# generated, so this macro takes no `path` argument any more and never runs
+# `akida engine deploy`. A missing tree is a broken checkout, and the
+# add_subdirectory below says so loudly instead of quietly deploying whatever
+# version the local akida package happens to be.
+macro(setup_akida_engine)
 
 	#
 	# -------------------------------------------------------------

@@ -32,7 +32,7 @@ message(STATUS "Top-level FEAT_NAME = ${FEATURE}")
 
 
 include(core/cmake/akida_engine_setup.cmake)
-setup_akida_engine(core/cmake/)
+setup_akida_engine()
 
 #
 # -------------------------------------------------------------

@@ -2,8 +2,13 @@
 zephyrproject
 tools/*
 build*
-src/deps/*
 models/
+
+# the Akida engine's own test tree. `akida engine deploy` has no flag to skip
+# it, no build ever compiles it, and test/akd1000/test_fnp2/program.cpp alone is
+# 9.3 MB of fixtures for the AKD1000, which this firmware does not target. The
+# rest of src/deps is tracked deliberately.
+src/deps/akida/engine/test/
 
 # ignore specific files
 *JLink_Linux_V888_x86_64.deb
