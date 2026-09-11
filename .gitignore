@@ -2,7 +2,7 @@
 zephyrproject
 tools/*
 build*
-source/external/*
+src/external/*
 
 # ignore specific files
 *JLink_Linux_V888_x86_64.deb

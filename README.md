@@ -187,7 +187,7 @@ The script verifies that the output contains:
 ## Full Hardware Test
 
 Runs **Testcases 1--7**.
-    ./scripts/run.sh -d -t (python source/utils/hil_test.py --port /dev/ttyUSB0)
+    ./scripts/run.sh -d -t (python src/utils/hil_test.py --port /dev/ttyUSB0)
 
 ------------------------------------------------------------------------
 
@@ -196,7 +196,7 @@ Runs **Testcases 1--7**.
 Runs **Testcase 8 only** (typically executed after the model is
 uploaded).
 
-    ./scripts/run.sh -d -t --infer-test (python source/utils/hil_test.py --port /dev/ttyUSB0 --only-infer)
+    ./scripts/run.sh -d -t --infer-test (python src/utils/hil_test.py --port /dev/ttyUSB0 --only-infer)
 
 ------------------------------------------------------------------------
 
@@ -254,7 +254,7 @@ pipeline** function correctly on the target hardware.
 
 ```text
 .
-├── source/            # Core firmware and app related code
+├── src/               # Core firmware and app related code
    ├── apps/           # Application related code
    ├── boards/         # Board overlays and config for the AkidaTag board and nRF5340 DK
    ├── core/           # CMake scripts, SPI communication, BLE services, boot management, etc

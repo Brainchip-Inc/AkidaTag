@@ -134,9 +134,9 @@ jobs:
       - name: Patch version in prj.conf
         run: |
           sed -i 's|CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION=.*|CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION="${{ steps.version.outputs.version }}"|' \
-            source/prj.conf
+            src/prj.conf
           echo "Patched prj.conf:"
-          grep CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION source/prj.conf
+          grep CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION src/prj.conf
 
       - name: Build firmware (AkidaTag board)
         run: |
@@ -151,9 +151,9 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p release-artifacts
 
-          cp build_docker/demo_apps/source/zephyr/zephyr.signed.hex \
+          cp build_docker/demo_apps/src/zephyr/zephyr.signed.hex \
              "release-artifacts/akidatag-${VERSION}.signed.hex"
-          cp build_docker/demo_apps/source/zephyr/zephyr.signed.bin \
+          cp build_docker/demo_apps/src/zephyr/zephyr.signed.bin \
              "release-artifacts/akidatag-${VERSION}.signed.bin"
           cp build_docker/demo_apps/merged.hex \
              "release-artifacts/akidatag-${VERSION}-merged.hex"

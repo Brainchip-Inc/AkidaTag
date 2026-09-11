@@ -7,9 +7,10 @@
 # Tools come from the runner image or from a pinned one-line install, never from
 # a third-party action.
 #
-# This repository's copy differs from the shared template in three places, each
-# carrying behaviour that the retired .github/workflows/lint.yml owned before
-# this job absorbed it. They are marked below.
+# This repository's copy differs from the shared template in four places, all
+# marked below. The first three carry behaviour that the retired
+# .github/workflows/lint.yml owned before this job absorbed it; the fourth keeps
+# a file a pull request only moved out of the linter.
 
 name: ci-gates-lint
 
@@ -51,8 +52,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          # Adapted for this repository. `changes > 0` is the fourth divergence:
+          # GitHub reports a moved file with status `renamed` and no additions or
+          # deletions, so without it a directory rename would hand the linters
+          # every file it moved and gate them on content the pull request never
+          # touched.
           gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate \
-            --jq '.[] | select(.status != "removed") | .filename' > changed.txt
+            --jq '.[] | select(.status != "removed") | select(.changes > 0) | .filename' > changed.txt
           echo "changed files:"
           sed 's/^/  /' changed.txt
 
@@ -94,7 +100,7 @@ jobs:
       # Adapted for this repository. The shared template runs clang-format
       # straight off the runner image; here the version is pinned and the file
       # list is handed to scripts/clang_format.sh, which is the single owner of
-      # the extension and pruned-directory rules and knows that source/external
+      # the extension and pruned-directory rules and knows that src/external
       # and friends are never formatted.
       - name: C and C++
         if: contains(env.LINT_LANGUAGES, 'c') || contains(env.LINT_LANGUAGES, 'cpp')

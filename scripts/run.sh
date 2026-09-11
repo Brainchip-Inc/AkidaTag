@@ -73,9 +73,9 @@ How to use script - Examples runs:
 
   # Send pre-generated model files via BLE using info.yaml (separate step; no Docker needed)
   $SCRIPT_INVOCATION --send_ble \
-      --info source/external/model_files/kws/kws_program_info.bin \
-      --bin source/external/model_files/kws/kws_program_data.bin \
-      --yaml source/external/model_files/kws/info.yaml
+      --info src/external/model_files/kws/kws_program_info.bin \
+      --bin src/external/model_files/kws/kws_program_data.bin \
+      --yaml src/external/model_files/kws/info.yaml
 
   # If there is a custom docker image then provide docker image name with -d
   $SCRIPT_INVOCATION -d custom_docker_image -b --app demo_apps
@@ -423,7 +423,7 @@ if $DO_MINICOM; then
 fi
 # Build the CLI hardware validation test command when -t is enabled, using the configured serial port
 if $DO_CLI_TEST; then
-    CLI_TEST_CMD="python source/utils/hil_test.py --port ${CLI_PORT}"
+    CLI_TEST_CMD="python src/utils/hil_test.py --port ${CLI_PORT}"
 
     if $DO_INFER_TEST; then
         CLI_TEST_CMD="${CLI_TEST_CMD} --only-infer"
@@ -480,7 +480,7 @@ if [[ -n "$APP" ]]; then
 
   case "$APP" in
     demo_apps)
-      APP_SRC_DIR="source"
+      APP_SRC_DIR="src"
       # Add only what demo_apps needs
       CMAKE_EXTRA_ARGS+=(-DCONFIG_DEMO_APPS=y)
 
@@ -496,11 +496,11 @@ if [[ -n "$APP" ]]; then
         CMAKE_EXTRA_ARGS+=(-DCONFIG_AKIDATAG_BOARD=n)
         CMAKE_EXTRA_ARGS+=("-DEXTRA_CONF_FILE=boards/dk.conf")
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/source/sysbuild/mcuboot_dk.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/src/sysbuild/mcuboot_dk.overlay")
       else
         CMAKE_EXTRA_ARGS+=(-DCONFIG_AKIDATAG_BOARD=y)
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_akidatag.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/source/sysbuild/mcuboot_akidatag.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/src/sysbuild/mcuboot_akidatag.overlay")
       fi
       ;;
     *)
@@ -564,7 +564,7 @@ fi
 # --send_ble + --info + --bin + --yaml: BLE send using info.yaml metadata (always runs on host)
 SEND_YAML_CMD=""
 if $SEND_BLE; then
-  SEND_YAML_CMD="python source/utils/send_model_via_ble.py \
+  SEND_YAML_CMD="python src/utils/send_model_via_ble.py \
 --info \"${MODEL_INFO}\" \
 --bin \"${MODEL_BIN}\" \
 --yaml \"${MODEL_YAML}\""
@@ -574,14 +574,14 @@ fi
 # All conversion params come from the config YAML passed as its argument.
 FETCH_MODEL_CMD=""
 if $DO_FETCH_MODEL; then
-  FETCH_MODEL_CMD="python source/utils/fetch_model.py --config \"${FETCH_CONFIG}\""
+  FETCH_MODEL_CMD="python src/utils/fetch_model.py --config \"${FETCH_CONFIG}\""
 fi
 
 # --generate_info: write the app-specific info.yaml from the shapes sidecar (no Akida SDK).
 # Profile and all info.yaml params come from the config YAML passed as its argument.
 GENERATE_INFO_CMD=""
 if $DO_GENERATE_INFO; then
-  GENERATE_INFO_CMD="python source/utils/generate_info.py --config \"${GENERATE_CONFIG}\""
+  GENERATE_INFO_CMD="python src/utils/generate_info.py --config \"${GENERATE_CONFIG}\""
 fi
 
 # -----------------------------------------------------------------------------
