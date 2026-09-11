@@ -44,7 +44,6 @@ macro(setup_akida_engine)
 		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/api
 		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/inc
 		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/src
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/akida/engine/devices/akd1500
 	)
 
 endmacro()
