@@ -11,10 +11,11 @@ Two rules keep that promise:
   CMake, under `src/core/cmake/`. Each tree stays byte-identical to what the
   tool or the release emits, because that is the only thing that makes an
   upgrade diff readable.
-- **Record every new tree here, and add it to `PRUNED_DIRS` in
-  `scripts/clang_format.sh`, in the pull request that lands it.** That list is a
-  blocklist, so a tree nobody lists is handed to clang-format on every pull
-  request that touches it.
+- **Record every new tree here, in the pull request that lands it, and keep it
+  under `src/deps`.** `PRUNED_DIRS` in `scripts/clang_format.sh` is a blocklist
+  of top-level directories under `src/`, and `deps` is the entry that keeps
+  every tree below it away from clang-format; imported code placed anywhere else
+  is handed to clang-format on every pull request that touches it.
 
 ---
 
