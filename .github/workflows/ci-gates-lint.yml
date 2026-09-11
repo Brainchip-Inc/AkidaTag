@@ -4,6 +4,10 @@
 # and the pull request touched a file of that type, so an untouched language
 # costs a couple of seconds and nothing more.
 #
+# The same file also carries LINT_EXCLUDE_REGEX, the paths this repository
+# imports rather than authors. They are dropped from the file list before any
+# linter sees them, for the reasons written out next to that setting.
+#
 # Tools come from the runner image or from a pinned one-line install, never from
 # a third-party action.
 #
@@ -45,6 +49,22 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Read the gate configuration
+        run: |
+          set -euo pipefail
+          conf=.github/ci-gates/ci-gates.conf
+          LINT_EXCLUDE_REGEX=""
+          if [ -f "$conf" ]; then
+            # shellcheck source=/dev/null
+            . "$conf"
+          else
+            LINT_LANGUAGES="python javascript typescript c cpp bash html css"
+          fi
+          echo "LINT_LANGUAGES=$LINT_LANGUAGES" >> "$GITHUB_ENV"
+          echo "LINT_EXCLUDE_REGEX=$LINT_EXCLUDE_REGEX" >> "$GITHUB_ENV"
+          echo "linting: $LINT_LANGUAGES"
+          echo "excluding: ${LINT_EXCLUDE_REGEX:-nothing}"
+
       - name: List the changed files
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,22 +78,24 @@ jobs:
           # every file it moved and gate them on content the pull request never
           # touched.
           gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate \
-            --jq '.[] | select(.status != "removed") | select(.changes > 0) | .filename' > changed.txt
-          echo "changed files:"
-          sed 's/^/  /' changed.txt
+            --jq '.[] | select(.status != "removed") | select(.changes > 0) | .filename' > all-changed.txt
 
-      - name: Read the language list
-        run: |
-          set -euo pipefail
-          conf=.github/ci-gates/ci-gates.conf
-          if [ -f "$conf" ]; then
-            # shellcheck source=/dev/null
-            . "$conf"
+          if [ -n "$LINT_EXCLUDE_REGEX" ]; then
+            # grep exits 1 when it selects nothing, which is an ordinary outcome
+            # here: a pull request may touch imported files and nothing else.
+            grep -Ev "$LINT_EXCLUDE_REGEX" all-changed.txt > changed.txt || true
+            grep -E "$LINT_EXCLUDE_REGEX" all-changed.txt > excluded.txt || true
           else
-            LINT_LANGUAGES="python javascript typescript c cpp bash html css"
+            cp all-changed.txt changed.txt
+            : > excluded.txt
           fi
-          echo "LINT_LANGUAGES=$LINT_LANGUAGES" >> "$GITHUB_ENV"
-          echo "linting: $LINT_LANGUAGES"
+
+          echo "linting these changed files:"
+          sed 's/^/  /' changed.txt
+          if [ -s excluded.txt ]; then
+            echo "skipped, imported paths:"
+            sed 's/^/  /' excluded.txt
+          fi
 
       # Each step below selects its own files and exits early when there are
       # none, so an untouched language costs a couple of seconds and nothing more.
