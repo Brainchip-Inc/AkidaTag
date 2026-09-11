@@ -8,6 +8,22 @@ macro(setup_akida_engine)
 
 	#
 	# -------------------------------------------------------------
+	#  FLATBUFFERS
+	# -------------------------------------------------------------
+	#
+	# The 2.0.8 headers are committed under deps/flatbuffers, so nothing is
+	# downloaded here. The engine's own cmake/akida-engine.cmake still declares
+	# FlatBuffers as a FetchContent dependency, and this variable is how CMake is
+	# told to satisfy that declaration from a local tree: it skips the download
+	# and sets flatbuffers_SOURCE_DIR to this path. Redirecting it from here keeps
+	# the engine tree byte-identical to what `akida engine deploy` emits.
+	set(FETCHCONTENT_SOURCE_DIR_FLATBUFFERS
+		${CMAKE_CURRENT_SOURCE_DIR}/deps/flatbuffers CACHE PATH "" FORCE)
+
+	zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/deps/flatbuffers/include)
+
+	#
+	# -------------------------------------------------------------
 	#  akida ENGINE (uses its own CMakeLists.txt)
 	# -------------------------------------------------------------
 	#
@@ -59,27 +75,4 @@ macro(setup_akida_engine)
 	# -------------------------------------------------------------
 	#
 	add_definitions(-DAKIDA_VERSION=\"2.17.0\")
-	#
-	# -------------------------------------------------------------
-	#  FLATBUFFERS FetchContent
-	# -------------------------------------------------------------
-	#
-	include(FetchContent)
-	set(FETCHCONTENT_QUIET FALSE)
-
-	FetchContent_Declare(
-		flatbuffers
-		URL https://github.com/google/flatbuffers/archive/v2.0.8.tar.gz
-		SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/flatbuffers
-	)
-
-	# Disable unneeded FlatBuffers components before fetching
-	set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-	set(FLATBUFFERS_BUILD_FLATC OFF CACHE BOOL "" FORCE)
-
-	FetchContent_MakeAvailable(flatbuffers)
-
-	# Add FlatBuffers include path
-	zephyr_include_directories(${flatbuffers_SOURCE_DIR}/include)
-	
 endmacro()
