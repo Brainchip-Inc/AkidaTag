@@ -2,7 +2,7 @@
 # Function: deploy_akida_engine)
 # ---------------------------------------------------------
 function(deploy_akida_engine)
-    set(AKD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/akida")
+    set(AKD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/akida")
 
     message(STATUS "Checking akida engine directory: ${AKD_DIR}")
 

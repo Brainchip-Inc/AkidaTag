@@ -122,7 +122,7 @@ jobs:
       # Adapted for this repository. The shared template runs clang-format
       # straight off the runner image; here the version is pinned and the file
       # list is handed to scripts/clang_format.sh, which is the single owner of
-      # the extension and pruned-directory rules and knows that src/external
+      # the extension and pruned-directory rules and knows that src/deps
       # and friends are never formatted.
       - name: C and C++
         if: contains(env.LINT_LANGUAGES, 'c') || contains(env.LINT_LANGUAGES, 'cpp')

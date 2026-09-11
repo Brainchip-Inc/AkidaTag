@@ -2,7 +2,7 @@
 zephyrproject
 tools/*
 build*
-src/external/*
+src/deps/*
 models/
 
 # ignore specific files

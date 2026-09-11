@@ -38,7 +38,7 @@ if [ ! -d "$SRC_ROOT" ]; then
 fi
 
 # Directories under src/ that are never formatted, and the extensions that are.
-PRUNED_DIRS=(external build_docker samples docs docker)
+PRUNED_DIRS=(deps build_docker samples docs docker)
 EXTENSIONS=(c h cpp hpp cc hh cxx hxx)
 
 # collect_all: every eligible file under src/, NUL separated.

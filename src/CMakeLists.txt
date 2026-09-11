@@ -107,9 +107,6 @@ if(CONFIG_IMU_ENABLE_THREAD)
         core/interface/imu/imu.c
     )
 endif()
-set(EXTERNAL_GEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external)
-
-
 #
 # -------------------------------------------------------------
 #  INCLUDE DIRECTORIES
