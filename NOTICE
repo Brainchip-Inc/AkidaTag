@@ -11,8 +11,9 @@ declares nothing, that is recorded rather than assumed away.
 Where each tree came from, at which version, and what was pruned from it is in
 `src/deps/VENDORING.md`. This file covers licensing only.
 
-The counts and file lists below were produced by reading every tracked file
-under `src/deps` as it stood when this file was added. That was 125 files.
+The counts and file lists below were produced by reading every imported file
+under `src/deps` as it stood when this file was added. That was 125 files;
+`src/deps/VENDORING.md` is this repository's own and is not counted.
 
 
 --------------------------------------------------------------------------
