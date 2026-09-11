@@ -1,6 +1,12 @@
 /**
- * This file is based on the akd1500_spi_driver file, and implements the akd
- * driver at the transaction level instead of the spi low level.
+ * nRF implementation of the Akd1500SpiDriver declared in
+ * deps/akida/engine/api/akd1500/akd1500_spi_driver.h.
+ *
+ * It is derived from the engine's own reference implementation at
+ * deps/akida/engine/devices/akd1500/akd1500_spi_driver.cpp, and drives the
+ * device at the transaction level instead of the spi low level. That reference
+ * is committed but never compiled, so this file is the only definition of the
+ * class that the firmware links.
  *
  */
 

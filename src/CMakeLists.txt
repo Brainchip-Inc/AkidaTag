@@ -51,7 +51,7 @@ target_include_directories(app PRIVATE include
 target_sources(app PRIVATE
 	core/interface/akd_spi_flash/akd_spi_flash.cpp
 	core/interface/akd_nrf_spi/nrf_spi.cpp
-	core/interface/akd_spi_flash/akd1500_spi_driver.cpp
+	core/interface/akd_spi_flash/akd1500_spi_driver_nrf.cpp
 	core/interface/akd_spi_flash/akd_spi_flash_handler.cpp
 	core/interface/ble_services/file_transfer.c
 	core/interface/ble_services/ble_initialization.c
