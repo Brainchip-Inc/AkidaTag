@@ -72,9 +72,9 @@ Two checks are required before a pull request can merge into `main`:
   subject you wrote. Merge commits are skipped.
 - **lint** runs ruff, shellcheck, clang-format and prettier over only the files whose
   content the pull request changed; a file it merely moved is skipped. C and C++ go through
-  `scripts/clang_format.sh`, so `.clang-format` is the agreed style. Imported code under
-  `src/deps` is never checked, by that script and by `LINT_EXCLUDE_REGEX` in
-  `.github/ci-gates/ci-gates.conf`, which is where a newly imported tree must be listed.
+  `scripts/clang_format.sh`, so `.clang-format` is the agreed style and imported code under
+  `src/deps` is never checked. That script's `PRUNED_DIRS` owns the rule, and is where a
+  newly imported tree must be listed.
 
 Pull requests into `release` require **format** only.
 

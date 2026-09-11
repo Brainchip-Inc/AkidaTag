@@ -42,14 +42,14 @@ The Akida engine, the FlatBuffers headers and kissfft are all committed, not dow
 generated at configure time. `src/deps/VENDORING.md` is the authority on where each came from, at
 which version, what is pruned, and how to upgrade it. Two rules matter more than the detail: never
 hand-edit a tree under `src/deps`, put adaptations in `src/core/cmake/akida_engine_setup.cmake`
-instead; and add any newly imported tree to `LINT_EXCLUDE_REGEX` in
-`.github/ci-gates/ci-gates.conf` in the same pull request, because that gate is a blocklist.
+instead; and add any newly imported tree to `PRUNED_DIRS` in `scripts/clang_format.sh` in the same
+pull request, because that list is a blocklist.
 
 The engine is the one to be careful with. `AKIDA_VERSION` is defined only by the engine's own
-`cmake/akida-engine.cmake`, so the version the firmware reports always matches the tree that
-shipped, and its CMake globs `src/*.cpp` into the `akida_engine` target, so the app must never list
-engine sources itself. `scripts/requirements.txt` pins the same `akida` version for model
-conversion; move the two together.
+`cmake/akida-engine.cmake`, so it is single-sourced from the committed tree, though nothing in the
+firmware currently reads it. That CMake also globs `src/*.cpp` into the `akida_engine` target, so
+the app must never list engine sources itself. `scripts/requirements.txt` pins the same `akida`
+version for model conversion; move the two together.
 
 ## Formatting
 

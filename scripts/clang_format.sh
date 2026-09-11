@@ -38,6 +38,8 @@ if [ ! -d "$SRC_ROOT" ]; then
 fi
 
 # Directories under src/ that are never formatted, and the extensions that are.
+# deps holds imported code that must stay identical to the version it came from,
+# so it is never reformatted.
 PRUNED_DIRS=(deps build_docker samples docs docker)
 EXTENSIONS=(c h cpp hpp cc hh cxx hxx)
 

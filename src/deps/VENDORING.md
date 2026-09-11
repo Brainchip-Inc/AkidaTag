@@ -11,10 +11,10 @@ Two rules keep that promise:
   CMake, under `src/core/cmake/`. Each tree stays byte-identical to what the
   tool or the release emits, because that is the only thing that makes an
   upgrade diff readable.
-- **Record every new tree here, and add it to `LINT_EXCLUDE_REGEX` in
-  `.github/ci-gates/ci-gates.conf`, in the pull request that lands it.** The
-  lint gate is a blocklist, so a tree nobody lists is handed to clang-format on
-  every pull request that touches it.
+- **Record every new tree here, and add it to `PRUNED_DIRS` in
+  `scripts/clang_format.sh`, in the pull request that lands it.** That list is a
+  blocklist, so a tree nobody lists is handed to clang-format on every pull
+  request that touches it.
 
 ---
 
@@ -28,9 +28,10 @@ Two rules keep that promise:
 | Tracked | 90 files, 556 KB |
 
 The version is asserted by the tree itself, in `engine/cmake/akida-engine.cmake`:
-`AKIDA_VERSION="2.17.0"` and `VERSION 2.17.0`. That file is the single source of
-the version the firmware reports, via `engine/src/version.cpp` and
-`akida::version()`. Nothing else defines `AKIDA_VERSION`.
+`AKIDA_VERSION="2.17.0"` and `VERSION 2.17.0`. Nothing else defines
+`AKIDA_VERSION`, so it is single-sourced from this committed tree. Its only
+consumer is `engine/src/version.cpp`, behind `akida::version()`, which nothing in
+the firmware currently calls.
 
 `scripts/requirements.txt` separately pins `akida==2.17.0` for the model
 conversion pipeline. It no longer decides what the firmware runs, but a model

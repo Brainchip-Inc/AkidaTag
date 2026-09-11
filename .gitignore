@@ -4,6 +4,13 @@ tools/*
 build*
 models/
 
+# retired generated directories from before the trees under src/deps were
+# committed: src/external/ came from `deploy_akida_engine`, src/flatbuffers/ from
+# the old FlatBuffers FetchContent download. Kept ignored so a stale working copy
+# stays harmless.
+src/external/
+src/flatbuffers/
+
 # the Akida engine's own test tree. `akida engine deploy` has no flag to skip
 # it, no build ever compiles it, and test/akd1000/test_fnp2/program.cpp alone is
 # 9.3 MB of fixtures for the AKD1000, which this firmware does not target. The
