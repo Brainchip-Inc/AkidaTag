@@ -723,7 +723,7 @@ self-hosted runner.
 # .env/demo_apps/kws.yaml
 app: demo_apps                                   # generate_info profile
 model_name: kws                                  # file prefix for bins/cpp/.h + shapes sidecar
-output_dir: src/external/model_files/kws      # converted artifacts + info.yaml are written here
+output_dir: src/external/model_files/kws      # everything Steps 1 and 2 write goes here; its basename names the bundle
 model_url: http://<internal-host>/path/to/akida_model.fbz   # .fbz to download (VPN required)
 map_mode: 2                                      # Akida MapMode (optional, default 1)
 neurons_per_class: 1                             # regular kws: 1, edge-learning: e.g. 10
