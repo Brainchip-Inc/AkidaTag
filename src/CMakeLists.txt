@@ -90,11 +90,11 @@ if(CONFIG_SYS_CPU_128MHZ)
 endif()
 
 target_sources(app PRIVATE
-    core/common/audio/kissfft/kiss_fft.c
-    core/common/audio/kissfft/kiss_fftr.c
+    deps/kissfft/kiss_fft.c
+    deps/kissfft/kiss_fftr.c
 )
 target_include_directories(app PRIVATE
-    core/common/audio/kissfft
+    deps/kissfft
 )
 
 if(CONFIG_WDT_ENABLE)
