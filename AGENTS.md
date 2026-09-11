@@ -14,6 +14,12 @@ Every build signs, so a build with no `.env/signing_key.pem` dies in CMake confi
 `src/sysbuild.conf` rather than anything about the app. That directory is git-ignored, so a
 fresh clone or worktree never has one; generate an RSA key there before the first build.
 
+The model workflow has the same shape of gap: the per-model configs it reads live at
+`.env/<app>/<model>.yaml`, also git-ignored, so every documented `--fetch_model` /
+`--generate_info` command dies on a missing config in a fresh worktree until you copy or
+recreate them. The schema is in the "Model build config" section of `src/README.md`, and the
+`model_url` they name is an internal host, so the fetch needs VPN.
+
 ## Both boards share one Zephyr board target
 
 The AkidaTag board and the nRF5340 DK are both built for `nrf5340dk/nrf5340/cpuapp`, fixed as
