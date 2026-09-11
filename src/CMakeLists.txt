@@ -32,7 +32,7 @@ message(STATUS "Top-level FEAT_NAME = ${FEATURE}")
 
 
 include(core/cmake/akida_engine_setup.cmake)
-setup_akida_engine(core/cmake/)
+setup_akida_engine()
 
 #
 # -------------------------------------------------------------
@@ -51,7 +51,7 @@ target_include_directories(app PRIVATE include
 target_sources(app PRIVATE
 	core/interface/akd_spi_flash/akd_spi_flash.cpp
 	core/interface/akd_nrf_spi/nrf_spi.cpp
-	core/interface/akd_spi_flash/akd1500_spi_driver.cpp
+	core/interface/akd_spi_flash/akd1500_spi_driver_nrf.cpp
 	core/interface/akd_spi_flash/akd_spi_flash_handler.cpp
 	core/interface/ble_services/file_transfer.c
 	core/interface/ble_services/ble_initialization.c
@@ -90,11 +90,11 @@ if(CONFIG_SYS_CPU_128MHZ)
 endif()
 
 target_sources(app PRIVATE
-    core/common/audio/kissfft/kiss_fft.c
-    core/common/audio/kissfft/kiss_fftr.c
+    deps/kissfft/kiss_fft.c
+    deps/kissfft/kiss_fftr.c
 )
 target_include_directories(app PRIVATE
-    core/common/audio/kissfft
+    deps/kissfft
 )
 
 if(CONFIG_WDT_ENABLE)
@@ -107,9 +107,6 @@ if(CONFIG_IMU_ENABLE_THREAD)
         core/interface/imu/imu.c
     )
 endif()
-set(EXTERNAL_GEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external)
-
-
 #
 # -------------------------------------------------------------
 #  INCLUDE DIRECTORIES

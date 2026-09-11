@@ -258,6 +258,7 @@ pipeline** function correctly on the target hardware.
    ├── apps/           # Application related code
    ├── boards/         # Board overlays and config for the AkidaTag board and nRF5340 DK
    ├── core/           # CMake scripts, SPI communication, BLE services, boot management, etc
+   ├── deps/           # Imported code: the Akida engine, FlatBuffers headers, kissfft
    ├── include/        # Header files
    ├── sysbuild/       # Configuration settings
    ├── utils/          # Utilities for BLE communication, models, etc
@@ -268,5 +269,14 @@ pipeline** function correctly on the target hardware.
 ├── CHANGELOG.md       # Cumulative change history, source of release notes
 ├── README.md
 ├── CONTRIBUTING.md
+├── NOTICE             # Copyright and licence statements of the code under src/deps
+├── LICENSE-APACHE-2.0 # Licence text the Apache-2.0 files under src/deps reference
 └── LICENSE
 ```
+
+## Licensing
+
+This repository is licensed under `LICENSE`. It also tracks imported code under
+`src/deps`, which carries its own licences: `NOTICE` records what those files
+declare and which paths each statement covers, and `src/deps/VENDORING.md`
+records where each tree came from and how to upgrade it.

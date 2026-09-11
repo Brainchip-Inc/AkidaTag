@@ -38,7 +38,10 @@ if [ ! -d "$SRC_ROOT" ]; then
 fi
 
 # Directories under src/ that are never formatted, and the extensions that are.
-PRUNED_DIRS=(external build_docker samples docs docker)
+# deps holds imported code that must stay identical to the version it came from,
+# so it is never reformatted; external is the retired generated directory it
+# replaced, kept pruned for working copies that still have it on disk.
+PRUNED_DIRS=(deps external build_docker samples docs docker)
 EXTENSIONS=(c h cpp hpp cc hh cxx hxx)
 
 # collect_all: every eligible file under src/, NUL separated.

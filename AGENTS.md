@@ -36,6 +36,22 @@ the set of CMake arguments the `--dk` branch of `scripts/run.sh` selects: the de
 overlay, the mcuboot overlay, `CONFIG_AKIDATAG_BOARD`, and `EXTRA_CONF_FILE=boards/dk.conf`.
 Put any new board-specific Kconfig there rather than in a board-named conf file.
 
+## Imported code lives under `src/deps`
+
+The Akida engine, the FlatBuffers headers and kissfft are all committed, not downloaded and not
+generated at configure time. `src/deps/VENDORING.md` is the authority on where each came from, at
+which version, what is pruned, and how to upgrade it. Two rules matter more than the detail: never
+hand-edit a tree under `src/deps`, put adaptations in `src/core/cmake/akida_engine_setup.cmake`
+instead; and put any newly imported tree under `src/deps`, because `PRUNED_DIRS` in
+`scripts/clang_format.sh` is a blocklist of top-level directories under `src/`, and `deps` is the
+entry that keeps imported code away from clang-format.
+
+The engine is the one to be careful with. `AKIDA_VERSION` is defined only by the engine's own
+`cmake/akida-engine.cmake`, so it is single-sourced from the committed tree, though nothing in the
+firmware currently reads it. That CMake also globs `src/*.cpp` into the `akida_engine` target, so
+the app must never list engine sources itself. `scripts/requirements.txt` pins the same `akida`
+version for model conversion; move the two together.
+
 ## Formatting
 
 `.clang-format` only started being honoured at commit 362bc45, so most of the tree is still
