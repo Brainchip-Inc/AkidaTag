@@ -24,7 +24,7 @@ Install the host tools once:
 
 ```sh
 uv tool install smpmgr        # talks to the bootloader
-pip install pyserial          # used by scripts/usb_dfu_enter.py
+pip install pyserial          # used by src/utils/usb_dfu_enter.py
 ```
 
 You need a signed application image. Every build produces one at
@@ -62,7 +62,7 @@ broken board.
 ## Step 2: Put the board into update mode
 
 ```sh
-python scripts/usb_dfu_enter.py --port /dev/cu.usbserial-01D9C7391
+python src/utils/usb_dfu_enter.py --port /dev/cu.usbserial-01D9C7391
 ```
 
 It prints `bootloader is in serial recovery` when the board is ready.
@@ -154,7 +154,7 @@ cable or port problem.
 ## Troubleshooting
 
 **`SMPBadSequence: Bad sequence N, expected 0`** means a reply from an earlier request was
-still in the pipe. `scripts/usb_dfu_enter.py` clears this before it exits; if you see it
+still in the pipe. `src/utils/usb_dfu_enter.py` clears this before it exits; if you see it
 after driving the bootloader by hand, simply run the command again.
 
 **The script says the bootloader did not answer.** Check you are on the debug UART using
