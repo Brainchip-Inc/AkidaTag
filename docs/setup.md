@@ -50,9 +50,10 @@ Based on the scripts you ran, following images should be build and seen. See bel
 `demo_apps` is the application this project builds and flashes. `--dk` selects the
 nRF5340 DK overlay, which is the board this document sets up.
 
-Every build signs its images and a fresh clone has no `.env/signing_key.pem`, so generate the
-key first with `./scripts/run.sh -d --key`; see
-[Application Security](../src/README.md#application-security) for what the key is for.
+Every build signs its images with the development key committed at
+`keys/NOT-SECRET-development-signing-key.pem`, so there is nothing to set up. That key is public on
+purpose; see [Application Security](../src/README.md#application-security) for what it does and does
+not protect, and for how to use your own key instead.
 
 ```
 # build

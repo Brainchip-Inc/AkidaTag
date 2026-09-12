@@ -902,16 +902,62 @@ cd AkidaTag
    on the chip until a full chip erase is performed.
 
 ### Application Security
-This project signs its firmware images and verifies them via MCUboot, both at boot and on DFU (Device Firmware Update). Security is enforced through an RSA-3072 digital signature. Note that secure boot, an immutable first-stage bootloader that verifies MCUboot itself, is not enabled; it is listed on the roadmap.
-The signing_key.pem file contains a Private Key used to cryptographically sign your firmware binaries. During the boot process and OTA updates, the bootloader (MCUboot) uses a corresponding Public Key (embedded in its own code) to verify that the firmware is authentic and has not been tampered with.
 
-To generate this file run
+This project signs its firmware images with an RSA-3072 key and MCUboot verifies that signature,
+both at boot and on DFU. There is nothing to set up: every build signs with the development key
+committed at `keys/NOT-SECRET-development-signing-key.pem`.
+
+Note that secure boot, an immutable first-stage bootloader that verifies MCUboot itself, is not
+enabled. The signature therefore protects the over-the-air and serial update paths, where it is the
+only control. It does not protect against someone with physical access and a debug probe, who can
+replace MCUboot itself.
+
+#### Two keys, and why one of them is public
+
+| Key | Where it lives | Signs |
+| --- | --- | --- |
+| Development | `keys/NOT-SECRET-development-signing-key.pem`, committed here | Everything built from this repository |
+| Production | A CI secret, not in this repository | BrainChip's official releases only |
+
+The development key is **public on purpose** and is not a secret. Anyone can sign firmware with it,
+so a signature made with it proves nothing about who produced the image; treat any image signed with
+it as untrusted. It exists so that a fresh clone builds and flashes with no setup step. The file's
+own header says the same thing.
+
+Official releases are signed with the production key, which CI substitutes for the line in
+`src/sysbuild.conf`. That one override is the entire difference between a build from this repository
+and a build BrainChip publishes.
+
+#### Which key a board trusts, and how to change it
+
+MCUboot carries the public half of a key inside its own image, so **a board trusts whichever key
+built the bootloader currently on it**, and only a flash that replaces MCUboot can change that.
+
+| What you flash | Replaces MCUboot? | Effect |
+| --- | --- | --- |
+| `merged.hex`, over SWD | Yes | The board adopts the key that built it |
+| `zephyr.signed.bin` / `.hex` / `dfu_application.zip`, over BLE or serial recovery | No | Must already match the key on the board, or the update is refused |
+
+So a board flashed from an official release accepts official updates, and a board you flashed
+yourself accepts yours. To move a board between the two, flash the other `merged.hex` over SWD once.
+This is the normal, supported way across, in both directions.
+
+A rejected update is quiet: MCUboot erases the image, logs `Image in the secondary slot is not
+valid!` to its console, and carries on running the previous firmware. Nothing is bricked.
+
+#### Using your own key instead
+
+If you want your boards to run only your own firmware, generate a key, keep it outside this
+repository, and point `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` in `src/sysbuild.conf` at it:
 
 ```
-./scripts/run.sh -d --key
+docker run --rm -v "$PWD":/akidatag -w /akidatag akidatag-ncs:v3.1.1-py3.12 \
+  imgtool keygen -k /path/to/your-key.pem -t rsa-3072
 ```
 
-KEEP THIS FILE SECRET. If an attacker gains access to signing_key.pem, they can sign and install malicious firmware on your devices. Never commit this file to public repositories.
+Build and flash `merged.hex` over SWD once, and from then on those boards will refuse anything not
+signed by you, including BrainChip's releases. Keep that key safe: there is no way to revoke it
+remotely, so a board can only be re-keyed with a debug probe.
 
 ### Console Logging Information
 The MCUboot log messages are output over the same USB cable used to power the board. To view these logs, open minicom and connect to the corresponding USB serial port.

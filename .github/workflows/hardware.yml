@@ -182,11 +182,6 @@ jobs:
         with:
           ref: ${{ needs.authorize.outputs.sha }}
 
-      - name: Generate Signing Key
-        timeout-minutes: 4
-        run: |
-          ./scripts/run.sh -d --key
-
       # The model config is git-ignored; materialise it from the repo secret.
       # checkout's git clean wipes .env/ each run, so this must run after checkout
       # and before fetch.

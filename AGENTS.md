@@ -9,12 +9,18 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 Everything goes through `scripts/run.sh` in the `akidatag-ncs` Docker image; `docs/setup.md`
 is the reference. The application app is `demo_apps`, whose source directory is `src/`.
 
-Every build signs, so a build with no `.env/signing_key.pem` dies in CMake configure with
-`west sign can't find file`, naming the path `${APP_DIR}/../.env/signing_key.pem` from
-`src/sysbuild.conf` rather than anything about the app. That directory is git-ignored, so a
-fresh clone or worktree never has one; generate an RSA key there before the first build.
+Every build signs, and the key it signs with is committed at
+`keys/NOT-SECRET-development-signing-key.pem`, so a fresh clone builds with no setup. That key is
+public on purpose and its own header says so. `.github/workflows/release.yml` overrides
+`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` with the private production key from a CI secret, and that one
+override is the whole boundary between a local build and a published release. Leave it alone.
 
-The model workflow has the same shape of gap: the per-model configs it reads live at
+Because MCUboot carries the public half inside its own image, a board trusts whichever key built
+the bootloader on it. Only `merged.hex` over SWD replaces MCUboot, so only that re-keys a board;
+BLE and serial-recovery updates write the application slot alone and must match the key already
+there. `src/README.md` "Application Security" is the reference.
+
+The model workflow still has a fresh-worktree gap: the per-model configs it reads live at
 `.env/<app>/<model>.yaml`, also git-ignored, so every documented `--fetch_model` /
 `--generate_info` command dies on a missing config in a fresh worktree until you copy or
 recreate them. The schema is in the "Model build config" section of `src/README.md`, and the

@@ -25,7 +25,6 @@ Options:
   -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
   -m, --minicom      | (str)  | Run minicom inside Docker (default: ttyUSB0).
                      |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
-  --key              | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
   --release          | (flag) | Release/CI mode: disables -it flag for non-interactive Docker runs
   -r, --reset        | (flag) | Do Board Reset
   -h, --help         | (flag) | Show this help message
@@ -95,12 +94,6 @@ How to use script - Examples runs:
   # Only launch container and stay
   $SCRIPT_INVOCATION -d --shell
 
-  # Create signing key locally
-  $SCRIPT_INVOCATION --key
-
-  # Create signing key inside docker
-  $SCRIPT_INVOCATION -d --shell
-
   # Run CLI hardware validation test
   $SCRIPT_INVOCATION -d -t
 
@@ -149,9 +142,7 @@ MINICOM_DEV="/dev/ttyUSB0"
 
 DO_RESET=false
 
-DO_KEY=false
 DO_RELEASE=false
-KEY_FILE=".env/signing_key.pem"
 
 IS_DARWIN=false
 IS_LINUX=false
@@ -234,10 +225,6 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
-        --key)
-            DO_KEY=true
-            shift
-            ;;
         --release)
             DO_RELEASE=true
             shift
@@ -270,8 +257,8 @@ if $DO_SHELL && ! $DOCKER; then
 fi
 
 # If not shell/minicom, require at least one action: build/flash/send_ble/fetch/generate
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && ! $DO_FETCH_MODEL && ! $DO_GENERATE_INFO && ! $DO_CLI_TEST; then
-    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --fetch_model and/or --generate_info, and/or --key or use --shell / --minicom"
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && ! $DO_FETCH_MODEL && ! $DO_GENERATE_INFO && ! $DO_CLI_TEST; then
+    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --fetch_model and/or --generate_info, or use --shell / --minicom"
     exit 1
 fi
 
@@ -280,7 +267,7 @@ _needs_app=false
 if $DO_BUILD || $DO_FLASH; then
     _needs_app=true
 fi
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && $_needs_app && [[ -z "$APP" ]]; then
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && $_needs_app && [[ -z "$APP" ]]; then
     echo "Error: --app is required"
     exit 1
 fi
@@ -441,29 +428,6 @@ if $DO_SHELL; then
 
     "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" bash -l
     exit $?
-fi
-
-# -----------------------------------------------------------------------------
-# KEYGEN MODE
-# -----------------------------------------------------------------------------
-if $DO_KEY; then
-    [[ -f "$KEY_FILE" ]] && echo "Error: $KEY_FILE already exists" && exit 1
-    echo "=== Generating signing key ==="
-    echo "    Output: $KEY_FILE"
-
-    if $DOCKER; then
-        echo "    Running inside Docker image: $DOCKER_IMAGE"
-        echo ">>> Docker command:"
-        printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" imgtool keygen -k "$KEY_FILE" -t rsa-3072
-        echo
-
-        "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" imgtool keygen -k "$KEY_FILE" -t rsa-3072
-        exit $?
-    else
-        echo ">>> imgtool keygen -k \"$KEY_FILE\" -t rsa-3072"
-        imgtool keygen -k "$KEY_FILE" -t rsa-3072
-        exit $?
-    fi
 fi
 
 # -----------------------------------------------------------------------------

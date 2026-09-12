@@ -131,6 +131,28 @@ jobs:
           echo "${{ secrets.PRODUCTION_SIGNING_KEY_PEM_B64 }}" | base64 -d > .env/signing_key.pem
           chmod 600 .env/signing_key.pem
 
+      # src/sysbuild.conf points at the committed development key, which is
+      # public on purpose so that a fresh clone builds with no setup. An
+      # official release must be signed with the production key instead, so
+      # repoint it here. This is the single line that separates a local build
+      # from a published one, and the guard below refuses to build if it ever
+      # stops working: a release accidentally signed with the public key would
+      # be trusted by every board flashed from it.
+      - name: Point the build at the production signing key
+        run: |
+          sed -i 's|^SB_CONFIG_BOOT_SIGNATURE_KEY_FILE=.*|SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\\${APP_DIR}/../.env/signing_key.pem"|' \
+            src/sysbuild.conf
+          echo "Patched sysbuild.conf:"
+          grep SB_CONFIG_BOOT_SIGNATURE_KEY_FILE src/sysbuild.conf
+          if grep -q 'NOT-SECRET' src/sysbuild.conf; then
+            echo "::error::sysbuild.conf still points at the development key; refusing to sign a release with it"
+            exit 1
+          fi
+          if ! grep -q '\.env/signing_key\.pem' src/sysbuild.conf; then
+            echo "::error::sysbuild.conf does not point at the production key after patching"
+            exit 1
+          fi
+
       - name: Patch version in prj.conf
         run: |
           sed -i 's|CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION=.*|CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION="${{ steps.version.outputs.version }}"|' \
