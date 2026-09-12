@@ -148,6 +148,11 @@ jobs:
             echo "::error::sysbuild.conf still points at the development key; refusing to sign a release with it"
             exit 1
           fi
+          # Catches the case the guard above cannot: the key file line being
+          # absent from sysbuild.conf, or the key being renamed so NOT-SECRET
+          # no longer appears. The sed then matches nothing and the NOT-SECRET
+          # grep passes vacuously, while sysbuild falls back to MCUboot's own
+          # root-rsa-2048.pem, whose private half anyone can download.
           if ! grep -q '\.env/signing_key\.pem' src/sysbuild.conf; then
             echo "::error::sysbuild.conf does not point at the production key after patching"
             exit 1
