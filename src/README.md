@@ -902,16 +902,80 @@ cd AkidaTag
    on the chip until a full chip erase is performed.
 
 ### Application Security
-This project signs its firmware images and verifies them via MCUboot, both at boot and on DFU (Device Firmware Update). Security is enforced through an RSA-3072 digital signature. Note that secure boot, an immutable first-stage bootloader that verifies MCUboot itself, is not enabled; it is listed on the roadmap.
-The signing_key.pem file contains a Private Key used to cryptographically sign your firmware binaries. During the boot process and OTA updates, the bootloader (MCUboot) uses a corresponding Public Key (embedded in its own code) to verify that the firmware is authentic and has not been tampered with.
 
-To generate this file run
+This project signs its firmware images with an RSA-3072 key and MCUboot verifies that signature,
+both at boot and on DFU. There is nothing to set up: every build signs with the development key
+committed at `.env/development_key.pem`.
+
+Note that secure boot, an immutable first-stage bootloader that verifies MCUboot itself, is not
+enabled. The signature therefore protects the over-the-air and serial update paths, where it is the
+only control. It does not protect against someone with physical access and a debug probe, who can
+replace MCUboot itself.
+
+#### Two keys, and why one of them is public
+
+| Key | Where it lives | Signs |
+| --- | --- | --- |
+| Development | `.env/development_key.pem`, committed here | Everything built from this repository |
+| Production | `.env/production_key.pem` in a release build only, from a CI secret; never committed | BrainChip's official releases only |
+
+The development key is **public on purpose** and is not a secret. Anyone can sign firmware with it,
+so a signature made with it proves nothing about who produced the image; treat any image signed with
+it as untrusted. It exists so that a fresh clone builds and flashes with no setup step. Nothing in
+the filename says any of this, so the file's own header does, in the first line inside it.
+
+Official releases are signed with the production key. `.github/workflows/release.yml` writes it to
+`.env/production_key.pem` from the `PRODUCTION_SIGNING_KEY_PEM_B64` secret and repoints the
+`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` line in `src/sysbuild.conf` at it, then refuses to build if that
+patch did not take. That one override is the entire difference between a build from this repository
+and a build BrainChip publishes. The production key is never committed: `.env/*` and `*.pem` both
+ignore it, and the `.gitignore` exception that lets the development key through names only that one
+file.
+
+#### Which key a board trusts, and how to change it
+
+MCUboot carries the public half of a key inside its own image, so **a board trusts whichever key
+built the bootloader currently on it**, and only a flash that replaces MCUboot can change that.
+
+| What you flash | Replaces MCUboot? | Effect |
+| --- | --- | --- |
+| `merged.hex`, over SWD | Yes | The board adopts the key that built it |
+| `zephyr.signed.bin` / `.hex` / `dfu_application.zip`, over BLE or serial recovery | No | Must already match the key on the board, or the update is refused |
+
+So a board flashed from an official release accepts official updates, and a board you flashed
+yourself accepts yours. To move a board between the two, flash the other `merged.hex` over SWD once.
+This is the normal, supported way across, in both directions.
+
+A rejected update is quiet: MCUboot erases the image, logs `Image in the secondary slot is not
+valid!` to its console, and carries on running the previous firmware. Nothing is bricked.
+
+#### Using your own key instead
+
+If you want your boards to run only your own firmware, generate your own key and point
+`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` in `src/sysbuild.conf` at it.
+
+The key has to live inside your working tree, because a containerised build sees nothing else: it
+runs with this repository bind-mounted at `/akidatag` and no other host path in reach. Put it in
+`.env/` under a name of your own, which is git-ignored, so it stays out of any commit. This is the
+same directory the two keys above live in.
 
 ```
-./scripts/run.sh -d --key
+docker run --rm -v "$PWD":/akidatag -w /akidatag \
+  -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" \
+  akidatag-ncs:v3.1.1-py3.12 \
+  imgtool keygen -k .env/my-signing-key.pem -t rsa-3072
+chmod 600 .env/my-signing-key.pem
 ```
 
-KEEP THIS FILE SECRET. If an attacker gains access to signing_key.pem, they can sign and install malicious firmware on your devices. Never commit this file to public repositories.
+Then edit `src/sysbuild.conf`:
+
+```
+SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\${APP_DIR}/../.env/my-signing-key.pem"
+```
+
+Build and flash `merged.hex` over SWD once, and from then on those boards will refuse anything not
+signed by you, including BrainChip's releases. Keep that key safe and back it up: there is no way to
+revoke it remotely, so a board can only be re-keyed with a debug probe.
 
 ### Console Logging Information
 The MCUboot log messages are output over the same USB cable used to power the board. To view these logs, open minicom and connect to the corresponding USB serial port.
