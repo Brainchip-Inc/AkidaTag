@@ -97,6 +97,17 @@ though SWD reads and writes are reliable. A re-run that prints
 `Flash download: ... Skipped. Contents already match` for both banks is the cheapest proof the
 device matches the built images.
 
+The USB-C connector reaches an on-board CP2105 dual bridge, so the board presents two serial
+ports and only the higher-numbered one carries the debug UART; the other is silent. That wire
+also serves MCUboot serial recovery, which is a probe-free way to flash and is documented in
+`docs/firmware-update-over-usb.md`. The nRF5340's own USB pins go to a header, not to USB-C.
+
+Do not assume the image on a board was signed with the key in `.env/`. Read the KEYHASH TLV out
+of flash and compare before concluding anything about why an image is refused: the TLV area
+starts at `mcuboot_primary` + `hdr_size` + `img_size`, and `imgtool dumpinfo` prints the same
+field for a local file. A mismatch means the bootloader on the board embeds a different key,
+not that the board is broken.
+
 ## Do not edit
 
 `CHANGELOG.md` and `VERSION` are release-managed. Commit subjects and pull request titles are
