@@ -19,7 +19,6 @@ import serial
 REBOOT_COMMAND = b"\r\nkernel reboot cold\r\n"
 SMP_FRAME_START = b"\x06\x09"
 SMP_READ_RESPONSE = 1
-SMP_WRITE_RESPONSE = 3
 KNOCK_INTERVAL_SECONDS = 0.1
 MARKER_SEQUENCE = 0xFF
 MARKER_LIMIT_SECONDS = 120.0
@@ -73,29 +72,7 @@ def image_state_read(sequence: int) -> bytes:
     return bytes([0x00, 0x00]) + struct.pack(">HHBB", 1, 1, sequence, 0) + b"\xa0"
 
 
-def find_bootloader_response(received: bytes) -> bytes | None:
-    """Pick a genuine bootloader reply out of everything the port has sent back.
-
-    The running application's shell also reacts to these bytes, so a reply only
-    counts when it decodes to an SMP response rather than shell output.
-
-    Args:
-        received: Everything read from the port so far.
-
-    Returns:
-        The decoded SMP response, or None if the bootloader has not answered.
-    """
-    for token in re.findall(rb"\x06\x09([A-Za-z0-9+/=]+)", received):
-        try:
-            decoded = base64.b64decode(token)
-        except ValueError:
-            continue
-        if len(decoded) > 3 and decoded[2] in (SMP_READ_RESPONSE, SMP_WRITE_RESPONSE):
-            return decoded
-    return None
-
-
-def enter_recovery(port: str, seconds: float) -> bool:
+def enter_recovery(port: str, seconds: float) -> tuple[bool, bool]:
     """Reboot the application and knock until the bootloader answers.
 
     Args:
@@ -103,7 +80,9 @@ def enter_recovery(port: str, seconds: float) -> bool:
         seconds: How long to keep knocking after the reboot command.
 
     Returns:
-        True if the bootloader answered, False if the window was never caught.
+        Whether the bootloader answered, and whether the replies still owed for
+        the earlier knocks were drained. An answer means the board is in serial
+        recovery whatever the drain did.
     """
     with serial.Serial(port, 115200, timeout=0.05) as link:
         link.reset_input_buffer()
@@ -119,9 +98,9 @@ def enter_recovery(port: str, seconds: float) -> bool:
             listen_until = time.time() + KNOCK_INTERVAL_SECONDS
             while time.time() < listen_until:
                 received += link.read(1024)
-            if find_bootloader_response(received):
-                return drain_to_marker(link)
-    return False
+            if response_sequences(received):
+                return True, drain_to_marker(link)
+    return False, False
 
 
 def drain_to_marker(link: serial.Serial) -> bool:
@@ -165,7 +144,7 @@ def response_sequences(received: bytes) -> list[int]:
             decoded = base64.b64decode(token)
         except ValueError:
             continue
-        if len(decoded) > 8 and decoded[2] in (SMP_READ_RESPONSE, SMP_WRITE_RESPONSE):
+        if len(decoded) > 8 and decoded[2] == SMP_READ_RESPONSE:
             sequences.append(decoded[8])
     return sequences
 
@@ -182,15 +161,23 @@ def main() -> int:
     )
     arguments = parser.parse_args()
 
-    if enter_recovery(arguments.port, arguments.seconds):
-        print(f"{arguments.port}: bootloader is in serial recovery")
-        return 0
-    print(
-        f"{arguments.port}: bootloader did not answer. Check this is the debug UART, "
-        f"and that the firmware enables CONFIG_BOOT_SERIAL_WAIT_FOR_DFU.",
-        file=sys.stderr,
-    )
-    return 1
+    answered, drained = enter_recovery(arguments.port, arguments.seconds)
+    if not answered:
+        print(
+            f"{arguments.port}: bootloader did not answer. Check this is the debug "
+            f"UART, and that the firmware enables CONFIG_BOOT_SERIAL_WAIT_FOR_DFU.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"{arguments.port}: bootloader is in serial recovery")
+    if not drained:
+        print(
+            f"{arguments.port}: stale replies are still arriving, so the next smpmgr "
+            f"command may fail with SMPBadSequence. Run it again if it does.",
+            file=sys.stderr,
+        )
+    return 0
 
 
 if __name__ == "__main__":

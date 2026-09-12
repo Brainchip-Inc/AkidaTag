@@ -72,8 +72,16 @@ until the bootloader answers. It has to repeat, because MCUboot only listens for
 window at each boot and `smpmgr` sends its request once and gives up. Once the bootloader
 answers, it stays in update mode until the next reset, so there is no hurry afterwards.
 
-A board whose firmware is too broken to boot goes into update mode **on its own** and
-waits there, so a bricked board is recoverable over the cable too.
+### The second entrance, for a board that cannot boot
+
+`src/sysbuild/mcuboot.conf` deliberately sets `CONFIG_BOOT_SERIAL_NO_APPLICATION` alongside
+the boot-time listening window. It gives the bootloader a second, independent entrance: when
+the image in slot 0 fails signature validation, the bootloader stays in serial recovery over
+the USB-C cable instead of halting, and waits there without any command from the host. That
+is what makes a board carrying a bad image recoverable without a debug probe.
+
+Because `src/sysbuild/mcuboot.conf` is shared by both build targets, the nRF5340 DK build
+behaves exactly the same way.
 
 ### What you see on the board
 
@@ -154,8 +162,9 @@ cable or port problem.
 ## Troubleshooting
 
 **`SMPBadSequence: Bad sequence N, expected 0`** means a reply from an earlier request was
-still in the pipe. `src/utils/usb_dfu_enter.py` clears this before it exits; if you see it
-after driving the bootloader by hand, simply run the command again.
+still in the pipe. `src/utils/usb_dfu_enter.py` normally clears this before it exits, and
+warns on stderr when it gave up waiting for the last of them. Either way the board is in
+update mode: simply run the command again until it sticks.
 
 **The script says the bootloader did not answer.** Check you are on the debug UART using
 the shell-prompt test in step 1, and that the firmware is recent enough to enable
