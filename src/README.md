@@ -947,17 +947,28 @@ valid!` to its console, and carries on running the previous firmware. Nothing is
 
 #### Using your own key instead
 
-If you want your boards to run only your own firmware, generate a key, keep it outside this
-repository, and point `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` in `src/sysbuild.conf` at it:
+If you want your boards to run only your own firmware, generate your own key and point
+`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` in `src/sysbuild.conf` at it.
+
+The key has to live inside your working tree, because the build sees nothing else: every build runs
+in the container with this repository bind-mounted at `/akidatag` and nothing else mounted. Put it
+in `.env/`, which is git-ignored, so it stays out of any commit. This is the same path CI uses for
+the production key.
 
 ```
 docker run --rm -v "$PWD":/akidatag -w /akidatag akidatag-ncs:v3.1.1-py3.12 \
-  imgtool keygen -k /path/to/your-key.pem -t rsa-3072
+  imgtool keygen -k .env/my-signing-key.pem -t rsa-3072
+```
+
+Then edit `src/sysbuild.conf`:
+
+```
+SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\${APP_DIR}/../.env/my-signing-key.pem"
 ```
 
 Build and flash `merged.hex` over SWD once, and from then on those boards will refuse anything not
-signed by you, including BrainChip's releases. Keep that key safe: there is no way to revoke it
-remotely, so a board can only be re-keyed with a debug probe.
+signed by you, including BrainChip's releases. Keep that key safe and back it up: there is no way to
+revoke it remotely, so a board can only be re-keyed with a debug probe.
 
 ### Console Logging Information
 The MCUboot log messages are output over the same USB cable used to power the board. To view these logs, open minicom and connect to the corresponding USB serial port.

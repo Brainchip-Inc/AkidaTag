@@ -233,13 +233,12 @@ check is not required, so an unplugged board never blocks a merge.
 
 The GitHub Actions workflow performs the following steps:
 
-1.  Generate firmware signing key
-2.  Download and prepare the model
-3.  Build firmware
-4.  Flash firmware to the device
-5.  Run CLI hardware tests (Testcases 1--7)
-6.  Upload model via BLE
-7.  Run inference validation (Testcase 8)
+1.  Download and prepare the model
+2.  Build firmware
+3.  Flash firmware to the device
+4.  Run CLI hardware tests (Testcases 1--7)
+5.  Upload model via BLE
+6.  Run inference validation (Testcase 8)
 
 This ensures that the firmware, peripherals, and **Akida KWS inference
 pipeline** function correctly on the target hardware.
@@ -264,8 +263,9 @@ pipeline** function correctly on the target hardware.
    ├── utils/          # Utilities for BLE communication, models, etc
 ├── scripts/           # Build, flash, and utility scripts
 ├── docs/              # Setup, Architecture and design documentation
-├── .env/              # Environment related file, signing keys not to be pushed
+├── .env/              # Local-only environment files: per-model build configs, not pushed
 ├── .github/           # CI, CODEOWNERS, repo configuration
+├── keys/              # The development signing key, committed and public on purpose
 ├── CHANGELOG.md       # Cumulative change history, source of release notes
 ├── README.md
 ├── CONTRIBUTING.md
