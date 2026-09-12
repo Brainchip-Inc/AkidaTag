@@ -263,9 +263,8 @@ pipeline** function correctly on the target hardware.
    ├── utils/          # Utilities for BLE communication, models, etc
 ├── scripts/           # Build, flash, and utility scripts
 ├── docs/              # Setup, Architecture and design documentation
-├── .env/              # Local-only environment files: per-model build configs, not pushed
+├── .env/              # Local-only files, plus the committed development signing key
 ├── .github/           # CI, CODEOWNERS, repo configuration
-├── keys/              # The development signing key, committed and public on purpose
 ├── CHANGELOG.md       # Cumulative change history, source of release notes
 ├── README.md
 ├── CONTRIBUTING.md

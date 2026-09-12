@@ -26,11 +26,12 @@ src/deps/akida/engine/test/
 # but allow
 !.env/README.md
 
-# The development signing key is committed on purpose and must survive the
-# *.pem rule above. It is not a secret; the file's own header explains why, and
-# BrainChip's released firmware is signed with a different key that is not in
-# this repository.
-!keys/NOT-SECRET-development-signing-key.pem
+# The development signing key is committed on purpose and must survive both
+# rules above. It is not a secret; the file's own header explains why. Its
+# sibling .env/production_key.pem is the real secret, is written only by
+# .github/workflows/release.yml during a release build, and has no exception
+# here or anywhere else: it stays ignored by .env/* and by *.pem.
+!.env/development_key.pem
 
 # misc files
 *.DS_Store

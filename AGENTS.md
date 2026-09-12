@@ -9,11 +9,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 Everything goes through `scripts/run.sh` in the `akidatag-ncs` Docker image; `docs/setup.md`
 is the reference. The application app is `demo_apps`, whose source directory is `src/`.
 
-Every build signs, and the key it signs with is committed at
-`keys/NOT-SECRET-development-signing-key.pem`, so a fresh clone builds with no setup. That key is
-public on purpose and its own header says so. `.github/workflows/release.yml` overrides
-`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` with the private production key from a CI secret, and that one
-override is the whole boundary between a local build and a published release. Leave it alone.
+Every build signs, and the key it signs with is committed at `.env/development_key.pem`, so a fresh
+clone builds with no setup. That key is public on purpose; nothing in its name says so, so its own
+header is what tells you, and `.env/README.md` describes both keys. `.github/workflows/release.yml`
+writes the private production key to `.env/production_key.pem` and repoints
+`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` at it, and that one override is the whole boundary between a
+local build and a published release. Two guards in that step fail the release if the config still
+names the development key or does not name the production one; both skip comment lines, because the
+comments in `src/sysbuild.conf` name both files. Leave that step alone.
 
 Because MCUboot carries the public half inside its own image, a board trusts whichever key built
 the bootloader on it. Only `merged.hex` over SWD replaces MCUboot, so only that re-keys a board;

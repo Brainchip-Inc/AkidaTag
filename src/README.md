@@ -905,7 +905,7 @@ cd AkidaTag
 
 This project signs its firmware images with an RSA-3072 key and MCUboot verifies that signature,
 both at boot and on DFU. There is nothing to set up: every build signs with the development key
-committed at `keys/NOT-SECRET-development-signing-key.pem`.
+committed at `.env/development_key.pem`.
 
 Note that secure boot, an immutable first-stage bootloader that verifies MCUboot itself, is not
 enabled. The signature therefore protects the over-the-air and serial update paths, where it is the
@@ -916,17 +916,21 @@ replace MCUboot itself.
 
 | Key | Where it lives | Signs |
 | --- | --- | --- |
-| Development | `keys/NOT-SECRET-development-signing-key.pem`, committed here | Everything built from this repository |
-| Production | A CI secret, not in this repository | BrainChip's official releases only |
+| Development | `.env/development_key.pem`, committed here | Everything built from this repository |
+| Production | `.env/production_key.pem` in a release build only, from a CI secret; never committed | BrainChip's official releases only |
 
 The development key is **public on purpose** and is not a secret. Anyone can sign firmware with it,
 so a signature made with it proves nothing about who produced the image; treat any image signed with
-it as untrusted. It exists so that a fresh clone builds and flashes with no setup step. The file's
-own header says the same thing.
+it as untrusted. It exists so that a fresh clone builds and flashes with no setup step. Nothing in
+the filename says any of this, so the file's own header does, in the first line inside it.
 
-Official releases are signed with the production key, which CI substitutes for the line in
-`src/sysbuild.conf`. That one override is the entire difference between a build from this repository
-and a build BrainChip publishes.
+Official releases are signed with the production key. `.github/workflows/release.yml` writes it to
+`.env/production_key.pem` from the `PRODUCTION_SIGNING_KEY_PEM_B64` secret and repoints the
+`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` line in `src/sysbuild.conf` at it, then refuses to build if that
+patch did not take. That one override is the entire difference between a build from this repository
+and a build BrainChip publishes. The production key is never committed: `.env/*` and `*.pem` both
+ignore it, and the `.gitignore` exception that lets the development key through names only that one
+file.
 
 #### Which key a board trusts, and how to change it
 
@@ -952,8 +956,8 @@ If you want your boards to run only your own firmware, generate your own key and
 
 The key has to live inside your working tree, because a containerised build sees nothing else: it
 runs with this repository bind-mounted at `/akidatag` and no other host path in reach. Put it in
-`.env/`, which is git-ignored, so it stays out of any commit. This is the same path CI uses for
-the production key.
+`.env/` under a name of your own, which is git-ignored, so it stays out of any commit. This is the
+same directory the two keys above live in.
 
 ```
 docker run --rm -v "$PWD":/akidatag -w /akidatag akidatag-ncs:v3.1.1-py3.12 \

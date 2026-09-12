@@ -128,8 +128,8 @@ jobs:
       - name: Reconstruct production signing key
         run: |
           mkdir -p .env
-          echo "${{ secrets.PRODUCTION_SIGNING_KEY_PEM_B64 }}" | base64 -d > .env/signing_key.pem
-          chmod 600 .env/signing_key.pem
+          echo "${{ secrets.PRODUCTION_SIGNING_KEY_PEM_B64 }}" | base64 -d > .env/production_key.pem
+          chmod 600 .env/production_key.pem
 
       # src/sysbuild.conf points at the committed development key, which is
       # public on purpose so that a fresh clone builds with no setup. An
@@ -140,20 +140,24 @@ jobs:
       # be trusted by every board flashed from it.
       - name: Point the build at the production signing key
         run: |
-          sed -i 's|^SB_CONFIG_BOOT_SIGNATURE_KEY_FILE=.*|SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\\${APP_DIR}/../.env/signing_key.pem"|' \
+          sed -i 's|^SB_CONFIG_BOOT_SIGNATURE_KEY_FILE=.*|SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\\${APP_DIR}/../.env/production_key.pem"|' \
             src/sysbuild.conf
           echo "Patched sysbuild.conf:"
           grep SB_CONFIG_BOOT_SIGNATURE_KEY_FILE src/sysbuild.conf
-          if grep -q 'NOT-SECRET' src/sysbuild.conf; then
+          # Both greps below skip comment lines: ^[^#]* cannot cross a '#', so
+          # only a live setting can match. src/sysbuild.conf names both key
+          # files in its own comments, and a naive grep would fail a correct
+          # release.
+          if grep -q '^[^#]*development_key\.pem' src/sysbuild.conf; then
             echo "::error::sysbuild.conf still points at the development key; refusing to sign a release with it"
             exit 1
           fi
           # Catches the case the guard above cannot: the key file line being
-          # absent from sysbuild.conf, or the key being renamed so NOT-SECRET
-          # no longer appears. The sed then matches nothing and the NOT-SECRET
-          # grep passes vacuously, while sysbuild falls back to MCUboot's own
-          # root-rsa-2048.pem, whose private half anyone can download.
-          if ! grep -q '\.env/signing_key\.pem' src/sysbuild.conf; then
+          # absent from sysbuild.conf altogether. The sed then matches nothing
+          # and the development-key grep passes vacuously, while sysbuild falls
+          # back to MCUboot's own root-rsa-2048.pem, whose private half anyone
+          # can download.
+          if ! grep -q '^[^#]*\.env/production_key\.pem' src/sysbuild.conf; then
             echo "::error::sysbuild.conf does not point at the production key after patching"
             exit 1
           fi
