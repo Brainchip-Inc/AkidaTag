@@ -128,6 +128,9 @@ rebuild it, then find `dfu_application.zip` in the build directory
 nRF Connect Mobile App; the FOTA section of
 [src/README.md](../src/README.md) walks through the app.
 
+To update a board over its USB-C cable instead, with no phone and no debug probe, see
+[firmware-update-over-usb.md](./firmware-update-over-usb.md).
+
 *Tip: A simple change that I make is adding a print statement in main.cpp*
 
 ---
