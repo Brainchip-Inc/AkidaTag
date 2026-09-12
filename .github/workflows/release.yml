@@ -143,7 +143,8 @@ jobs:
           sed -i 's|^SB_CONFIG_BOOT_SIGNATURE_KEY_FILE=.*|SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\\${APP_DIR}/../.env/production_key.pem"|' \
             src/sysbuild.conf
           echo "Patched sysbuild.conf:"
-          grep SB_CONFIG_BOOT_SIGNATURE_KEY_FILE src/sysbuild.conf
+          grep SB_CONFIG_BOOT_SIGNATURE_KEY_FILE src/sysbuild.conf \
+            || echo "(no SB_CONFIG_BOOT_SIGNATURE_KEY_FILE line found)"
           # Both greps below skip comment lines: ^[^#]* cannot cross a '#', so
           # only a live setting can match. src/sysbuild.conf names both key
           # files in its own comments, and a naive grep would fail a correct

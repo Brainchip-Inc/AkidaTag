@@ -964,6 +964,7 @@ docker run --rm -v "$PWD":/akidatag -w /akidatag \
   -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" \
   akidatag-ncs:v3.1.1-py3.12 \
   imgtool keygen -k .env/my-signing-key.pem -t rsa-3072
+chmod 600 .env/my-signing-key.pem
 ```
 
 Then edit `src/sysbuild.conf`:
