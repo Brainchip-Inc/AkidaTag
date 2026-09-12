@@ -11,7 +11,8 @@ is the reference. The application app is `demo_apps`, whose source directory is 
 
 Every build signs, and the key it signs with is committed at `.env/development_key.pem`, so a fresh
 clone builds with no setup. That key is public on purpose; nothing in its name says so, so its own
-header is what tells you, and `.env/README.md` describes both keys. `.github/workflows/release.yml`
+header is what tells you, and `src/README.md` "Application Security" describes both keys.
+`.github/workflows/release.yml`
 writes the private production key to `.env/production_key.pem` and repoints
 `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` at it, and that one override is the whole boundary between a
 local build and a published release. Two guards in that step fail the release if the config still

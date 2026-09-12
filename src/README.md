@@ -960,7 +960,9 @@ runs with this repository bind-mounted at `/akidatag` and no other host path in 
 same directory the two keys above live in.
 
 ```
-docker run --rm -v "$PWD":/akidatag -w /akidatag akidatag-ncs:v3.1.1-py3.12 \
+docker run --rm -v "$PWD":/akidatag -w /akidatag \
+  -e USER_NAME=demo -e USER_UID="$(id -u)" -e USER_GID="$(id -g)" \
+  akidatag-ncs:v3.1.1-py3.12 \
   imgtool keygen -k .env/my-signing-key.pem -t rsa-3072
 ```
 
