@@ -950,9 +950,9 @@ valid!` to its console, and carries on running the previous firmware. Nothing is
 If you want your boards to run only your own firmware, generate your own key and point
 `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` in `src/sysbuild.conf` at it.
 
-The key has to live inside your working tree, because the build sees nothing else: every build runs
-in the container with this repository bind-mounted at `/akidatag` and nothing else mounted. Put it
-in `.env/`, which is git-ignored, so it stays out of any commit. This is the same path CI uses for
+The key has to live inside your working tree, because a containerised build sees nothing else: it
+runs with this repository bind-mounted at `/akidatag` and no other host path in reach. Put it in
+`.env/`, which is git-ignored, so it stays out of any commit. This is the same path CI uses for
 the production key.
 
 ```

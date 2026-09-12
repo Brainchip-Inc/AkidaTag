@@ -21,7 +21,7 @@ BLE and serial-recovery updates write the application slot alone and must match 
 there. `src/README.md` "Application Security" is the reference.
 
 The model workflow still has a fresh-worktree gap: the per-model configs it reads live at
-`.env/<app>/<model>.yaml`, also git-ignored, so every documented `--fetch_model` /
+`.env/<app>/<model>.yaml`, which is git-ignored, so every documented `--fetch_model` /
 `--generate_info` command dies on a missing config in a fresh worktree until you copy or
 recreate them. The schema is in the "Model build config" section of `src/README.md`, and the
 `model_url` they name is an internal host, so the fetch needs VPN.
