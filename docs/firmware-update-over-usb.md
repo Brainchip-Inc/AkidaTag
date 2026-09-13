@@ -16,6 +16,13 @@ bootloader's own serial recovery mode therefore answers over the cable.
 The nRF5340's native USB pins do **not** reach the USB-C connector on this board, so USB
 CDC flashing is not possible and is not what this page describes.
 
+Listening at every boot is not free. `CONFIG_BOOT_SERIAL_WAIT_FOR_DFU_TIMEOUT` in
+`src/sysbuild/mcuboot.conf` makes MCUboot hold the board for about a second before it starts
+the application, on both build targets and in every release: measured, the application banner
+appears about 1.5 s after a reset. That timeout is a budget which also covers the slot 0
+signature check, which happens whether or not this option is set, so raising it does not add
+delay one for one.
+
 ---
 
 ## Before you start
@@ -65,12 +72,20 @@ broken board.
 python src/utils/usb_dfu_enter.py --port /dev/cu.usbserial-01D9C7391
 ```
 
-It prints `bootloader is in serial recovery` when the board is ready.
+It prints `bootloader is in serial recovery` when the board is ready, after about four
+seconds, and then keeps running for another twenty or so before it exits. **Both parts are
+normal.** The board is already in update mode when that line appears.
 
 The script reboots the running application over the same cable and then repeats a request
 until the bootloader answers. It has to repeat, because MCUboot only listens for a short
 window at each boot and `smpmgr` sends its request once and gives up. Once the bootloader
 answers, it stays in update mode until the next reset, so there is no hurry afterwards.
+
+The extra twenty seconds are the script clearing up after itself. Every repeated request the
+bootloader accepted is owed a reply, and each reply costs it a full signature check over the
+image, so they trail out slowly. The script waits for the last of them, which is what leaves
+the port clean for `smpmgr`. If it cannot, it says so on stderr and still exits 0, because the
+board is in update mode either way.
 
 ### The second entrance, for a board that cannot boot
 
@@ -165,6 +180,11 @@ cable or port problem.
 still in the pipe. `src/utils/usb_dfu_enter.py` normally clears this before it exits, and
 warns on stderr when it gave up waiting for the last of them. Either way the board is in
 update mode: simply run the command again until it sticks.
+
+**The script printed `bootloader is in serial recovery` and then sat there.** That is the
+clean-up described in step 2, and the board is already in update mode. It normally takes
+about twenty seconds. If the bootloader drops the script's last request the wait can reach
+two minutes before it gives up and warns on stderr, which is slow but harmless.
 
 **The script says the bootloader did not answer.** Check you are on the debug UART using
 the shell-prompt test in step 1, and that the firmware is recent enough to enable
