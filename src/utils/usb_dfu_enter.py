@@ -22,6 +22,7 @@ SMP_READ_RESPONSE = 1
 KNOCK_INTERVAL_SECONDS = 0.1
 MARKER_SEQUENCE = 0xFF
 MARKER_LIMIT_SECONDS = 120.0
+SETTLE_SECONDS = 0.5
 
 
 def crc16_xmodem(payload: bytes) -> int:
@@ -112,12 +113,17 @@ def drain_to_marker(link: serial.Serial) -> bool:
     knocks never use gives a definite end instead: everything ahead of its reply
     is stale, and nothing is outstanding behind it.
 
+    The bootloader holds a fixed number of input buffers and drops whatever
+    arrives while they are all full, so the marker is sent only once the knocks
+    have stopped and the wire has fallen quiet.
+
     Args:
         link: The open serial port.
 
     Returns:
         True once the marker reply arrives, False if it never does.
     """
+    time.sleep(SETTLE_SECONDS)
     link.write(frame_request(image_state_read(MARKER_SEQUENCE)))
     give_up_at = time.time() + MARKER_LIMIT_SECONDS
     received = b""
