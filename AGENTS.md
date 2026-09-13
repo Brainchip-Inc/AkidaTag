@@ -115,6 +115,24 @@ checked in CI by `.github/ci-gates/check-subject.sh`, which is the authority on 
 accepted; see `CONTRIBUTING.md`. The old local `commit-msg` hook is gone, so a stale copy left
 in `.git/hooks/` by the retired installer enforces rules that no longer apply.
 
+## A cancelled no-mistakes run can strand its gate ref
+
+The pipeline pushes into its own staging repo without `--force`, and its `rebase` step
+rewrites your commits, so cancelling a run after that step leaves the gate ref on the
+pre-rebase head while `axi sync --recover` moves the local branch to the rebased one. Every
+later `axi run` then dies with a non-fast-forward push and no run is ever created, so there is
+no gate to respond to. `rerun`, `axi sync --check` and `axi sync --recover --keep-local` all
+fail to clear it, the last reporting `recovered: true` with `changed: false`, which reads like
+success. Compare the refs rather than trusting that line:
+
+```sh
+git ls-remote no-mistakes "refs/heads/<branch>"; git rev-parse HEAD
+```
+
+If they have diverged, delete the stale ref and let the next run recreate it, after confirming
+the old commit survives locally and on origin: `git push no-mistakes :refs/heads/<branch>`.
+Never force-push into the staging repo.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
