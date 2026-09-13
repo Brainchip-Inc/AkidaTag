@@ -982,8 +982,24 @@ signed by you, including BrainChip's releases. Keep that key safe and back it up
 revoke it remotely, so a board can only be re-keyed with a debug probe.
 
 ### Console Logging Information
-The MCUboot log messages are output over the same USB cable used to power the board. To view these logs, open minicom and connect to the corresponding USB serial port.
-The demo_apps log messages are output on the dedicated UART pins. To view these logs, connect the UART TX/RX pins to a USB-to-TTL converter, plug the converter into the host PC, and open the associated serial port in minicom.
+The demo_apps console and shell run on uart0, which the overlays map to the dedicated pins
+TX P0.29 and RX P1.04 on either board. Where those pins reach the host is what differs.
+
+On the AkidaTag board they are wired to the on-board USB-to-UART bridge behind the USB-C
+connector, so the cable that powers the board already carries the console; open the bridge
+port in minicom at 115200 baud. That bridge presents two ports and only one of them is the
+console; [docs/firmware-update-over-usb.md](../docs/firmware-update-over-usb.md#step-1-find-the-port)
+tells you which.
+
+On the nRF5340 DK those pins go to a header rather than to the on-board debug VCOM, so
+connect them to a USB-to-TTL converter, plug the converter into the host PC, and open the
+converter's serial port in minicom.
+
+MCUboot itself prints nothing on that port. `src/sysbuild/mcuboot.conf` sets
+`CONFIG_UART_CONSOLE=n` because the bootloader uses the same uart0 for its mcumgr serial
+recovery channel, and a log console sharing the wire would corrupt it. The board's state in
+the bootloader is read from the LEDs and from `smpmgr`, not from a log; see
+[docs/firmware-update-over-usb.md](../docs/firmware-update-over-usb.md).
 
 ### Inference test
 This application co-hosts both MNIST and KWS models in serial flash memory:
