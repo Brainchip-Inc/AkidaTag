@@ -73,35 +73,33 @@ def image_state_read(sequence: int) -> bytes:
     return bytes([0x00, 0x00]) + struct.pack(">HHBB", 1, 1, sequence, 0) + b"\xa0"
 
 
-def enter_recovery(port: str, seconds: float) -> tuple[bool, bool]:
+def enter_recovery(link: serial.Serial, seconds: float) -> bool:
     """Reboot the application and knock until the bootloader answers.
 
     Args:
-        port: Serial device carrying the board's debug UART.
+        link: Open serial port carrying the board's debug UART.
         seconds: How long to keep knocking after the reboot command.
 
     Returns:
-        Whether the bootloader answered, and whether the replies still owed for
-        the earlier knocks were drained. An answer means the board is in serial
-        recovery whatever the drain did.
+        Whether the bootloader answered. An answer means the board is in serial
+        recovery, and it stays there until the next reset.
     """
-    with serial.Serial(port, 115200, timeout=0.05) as link:
-        link.reset_input_buffer()
-        link.write(REBOOT_COMMAND)
-        link.flush()
+    link.reset_input_buffer()
+    link.write(REBOOT_COMMAND)
+    link.flush()
 
-        deadline = time.time() + seconds
-        received = b""
-        sequence = 0
-        while time.time() < deadline:
-            link.write(frame_request(image_state_read(sequence % MARKER_SEQUENCE)))
-            sequence += 1
-            listen_until = time.time() + KNOCK_INTERVAL_SECONDS
-            while time.time() < listen_until:
-                received += link.read(1024)
-            if response_sequences(received):
-                return True, drain_to_marker(link)
-    return False, False
+    deadline = time.time() + seconds
+    received = b""
+    sequence = 0
+    while time.time() < deadline:
+        link.write(frame_request(image_state_read(sequence % MARKER_SEQUENCE)))
+        sequence += 1
+        listen_until = time.time() + KNOCK_INTERVAL_SECONDS
+        while time.time() < listen_until:
+            received += link.read(1024)
+        if response_sequences(received):
+            return True
+    return False
 
 
 def drain_to_marker(link: serial.Serial) -> bool:
@@ -167,22 +165,22 @@ def main() -> int:
     )
     arguments = parser.parse_args()
 
-    answered, drained = enter_recovery(arguments.port, arguments.seconds)
-    if not answered:
-        print(
-            f"{arguments.port}: bootloader did not answer. Check this is the debug "
-            f"UART, and that the firmware enables CONFIG_BOOT_SERIAL_WAIT_FOR_DFU.",
-            file=sys.stderr,
-        )
-        return 1
+    with serial.Serial(arguments.port, 115200, timeout=0.05) as link:
+        if not enter_recovery(link, arguments.seconds):
+            print(
+                f"{arguments.port}: bootloader did not answer. Check this is the debug "
+                f"UART, and that the firmware enables CONFIG_BOOT_SERIAL_WAIT_FOR_DFU.",
+                file=sys.stderr,
+            )
+            return 1
 
-    print(f"{arguments.port}: bootloader is in serial recovery")
-    if not drained:
-        print(
-            f"{arguments.port}: stale replies are still arriving, so the next smpmgr "
-            f"command may fail with SMPBadSequence. Run it again if it does.",
-            file=sys.stderr,
-        )
+        print(f"{arguments.port}: bootloader is in serial recovery", flush=True)
+        if not drain_to_marker(link):
+            print(
+                f"{arguments.port}: stale replies are still arriving, so the next "
+                f"smpmgr command may fail with SMPBadSequence. Run it again if it does.",
+                file=sys.stderr,
+            )
     return 0
 
 
