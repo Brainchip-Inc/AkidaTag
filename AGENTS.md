@@ -97,12 +97,41 @@ though SWD reads and writes are reliable. A re-run that prints
 `Flash download: ... Skipped. Contents already match` for both banks is the cheapest proof the
 device matches the built images.
 
+The USB-C connector reaches an on-board CP2105 dual bridge, so the board presents two serial
+ports and only the higher-numbered one carries the debug UART; the other is silent. That wire
+also serves MCUboot serial recovery, which is a probe-free way to flash and is documented in
+`docs/firmware-update-over-usb.md`. The nRF5340's own USB pins go to a header, not to USB-C.
+
+Do not assume the image on a board was signed with the key in `.env/`. Read the KEYHASH TLV out
+of flash and compare before concluding anything about why an image is refused: the TLV area
+starts at `mcuboot_primary` + `hdr_size` + `img_size`, and `imgtool dumpinfo` prints the same
+field for a local file. A mismatch means the bootloader on the board embeds a different key,
+not that the board is broken.
+
 ## Do not edit
 
 `CHANGELOG.md` and `VERSION` are release-managed. Commit subjects and pull request titles are
 checked in CI by `.github/ci-gates/check-subject.sh`, which is the authority on what is
 accepted; see `CONTRIBUTING.md`. The old local `commit-msg` hook is gone, so a stale copy left
 in `.git/hooks/` by the retired installer enforces rules that no longer apply.
+
+## A cancelled no-mistakes run can strand its gate ref
+
+The pipeline pushes into its own staging repo without `--force`, and its `rebase` step
+rewrites your commits, so cancelling a run after that step leaves the gate ref on the
+pre-rebase head while `axi sync --recover` moves the local branch to the rebased one. Every
+later `axi run` then dies with a non-fast-forward push and no run is ever created, so there is
+no gate to respond to. `rerun`, `axi sync --check` and `axi sync --recover --keep-local` all
+fail to clear it, the last reporting `recovered: true` with `changed: false`, which reads like
+success. Compare the refs rather than trusting that line:
+
+```sh
+git ls-remote no-mistakes "refs/heads/<branch>"; git rev-parse HEAD
+```
+
+If they have diverged, delete the stale ref and let the next run recreate it, after confirming
+the old commit survives locally and on origin: `git push no-mistakes :refs/heads/<branch>`.
+Never force-push into the staging repo.
 
 ## Maintaining this file
 
