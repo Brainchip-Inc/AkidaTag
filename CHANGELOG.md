@@ -529,8 +529,10 @@ has no GitHub release page.
 - Sample applications for DK board validation
 - Dockerfile and scripts for the development environment
 
-[Unreleased]: https://github.com/Brainchip-Inc/spark/compare/v1.1.0+0...HEAD
-[1.1.0+0]: https://github.com/Brainchip-Inc/spark/compare/v1.0.0+0...v1.1.0+0
-[1.0.0+0]: https://github.com/Brainchip-Inc/spark/compare/v0.2.0...v1.0.0+0
-[0.2.0]: https://github.com/Brainchip-Inc/spark/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Brainchip-Inc/spark/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Brainchip-Inc/AkidaTag/compare/v1.2.0+0...HEAD
+[1.2.0+0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v1.1.1+0...v1.2.0+0
+[1.1.1+0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v1.1.0+0...v1.1.1+0
+[1.1.0+0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v1.0.0+0...v1.1.0+0
+[1.0.0+0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v0.2.0...v1.0.0+0
+[0.2.0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Brainchip-Inc/AkidaTag/releases/tag/v0.1.0
