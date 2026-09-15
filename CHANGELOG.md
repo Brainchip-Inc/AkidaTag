@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Spark firmware are documented in this file.
+All notable changes to the AkidaTag firmware are documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
@@ -22,6 +22,161 @@ release. On release, this section is renamed to the new version heading and a
 fresh empty `[Unreleased]` is added above it. Not to be confused with the
 roadmap in README.md, which lists work that has not landed at all.
 -->
+
+## [1.2.0+0] - 2026-09-14
+
+Pre-release carrying the product rename from Spark to AkidaTag, a firmware update
+path that needs nothing but the USB-C cable, and a build that works from a fresh
+clone with no setup. The Akida engine and its dependencies are now committed
+rather than fetched at configure time, and the generated model output has moved
+out of the firmware tree. The cycle carries new features and a rename rather than
+bug fixes alone, so the version takes a minor bump and the build counter resets
+to `0`.
+
+### Added
+
+- **DFU:** firmware update over the USB-C cable with no button press and no debug
+  probe. MCUboot now listens for an mcumgr command at every boot
+  (`CONFIG_BOOT_SERIAL_WAIT_FOR_DFU`, a 1000 ms window) and stays in serial
+  recovery when no image is bootable (`CONFIG_BOOT_SERIAL_NO_APPLICATION`), so a
+  customer with neither a J-Link probe nor the phone app is no longer stuck. The
+  board's buttons are too small to be a usable entrance, which is why the
+  entrance is buttonless rather than the button path being documented (#82)
+- **DFU:** `src/utils/usb_dfu_enter.py`, a host helper that reboots the running
+  application over the serial port and repeats an mcumgr request until the
+  bootloader answers inside that short window (#82)
+- **Docs:** `docs/firmware-update-over-usb.md`, the single procedure for updating
+  over USB-C: port selection, entering update mode, listing images, upload, boot,
+  refused-image behaviour and troubleshooting. `docs/setup.md`, the UART DFU and
+  console-logging sections of `src/README.md` and `AGENTS.md` point at it,
+  including the CP2105 dual-port and KEYHASH TLV sharp edges. Entering recovery
+  over the cable, uploading a signed image, booting it and refusing an image
+  signed with a different key were all demonstrated on a physical AkidaTag board
+  (#82)
+- **Model:** the documented fetch flow now writes the per-model `.zip` bundle the
+  BrainChip Connect app reads, so a clean re-fetch produces a complete package
+  with no manual zipping. The archive wraps a directory named after the output
+  directory around `info.yaml` and the two program binaries, matching the bundles
+  the app is known to accept (#78)
+- **BLE:** the device serial is reported over the bonded link instead of on the
+  air, as a fifth and final frame appended to the `CMD_DEVICE_INFO` burst, which
+  is served only over a connection the firmware raises to `BT_SECURITY_L4`. It is
+  emitted as 16 lowercase hex characters of `device_id.high`; `device_id.low` is
+  always zero and so is padding rather than information (#66)
+- **CI:** conventional commit and pull request title gates, so
+  `type(scope): concise message` is enforced on pull requests rather than only
+  suggested by a local hook. The retired `lint.yml` is folded into the gate's
+  lint job, keeping its pinned clang-format and its delegation to
+  `scripts/clang_format.sh`, so one required check now covers formatting for
+  every language in the repository (#68)
+- **Licensing:** `src/deps/VENDORING.md`, `NOTICE` and `LICENSE-APACHE-2.0`
+  record where each imported tree came from, at which version, what is pruned and
+  how to upgrade it (#80)
+
+### Changed
+
+- **Product:** Spark is renamed to AkidaTag across the repository, in mixed case
+  rather than AkidaTAG. The toolchain image `spark-ncs` becomes `akidatag-ncs`,
+  the board Kconfig symbol `CONFIG_SPARK_BOARD` becomes `CONFIG_AKIDATAG_BOARD`,
+  the board and MCUboot overlays and `spark_peripherals_power_enable()` follow,
+  release assets become `akidatag-<VERSION>.*`, and the advertised device names
+  become `AkidaTag` and `AkidaTag-DK`. No compatibility aliases were kept: one
+  name per thing. Wire-format constants, BLE UUIDs, opcodes, the AKD1500 chip-id
+  string and the Zephyr board target are deliberately untouched, and boards
+  already flashed keep advertising the old spelling until reflashed (#75)
+- **Repository:** the firmware tree `source/` is renamed to `src/`, with every
+  reference repointed: `run.sh` app and overlay paths, `clang_format.sh`,
+  `.gitignore`, the hardware and release workflows, README, `docs/setup.md`,
+  `CONTRIBUTING.md`, `AGENTS.md` and the utility docstrings. The lint gate's
+  changed-file filter is narrowed at the same time, so a pull request that only
+  moves files no longer hands every moved file to the linters (#77)
+- **Build:** every build now signs with the committed development key at
+  `.env/development_key.pem`, so a fresh clone builds with no setup. Previously
+  each clone generated its own random RSA-3072 key, which meant two checkouts on
+  one machine produced firmware that would not install on each other's boards,
+  and which protected nothing: it sat on a developer machine and guarded a board
+  on the same desk. The key is public on purpose and says so in its own header.
+  Official releases are unaffected and still sign with the private production
+  key, which CI writes to `.env/production_key.pem`; the release workflow now
+  points the build at that key explicitly rather than relying on a shared path,
+  and fails the release if the key it is about to sign with is not the production
+  one (#81)
+- **Dependencies:** the Akida engine 2.17.0 tree, the FlatBuffers 2.0.8 headers
+  and kissfft are committed under `src/deps` instead of being produced at CMake
+  configure time. Nothing in the repository previously recorded which engine
+  shipped, a version bump took five manual steps of which three failed silently,
+  and FlatBuffers was downloaded from github.com on every build with no checksum,
+  so the firmware build needed public internet and trusted whatever that URL
+  served. An upgrade is now a reviewable diff. The engine's own CMake owns its
+  source list and `AKIDA_VERSION`, replacing the hand-maintained source list and
+  the hardcoded version. This repository's forked AKD1500 SPI driver is renamed
+  to `akd1500_spi_driver_nrf.cpp` so it no longer shares a basename with the
+  vendor's reference implementation, which is committed but never compiled (#80)
+- **Model:** generated model output now lands in a git-ignored `models/`
+  directory at the repository root instead of inside the firmware tree, so no
+  future rename of the source tree can break the model pipeline. The
+  `MODEL_CONFIG_DEMO_APPS_KWS` repository secret and any local `.env` model
+  config carry `output_dir` and must be updated to the new root before the
+  hardware workflow next runs (#79)
+- **CI:** the hardware-in-the-loop board test runs on request rather than on
+  every pull request and every push to `main`. A maintainer comments `/dk-test`
+  and the board runs against that pull request's head commit, guarded by an exact
+  command match, an owner/member/collaborator check and a no-forks rule, all on a
+  hosted runner, with the outcome published back as a check named `hardware`.
+  Renamed from `HIL_Test` to `hardware` and from `ci.yml` to `hardware.yml`; the
+  test steps themselves are unchanged (#71)
+- **Contributing:** `CONTRIBUTING.md` now documents what the CI gate actually
+  accepts, with `check-subject.sh` named as the authority, rather than describing
+  a local hook whose rules disagreed with the gate in both directions (#70)
+- **Docs:** the security section describes what is actually enabled instead of
+  claiming secure boot. The firmware signs application images with RSA-3072 and
+  MCUboot verifies them at boot and over DFU, but there is no immutable
+  first-stage bootloader verifying MCUboot itself, no APPROTECT and no
+  anti-rollback counter. The roadmap entry in README.md already lists secure boot
+  as planned and is left as is (#67)
+
+### Fixed
+
+- **BLE privacy:** the scan response carried the chip's factory DEVICEID as a
+  128-bit service UUID. That value never changes, so any passive scanner could
+  follow a specific tag across every address rotation, defeating the resolvable
+  private address that `CONFIG_BT_PRIVACY` and `CONFIG_BT_RPA_TIMEOUT` already
+  provide. The scan response is dropped entirely at both `bt_le_adv_start()` call
+  sites. Advertising stays connectable and the advertising data is unchanged, so
+  the flags, device name and manufacturer data the app identifies the board by
+  are still broadcast (#66)
+- **BLE:** both boards advertised under the same name, so a DK on the bench and
+  an AkidaTag board were indistinguishable on air. The DK now carries its own
+  name through `src/boards/dk.conf`, which `scripts/run.sh` merges via
+  `EXTRA_CONF_FILE` in its `--dk` branch. Both boards build for the same Zephyr
+  board target, so the auto-discovered `boards/<board>.conf` route would have
+  merged into both builds; what distinguishes the two is the set of CMake
+  arguments `run.sh` selects, which is where the override belongs (#66)
+- **Utils:** `get_device_name()` read `prj.conf`, which holds only the AkidaTag
+  board's name, so every consumer would have scanned for the wrong name against a
+  DK, including `send_model_via_ble.py` that the hardware workflow runs straight
+  after flashing one. It now reads the merged Kconfig output of the most recent
+  build, which is the configuration the flashed firmware was actually compiled
+  from, with `prj.conf` kept as the fallback for a checkout that has not been
+  built yet (#66)
+- **CI:** reacting to a `/dk-test` request failed with HTTP 403. A comment on a
+  pull request is authorised against the pull-requests scope rather than the
+  issues scope, and the job held only `pull-requests: read`; both scopes are now
+  written out. The board job also now requires the authorising job to have
+  succeeded outright rather than merely to have resolved a commit, so the
+  hardware is never spent on a run whose result has nowhere to be reported (#73)
+
+### Removed
+
+- **Samples:** the three early validation applications under `samples/`, now that
+  `demo_apps` covers that ground. `scripts/run.sh` makes `demo_apps` the ordinary
+  app path and rejects anything else by name, the setup walkthrough and README
+  are retargeted, and two broken J-Link examples in the help text are corrected
+  (#76)
+- **Hooks:** `scripts/commit_msg_hook.sh` and `scripts/install_git_hooks.sh`,
+  superseded by the CI gate. A copy already installed in a clone keeps enforcing
+  the old rules, so `CONTRIBUTING.md` and `AGENTS.md` both say to remove
+  `.git/hooks/commit-msg` (#70)
 
 ## [1.1.1+0] - 2026-08-25
 
@@ -374,8 +529,10 @@ has no GitHub release page.
 - Sample applications for DK board validation
 - Dockerfile and scripts for the development environment
 
-[Unreleased]: https://github.com/Brainchip-Inc/spark/compare/v1.1.0+0...HEAD
-[1.1.0+0]: https://github.com/Brainchip-Inc/spark/compare/v1.0.0+0...v1.1.0+0
-[1.0.0+0]: https://github.com/Brainchip-Inc/spark/compare/v0.2.0...v1.0.0+0
-[0.2.0]: https://github.com/Brainchip-Inc/spark/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Brainchip-Inc/spark/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Brainchip-Inc/AkidaTag/compare/v1.2.0+0...HEAD
+[1.2.0+0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v1.1.1+0...v1.2.0+0
+[1.1.1+0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v1.1.0+0...v1.1.1+0
+[1.1.0+0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v1.0.0+0...v1.1.0+0
+[1.0.0+0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v0.2.0...v1.0.0+0
+[0.2.0]: https://github.com/Brainchip-Inc/AkidaTag/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Brainchip-Inc/AkidaTag/releases/tag/v0.1.0
