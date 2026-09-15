@@ -7,8 +7,10 @@
 # these gates existed that nobody can go back and rewrite.
 #
 # actions/checkout is GitHub's own first-party action, not a third-party one.
-# It checks out the BASE branch, so the validator that runs is always the copy
-# on the protected branch and never a version edited inside the pull request.
+# It checks out the repository's default branch, so the validator that runs is
+# always the copy on that protected branch and never a version edited inside the
+# pull request. The base branch is not usable as the source: a release pull
+# request merges into a branch that may not carry the validator at all.
 
 name: ci-gates
 
@@ -25,10 +27,10 @@ jobs:
     name: format
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the validator from the base branch
+      - name: Check out the validator from the default branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Check the pull request title
         env:
