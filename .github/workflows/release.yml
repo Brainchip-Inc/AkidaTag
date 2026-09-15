@@ -10,7 +10,7 @@ permissions:
   packages: read
 
 env:
-  DOCKER_IMAGE: ghcr.io/brainchip-inc/spark-ncs:v3.1.1-py3.12
+  DOCKER_IMAGE: ghcr.io/brainchip-inc/akidatag-ncs:v3.1.1-py3.12
 
 jobs:
   build-and-release:
@@ -96,10 +96,10 @@ jobs:
 
           | File | Purpose |
           |------|---------|
-          | \`spark-$VERSION.signed.hex\` | Signed firmware for JLink flashing |
-          | \`spark-$VERSION.signed.bin\` | Signed firmware for OTA/DFU via BLE |
-          | \`spark-$VERSION-merged.hex\` | MCUboot + app for initial programming |
-          | \`spark-$VERSION-dfu.zip\` | DFU package for nRF Connect mobile app |
+          | \`akidatag-$VERSION.signed.hex\` | Signed firmware for JLink flashing |
+          | \`akidatag-$VERSION.signed.bin\` | Signed firmware for OTA/DFU via BLE |
+          | \`akidatag-$VERSION-merged.hex\` | MCUboot + app for initial programming |
+          | \`akidatag-$VERSION-dfu.zip\` | DFU package for nRF Connect mobile app |
           | \`SHA256SUMS.txt\` | Integrity checksums |
           EOF
 
@@ -128,17 +128,49 @@ jobs:
       - name: Reconstruct production signing key
         run: |
           mkdir -p .env
-          echo "${{ secrets.PRODUCTION_SIGNING_KEY_PEM_B64 }}" | base64 -d > .env/signing_key.pem
-          chmod 600 .env/signing_key.pem
+          echo "${{ secrets.PRODUCTION_SIGNING_KEY_PEM_B64 }}" | base64 -d > .env/production_key.pem
+          chmod 600 .env/production_key.pem
+
+      # src/sysbuild.conf points at the committed development key, which is
+      # public on purpose so that a fresh clone builds with no setup. An
+      # official release must be signed with the production key instead, so
+      # repoint it here. This is the single line that separates a local build
+      # from a published one, and the guard below refuses to build if it ever
+      # stops working: a release accidentally signed with the public key would
+      # be trusted by every board flashed from it.
+      - name: Point the build at the production signing key
+        run: |
+          sed -i 's|^SB_CONFIG_BOOT_SIGNATURE_KEY_FILE=.*|SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\\${APP_DIR}/../.env/production_key.pem"|' \
+            src/sysbuild.conf
+          echo "Patched sysbuild.conf:"
+          grep SB_CONFIG_BOOT_SIGNATURE_KEY_FILE src/sysbuild.conf \
+            || echo "(no SB_CONFIG_BOOT_SIGNATURE_KEY_FILE line found)"
+          # Both greps below skip comment lines: ^[^#]* cannot cross a '#', so
+          # only a live setting can match. src/sysbuild.conf names both key
+          # files in its own comments, and a naive grep would fail a correct
+          # release.
+          if grep -q '^[^#]*development_key\.pem' src/sysbuild.conf; then
+            echo "::error::sysbuild.conf still points at the development key; refusing to sign a release with it"
+            exit 1
+          fi
+          # Catches the case the guard above cannot: the key file line being
+          # absent from sysbuild.conf altogether. The sed then matches nothing
+          # and the development-key grep passes vacuously, while sysbuild falls
+          # back to MCUboot's own root-rsa-2048.pem, whose private half anyone
+          # can download.
+          if ! grep -q '^[^#]*\.env/production_key\.pem' src/sysbuild.conf; then
+            echo "::error::sysbuild.conf does not point at the production key after patching"
+            exit 1
+          fi
 
       - name: Patch version in prj.conf
         run: |
           sed -i 's|CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION=.*|CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION="${{ steps.version.outputs.version }}"|' \
-            source/prj.conf
+            src/prj.conf
           echo "Patched prj.conf:"
-          grep CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION source/prj.conf
+          grep CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION src/prj.conf
 
-      - name: Build firmware (Spark board)
+      - name: Build firmware (AkidaTag board)
         run: |
           ./scripts/run.sh \
             -d "$DOCKER_IMAGE" \
@@ -151,14 +183,14 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p release-artifacts
 
-          cp build_docker/demo_apps/source/zephyr/zephyr.signed.hex \
-             "release-artifacts/spark-${VERSION}.signed.hex"
-          cp build_docker/demo_apps/source/zephyr/zephyr.signed.bin \
-             "release-artifacts/spark-${VERSION}.signed.bin"
+          cp build_docker/demo_apps/src/zephyr/zephyr.signed.hex \
+             "release-artifacts/akidatag-${VERSION}.signed.hex"
+          cp build_docker/demo_apps/src/zephyr/zephyr.signed.bin \
+             "release-artifacts/akidatag-${VERSION}.signed.bin"
           cp build_docker/demo_apps/merged.hex \
-             "release-artifacts/spark-${VERSION}-merged.hex"
+             "release-artifacts/akidatag-${VERSION}-merged.hex"
           cp build_docker/demo_apps/dfu_application.zip \
-             "release-artifacts/spark-${VERSION}-dfu.zip"
+             "release-artifacts/akidatag-${VERSION}-dfu.zip"
 
       - name: Generate SHA256 checksums
         run: |
@@ -178,7 +210,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "Spark Firmware ${{ steps.version.outputs.tag }}"
+          name: "AkidaTag Firmware ${{ steps.version.outputs.tag }}"
           prerelease: ${{ steps.release_type.outputs.prerelease }}
           body_path: release-body.md
           files: |

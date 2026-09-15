@@ -1,0 +1,274 @@
+# Hardware-in-the-loop test, run on request rather than on every pull request.
+#
+# Driving the real board takes minutes, needs the device plugged in and free,
+# and only tells you something when the change actually touches firmware. So it
+# no longer starts on its own. A maintainer reads the pull request and then asks
+# for it by commenting:
+#
+#     /dk-test
+#
+# `/` rather than `@`, because that is what a repository command looks like when
+# no bot account owns it, the same shape as Kubernetes' `/lgtm` and GitLab's
+# quick actions. `@name` conventionally addresses a real account, and there is no
+# account named dk-test.
+#
+# It can also be started without a pull request, from the Actions tab or with
+# `gh workflow run hardware.yml --ref <branch>`.
+#
+# The result is published back onto the pull request as a check named
+# `hardware`, so it sits in the same list as `format` and `lint`. It is not a
+# required check and never blocks a merge by itself.
+#
+# GitHub always runs the `main` copy of an issue_comment workflow, so a pull
+# request cannot edit this file to talk its own way onto the board.
+
+name: hardware
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  # A comment on a pull request is an issue comment that GitHub authorises
+  # against the pull-requests scope, so reacting to one needs both written out.
+  # Neither grants any ability to change code.
+  issues: write
+  pull-requests: write
+
+env:
+  # Model parameters live in a per-(app,model) config YAML. It is git-ignored, so
+  # CI writes it from the MODEL_CONFIG_DEMO_APPS_KWS repo secret (full YAML) into
+  # the path below before fetch. See src/README.md for the schema.
+  MODEL_CONFIG: .env/demo_apps/kws.yaml
+  MODEL_DIR: models/kws
+  MODEL_NAME: kws
+
+jobs:
+  # Decides whether a comment is a genuine request from someone allowed to spend
+  # the board, and works out which commit to test. Cheap, so it runs on a hosted
+  # runner and never occupies the hardware.
+  authorize:
+    name: authorize
+    if: >-
+      github.event_name == 'issue_comment'
+      && github.event.issue.pull_request
+      && startsWith(github.event.comment.body, '/dk-test')
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      check_id: ${{ steps.check.outputs.id }}
+    steps:
+      - name: Check the comment and who wrote it
+        id: gate
+        env:
+          BODY: ${{ github.event.comment.body }}
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+
+          # The whole first line, and nothing else on it, so a comment that only
+          # mentions the command in passing does not flash the board.
+          # Sliced with parameter expansion rather than `| head -n 1`, which
+          # would SIGPIPE the writer on a long comment and trip pipefail.
+          command=$(
+            printf '%s' "${BODY%%$'\n'*}" | tr -d '\r' \
+              | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+          )
+          if [ "$command" != "/dk-test" ]; then
+            echo "not a hardware request: '$command'"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          case "$ASSOCIATION" in
+            OWNER | MEMBER | COLLABORATOR) ;;
+            *)
+              echo "::notice::$COMMENTER cannot start a hardware run on this repository"
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Find the commit to test
+        id: resolve
+        if: steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          read -r sha head_repo < <(
+            gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '[.head.sha, .head.repo.full_name] | @tsv'
+          )
+
+          # A fork's branch would build and flash unreviewed code on the board
+          # runner with this repository's secrets within reach.
+          if [ "$head_repo" != "$REPO" ]; then
+            echo "::error::pull request $PR_NUMBER comes from $head_repo; hardware runs are limited to branches in $REPO"
+            exit 1
+          fi
+
+          echo "testing $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Acknowledge the request
+        if: steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content=eyes --silent
+
+      - name: Open the hardware check on the pull request
+        id: check
+        if: steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          id=$(
+            jq -n --arg sha "$SHA" --arg url "$RUN_URL" --arg who "$COMMENTER" \
+              '{
+                 name: "hardware",
+                 head_sha: $sha,
+                 status: "in_progress",
+                 details_url: $url,
+                 output: {
+                   title: "Running on the board",
+                   summary: ("Requested by @" + $who + ".")
+                 }
+               }' \
+              | gh api -X POST "repos/$REPO/check-runs" --input - --jq .id
+          )
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  hardware:
+    name: hardware
+    needs: [authorize]
+    # A manual dispatch is already authorised by whoever started it. A comment
+    # is authorised only once the job above has cleared every guard. Requiring
+    # that job to have succeeded outright, rather than merely to have resolved a
+    # commit, keeps the board from running a test whose result has nowhere to be
+    # reported.
+    if: >-
+      !cancelled()
+      && (github.event_name == 'workflow_dispatch'
+          || (needs.authorize.result == 'success' && needs.authorize.outputs.sha != ''))
+    runs-on: self-hosted
+    concurrency:
+      # There is one board. Queue behind whatever is already on it rather than
+      # cancelling a half-flashed device.
+      group: hardware
+      cancel-in-progress: false
+
+    steps:
+      # Empty on a manual dispatch, which is exactly checkout's default of
+      # "the ref this run was started from".
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.authorize.outputs.sha }}
+
+      # The model config is git-ignored; materialise it from the repo secret.
+      # checkout's git clean wipes .env/ each run, so this must run after checkout
+      # and before fetch.
+      - name: Write Model Config
+        env:
+          MODEL_CONFIG_YAML: ${{ secrets.MODEL_CONFIG_DEMO_APPS_KWS }}
+        run: |
+          if [ -z "${MODEL_CONFIG_YAML}" ]; then
+            echo "Error: secret MODEL_CONFIG_DEMO_APPS_KWS is empty/unset"
+            exit 1
+          fi
+          mkdir -p "$(dirname "${MODEL_CONFIG}")"
+          printf '%s\n' "${MODEL_CONFIG_YAML}" > "${MODEL_CONFIG}"
+
+      - name: Fetch + Generate Model
+        timeout-minutes: 4
+        run: |
+          ./scripts/run.sh -d \
+          --fetch_model "${MODEL_CONFIG}" \
+          --generate_info "${MODEL_CONFIG}"
+
+      - name: Build and Flash
+        timeout-minutes: 4
+        run: |
+          ./scripts/run.sh -d -b -f --dk --app demo_apps
+
+      - name: Run CLI Test
+        timeout-minutes: 4
+        run: |
+          ./scripts/run.sh -d -t
+
+      - name: Upload Model
+        timeout-minutes: 4
+        run: |
+          "${HOME}/.conda/envs/akidatag/bin/python" src/utils/send_model_via_ble.py \
+          --info "${MODEL_DIR}/${MODEL_NAME}_program_info.bin" \
+          --bin "${MODEL_DIR}/${MODEL_NAME}_program_data.bin" \
+          --yaml "${MODEL_DIR}/info.yaml"
+
+      - name: Run inference CLI Test
+        timeout-minutes: 4
+        run: |
+          ./scripts/run.sh -d -t --infer-test
+
+  # Closes the check opened above, so the pull request shows the outcome even
+  # though the run itself is attached to main rather than to the branch.
+  #
+  # always(), not !cancelled(): a check left open is worse than a wrong one, and
+  # cancelling the run is exactly when nothing else would ever close it.
+  report:
+    name: report
+    needs: [authorize, hardware]
+    if: ${{ always() && needs.authorize.outputs.check_id != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the result on the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CHECK_ID: ${{ needs.authorize.outputs.check_id }}
+          RESULT: ${{ needs.hardware.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          case "$RESULT" in
+            success)
+              conclusion=success
+              title="Passed on the board"
+              ;;
+            skipped)
+              conclusion=cancelled
+              title="Never reached the board"
+              ;;
+            cancelled)
+              conclusion=cancelled
+              title="Cancelled"
+              ;;
+            *)
+              conclusion=failure
+              title="Failed on the board"
+              ;;
+          esac
+
+          jq -n --arg conclusion "$conclusion" --arg title "$title" --arg url "$RUN_URL" \
+            '{
+               status: "completed",
+               conclusion: $conclusion,
+               output: { title: $title, summary: ("Full log: " + $url) }
+             }' \
+            | gh api -X PATCH "repos/$REPO/check-runs/$CHECK_ID" --input - --silent

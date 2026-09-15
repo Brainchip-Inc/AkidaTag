@@ -1,0 +1,10 @@
+# Repository configuration for the no-mistakes validation pipeline.
+#
+# Pipeline-authored fix commits must satisfy this repository's own commit
+# subject gate, .github/ci-gates/check-subject.sh, which the required `format`
+# check runs over every non-merge commit on a pull request into main. The
+# shipped default subject prefix, `no-mistakes(<step>)`, uses a type the gate
+# does not accept, so pipeline fix commits fail that check. `chore` is an
+# accepted type.
+commit:
+  fix_message: "chore({{.Step}}): {{.Summary}}"

@@ -18,14 +18,13 @@ Options:
   --bin              | (str)  | Path to program_data .bin file (use with --send_ble)
   --yaml             | (str)  | Path to info.yaml metadata file (use with --send_ble)
   --fetch_model      | (str)  | Fetch + convert the model from the given config YAML (.env/<app>/<model>.yaml); bins/cpp/.h, no info.yaml
-  --generate_info    | (str)  | Generate app-specific info.yaml from the given config YAML + the converted shapes sidecar
+  --generate_info    | (str)  | Generate app-specific info.yaml from the given config YAML + the converted shapes sidecar, then bundle it with the bins into the model .zip
   --send_ble         | (flag) | Send model via BLE; requires --info, --bin, and --yaml (separate step; cannot be combined with --fetch_model)
   -d, --docker       | (str)  | Run build/flash using Docker
-                     |        | AND provide docker image name   (default:spark-ncs:v3.1.1-py3.12)
+                     |        | AND provide docker image name   (default:akidatag-ncs:v3.1.1-py3.12)
   -i, --shell        | (flag) | Launch an interactive shell inside the Docker container (no build/flash)
   -m, --minicom      | (str)  | Run minicom inside Docker (default: ttyUSB0).
                      |        | Optional arg: ttyUSB1, ttyACM0, /dev/ttyUSB0, etc.
-  --key              | (flag) | Generate signing key (default KEY_FILE=".env/signing_key.pem")
   --release          | (flag) | Release/CI mode: disables -it flag for non-interactive Docker runs
   -r, --reset        | (flag) | Do Board Reset
   -h, --help         | (flag) | Show this help message
@@ -36,12 +35,12 @@ Options:
 Run the script from project root.
 
 How to use script - Examples runs:
-(eg. app - blinky, demo_apps)
+(eg. app - demo_apps)
 
   # Build locally
-  $SCRIPT_INVOCATION -b --app blinky
+  $SCRIPT_INVOCATION -b --app demo_apps
 
-  # Build akida_spi_flash_app inside Docker
+  # Build demo_apps inside Docker
   $SCRIPT_INVOCATION -d -b --app demo_apps
 
   # Build demo_apps with dk board overlay file inside Docker
@@ -51,21 +50,21 @@ How to use script - Examples runs:
   $SCRIPT_INVOCATION -f --app demo_apps
 
   # Flash locally using Jlink
-  $SCRIPT_INVOCATION -d -f -jl --app demo_apps
+  $SCRIPT_INVOCATION -f -jf --app demo_apps
 
   # Flash inside Docker
   $SCRIPT_INVOCATION -d -f --app demo_apps
 
   # Flash using Jlink inside Docker
-  $SCRIPT_INVOCATION -d -f -jl --app demo_apps
+  $SCRIPT_INVOCATION -d -f -jf --app demo_apps
 
-  # Fetch + convert only, on the host → bins/cpp (no info.yaml). All params from the config.
+  # Fetch + convert only, on the host → bins/cpp (no info.yaml, so no .zip bundle either). All params from the config.
   $SCRIPT_INVOCATION --fetch_model .env/demo_apps/kws.yaml
 
-  # Generate the app-specific info.yaml for a previously-converted model (no Akida SDK needed)
+  # Generate the app-specific info.yaml + model bundle .zip for a previously-converted model (no Akida SDK needed)
   $SCRIPT_INVOCATION --generate_info .env/demo_apps/kws.yaml
 
-  # Fetch + convert + generate info.yaml in one go inside Docker (akida SDK lives in the container)
+  # Fetch + convert + generate info.yaml + bundle .zip in one go inside Docker (akida SDK lives in the container)
   $SCRIPT_INVOCATION -d --fetch_model .env/demo_apps/kws.yaml --generate_info .env/demo_apps/kws.yaml
 
   # Edge-learning kws model (its config points at .../kws_edge_learning, 10 neurons/class, 3 novel classes)
@@ -73,12 +72,12 @@ How to use script - Examples runs:
 
   # Send pre-generated model files via BLE using info.yaml (separate step; no Docker needed)
   $SCRIPT_INVOCATION --send_ble \
-      --info source/external/model_files/kws/kws_program_info.bin \
-      --bin source/external/model_files/kws/kws_program_data.bin \
-      --yaml source/external/model_files/kws/info.yaml
+      --info models/kws/kws_program_info.bin \
+      --bin models/kws/kws_program_data.bin \
+      --yaml models/kws/info.yaml
 
   # If there is a custom docker image then provide docker image name with -d
-  $SCRIPT_INVOCATION -d custom_docker_image -b --app akida_spi_flash_app  
+  $SCRIPT_INVOCATION -d custom_docker_image -b --app demo_apps
 
   # Minicom on /dev/ttyACM0 locally
   $SCRIPT_INVOCATION -m /dev/ttyACM0
@@ -95,12 +94,6 @@ How to use script - Examples runs:
   # Only launch container and stay
   $SCRIPT_INVOCATION -d --shell
 
-  # Create signing key locally
-  $SCRIPT_INVOCATION --key
-
-  # Create signing key inside docker
-  $SCRIPT_INVOCATION -d --shell
-
   # Run CLI hardware validation test
   $SCRIPT_INVOCATION -d -t
 
@@ -109,16 +102,10 @@ How to use script - Examples runs:
   
 There is a BUILD_DIR env variable that can be set to override the default build
 directory location. For example:
-  BUILD_DIR=custom_build_dir $SCRIPT_INVOCATION -b --app blinky
+  BUILD_DIR=custom_build_dir $SCRIPT_INVOCATION -b --app demo_apps
 
 ###################################################################################################
 Following Apps are available:
-    The following apps are available for testing connections:
-    - blinky
-    - akida_simple_app
-    - akida_spi_flash_app
-
-    The following apps are available as default:
     - demo_apps
 
 EOF
@@ -147,7 +134,7 @@ DK_OVERLAY=false
 DO_INFER_TEST=false
 
 DOCKER=false
-DOCKER_IMAGE="spark-ncs:v3.1.1-py3.12"
+DOCKER_IMAGE="akidatag-ncs:v3.1.1-py3.12"
 DO_SHELL=false
 
 DO_MINICOM=false
@@ -155,9 +142,7 @@ MINICOM_DEV="/dev/ttyUSB0"
 
 DO_RESET=false
 
-DO_KEY=false
 DO_RELEASE=false
-KEY_FILE=".env/signing_key.pem"
 
 IS_DARWIN=false
 IS_LINUX=false
@@ -180,11 +165,7 @@ get_jlink_jobs() {
   local build_dir="$2"   # e.g. build_docker/demo_apps
 
   case "$app" in
-    blinky)
-      # blinky only has merged.hex (APP)
-      printf '%s|%s\n' "NRF5340_XXAA_APP" "$PWD/$build_dir/merged.hex"
-      ;;
-    akida_simple_app|akida_spi_flash_app|demo_apps)
+    demo_apps)
       # two images: NET then APP (same order as west flash output)
       printf '%s|%s\n' \
         "NRF5340_XXAA_NET" "$PWD/$build_dir/merged_CPUNET.hex" \
@@ -244,10 +225,6 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
-        --key)
-            DO_KEY=true
-            shift
-            ;;
         --release)
             DO_RELEASE=true
             shift
@@ -280,8 +257,8 @@ if $DO_SHELL && ! $DOCKER; then
 fi
 
 # If not shell/minicom, require at least one action: build/flash/send_ble/fetch/generate
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && ! $DO_FETCH_MODEL && ! $DO_GENERATE_INFO && ! $DO_CLI_TEST; then
-    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --fetch_model and/or --generate_info, and/or --key or use --shell / --minicom"
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_BUILD && ! $DO_FLASH && ! $SEND_BLE  && ! $DO_FETCH_MODEL && ! $DO_GENERATE_INFO && ! $DO_CLI_TEST; then
+    echo "Nothing to do: pass --build and/or --flash and/or --send_ble (with --info/--bin/--yaml) and/or --fetch_model and/or --generate_info, or use --shell / --minicom"
     exit 1
 fi
 
@@ -290,7 +267,7 @@ _needs_app=false
 if $DO_BUILD || $DO_FLASH; then
     _needs_app=true
 fi
-if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && ! $DO_KEY && $_needs_app && [[ -z "$APP" ]]; then
+if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && $_needs_app && [[ -z "$APP" ]]; then
     echo "Error: --app is required"
     exit 1
 fi
@@ -374,16 +351,16 @@ fi
 
 DOCKER_RUN_BASE=(
     docker run --rm --privileged
-    -v "$PWD":/spark
-    -w /spark
+    -v "$PWD":/akidatag
+    -w /akidatag
     -e USER_NAME=demo
     -e USER_UID="$HOST_UID"
     -e USER_GID="$HOST_GID"
     -e CCACHE_DIR="/home/demo/.ccache"
 )
 
-# Add interactive mode only if terminal exists
-if [ -t 1 ]; then
+# Add interactive mode only if a terminal exists and release mode is off
+if [ -t 1 ] && ! $DO_RELEASE; then
     DOCKER_RUN_BASE+=(-it)
 fi
 
@@ -433,7 +410,7 @@ if $DO_MINICOM; then
 fi
 # Build the CLI hardware validation test command when -t is enabled, using the configured serial port
 if $DO_CLI_TEST; then
-    CLI_TEST_CMD="python source/utils/hil_test.py --port ${CLI_PORT}"
+    CLI_TEST_CMD="python src/utils/hil_test.py --port ${CLI_PORT}"
 
     if $DO_INFER_TEST; then
         CLI_TEST_CMD="${CLI_TEST_CMD} --only-infer"
@@ -454,29 +431,6 @@ if $DO_SHELL; then
 fi
 
 # -----------------------------------------------------------------------------
-# KEYGEN MODE
-# -----------------------------------------------------------------------------
-if $DO_KEY; then
-    [[ -f "$KEY_FILE" ]] && echo "Error: $KEY_FILE already exists" && exit 1
-    echo "=== Generating signing key ==="
-    echo "    Output: $KEY_FILE"
-
-    if $DOCKER; then
-        echo "    Running inside Docker image: $DOCKER_IMAGE"
-        echo ">>> Docker command:"
-        printf ' %q' "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" imgtool keygen -k "$KEY_FILE" -t rsa-3072
-        echo
-
-        "${DOCKER_RUN_BASE[@]}" "$DOCKER_IMAGE" imgtool keygen -k "$KEY_FILE" -t rsa-3072
-        exit $?
-    else
-        echo ">>> imgtool keygen -k \"$KEY_FILE\" -t rsa-3072"
-        imgtool keygen -k "$KEY_FILE" -t rsa-3072
-        exit $?
-    fi
-fi
-
-# -----------------------------------------------------------------------------
 # App → source dir, build dir, and build/flash commands (only when --app is set)
 # -----------------------------------------------------------------------------
 APP_SRC_DIR=""
@@ -485,15 +439,12 @@ BUILD_CMD=""
 FLASH_CMD=""
 
 if [[ -n "$APP" ]]; then
-  APP_SRC_DIR="samples/$APP"
-
   # Build-time "extra CMake args" (only appended when set)
   declare -a CMAKE_EXTRA_ARGS=()
 
-  # Overrides for non-standard layouts
   case "$APP" in
     demo_apps)
-      APP_SRC_DIR="source"
+      APP_SRC_DIR="src"
       # Add only what demo_apps needs
       CMAKE_EXTRA_ARGS+=(-DCONFIG_DEMO_APPS=y)
 
@@ -506,14 +457,18 @@ if [[ -n "$APP" ]]; then
 	  CMAKE_EXTRA_ARGS+=(-DCONFIG_AUDIO_CAPTURE_TEST=n)
       # Overlay selection using USE_AUDIO
       if $DK_OVERLAY; then
-        CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=n)
+        CMAKE_EXTRA_ARGS+=(-DCONFIG_AKIDATAG_BOARD=n)
+        CMAKE_EXTRA_ARGS+=("-DEXTRA_CONF_FILE=boards/dk.conf")
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/spark/source/sysbuild/mcuboot_dk.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/src/sysbuild/mcuboot_dk.overlay")
       else
-        CMAKE_EXTRA_ARGS+=(-DCONFIG_SPARK_BOARD=y)
-        CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_spark.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/spark/source/sysbuild/mcuboot_spark.overlay")
+        CMAKE_EXTRA_ARGS+=(-DCONFIG_AKIDATAG_BOARD=y)
+        CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_akidatag.overlay")
+        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/src/sysbuild/mcuboot_akidatag.overlay")
       fi
+      ;;
+    *)
+      die "Unknown app: $APP (available: demo_apps)"
       ;;
   esac
 
@@ -573,7 +528,7 @@ fi
 # --send_ble + --info + --bin + --yaml: BLE send using info.yaml metadata (always runs on host)
 SEND_YAML_CMD=""
 if $SEND_BLE; then
-  SEND_YAML_CMD="python source/utils/send_model_via_ble.py \
+  SEND_YAML_CMD="python src/utils/send_model_via_ble.py \
 --info \"${MODEL_INFO}\" \
 --bin \"${MODEL_BIN}\" \
 --yaml \"${MODEL_YAML}\""
@@ -583,14 +538,15 @@ fi
 # All conversion params come from the config YAML passed as its argument.
 FETCH_MODEL_CMD=""
 if $DO_FETCH_MODEL; then
-  FETCH_MODEL_CMD="python source/utils/fetch_model.py --config \"${FETCH_CONFIG}\""
+  FETCH_MODEL_CMD="python src/utils/fetch_model.py --config \"${FETCH_CONFIG}\""
 fi
 
-# --generate_info: write the app-specific info.yaml from the shapes sidecar (no Akida SDK).
+# --generate_info: write the app-specific info.yaml from the shapes sidecar, then
+# bundle it with the two bins into the .zip the phone app reads (no Akida SDK).
 # Profile and all info.yaml params come from the config YAML passed as its argument.
 GENERATE_INFO_CMD=""
 if $DO_GENERATE_INFO; then
-  GENERATE_INFO_CMD="python source/utils/generate_info.py --config \"${GENERATE_CONFIG}\""
+  GENERATE_INFO_CMD="python src/utils/generate_info.py --config \"${GENERATE_CONFIG}\""
 fi
 
 # -----------------------------------------------------------------------------

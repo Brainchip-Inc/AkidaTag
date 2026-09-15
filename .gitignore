@@ -1,9 +1,19 @@
 # ignore folder
-samples/*
 zephyrproject
 tools/*
 build*
-source/external/*
+models/
+
+# a retired generated directory from before the trees under src/deps were
+# committed: src/external/ came from `deploy_akida_engine`. Kept ignored so a
+# stale working copy stays harmless.
+src/external/
+
+# the Akida engine's own test tree. `akida engine deploy` has no flag to skip
+# it, no build ever compiles it, and test/akd1000/test_fnp2/program.cpp alone is
+# 9.3 MB of fixtures for the AKD1000, which this firmware does not target. The
+# rest of src/deps is tracked deliberately.
+src/deps/akida/engine/test/
 
 # ignore specific files
 *JLink_Linux_V888_x86_64.deb
@@ -15,6 +25,13 @@ source/external/*
 
 # but allow
 !.env/README.md
+
+# The development signing key is committed on purpose and must survive both
+# rules above. It is not a secret; the file's own header explains why. Its
+# sibling .env/production_key.pem is the real secret, is written only by
+# .github/workflows/release.yml during a release build, and has no exception
+# here or anywhere else: it stays ignored by .env/* and by *.pem.
+!.env/development_key.pem
 
 # misc files
 *.DS_Store

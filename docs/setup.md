@@ -4,9 +4,9 @@
 
 Follow the pin connections as shown below:
 
-![Pin Connections](./images_and_videos/images_and_videos/Pin-Connection-nRF-AK.jpg)
+![Pin Connections](./images_and_videos/Pin-Connection-nRF-AK.jpg)
 
-![Pin Connections](./images_and_videos/images_and_videos/Pin-Connection-nRF-UART.jpg)
+![Pin Connections](./images_and_videos/Pin-Connection-nRF-UART.jpg)
 
 
 ---
@@ -26,7 +26,7 @@ Run the following script from Project Root To Build The Docker Image.
 ./scripts/build_docker_image.sh -h
 
 # build docker image for ncs v3.1.1
-./scripts/build_docker_image.sh --ncs v3.1.1 --python3.12
+./scripts/build_docker_image.sh --ncs v3.1.1 --python 3.12
 ```
 
 The build will take some time as it downloads ncs sdk.
@@ -35,173 +35,101 @@ Based on the scripts you ran, following images should be build and seen. See bel
 
 `docker images`
 
-| IMAGE                   | ID           | DISK USAGE |
-|-------------------------|--------------|------------|
-| spark-ncs:v3.1.1-py3.12 | 7d2f06ee0930 | 17.6GB     |
+| IMAGE                      | ID           | DISK USAGE |
+|----------------------------|--------------|------------|
+| akidatag-ncs:v3.1.1-py3.12 | 7d2f06ee0930 | 17.6GB     |
 
 ---
 
-### Step 3: Test Connections
+### Step 3: Build, Flash And Test Connections
 
-*Note: Following scripts are running through docker. If installed dependency locally then simply remove `-d` from below runs. 
+*Note: Following scripts are running through docker. If installed dependency locally then simply remove `-d` from below runs.*
 
-**1. Blinky Sample**
+**1. Build And Flash demo_apps**
 
-This app will confirm if nRF5340 DK board is functioning. 
+`demo_apps` is the application this project builds and flashes. `--dk` selects the
+nRF5340 DK overlay, which is the board this document sets up.
+
+Every build signs its images with the development key committed at `.env/development_key.pem`, so
+there is nothing to set up. That key is public on purpose; see
+[Application Security](../src/README.md#application-security) for what it does and does not
+protect, and for how to use your own key instead.
 
 ```
 # build
-./scripts/run.sh -d -b --app blinky
+./scripts/run.sh -d -b --dk --app demo_apps
 
 # flash
-./scripts/run.sh -d -f --app blinky
+./scripts/run.sh -d -f --app demo_apps
 ```
-
-Upon running this, the board should show flashing led light.
 
 **To see output on the terminal through UART**
 
 ```
-# replace /dev/ttyACM1 with endpoint at your system
-minicom -D /dev/ttyACM1'
+# replace /dev/ttyUSB0 with endpoint at your system
+minicom -D /dev/ttyUSB0
 
 # install minicom if not there
 sudo apt-get install minicom
 ```
 
-Following output should be seen:
+---
 
-![Blinky UART Output](./images_and_videos/Blinky-UART-Output.jpg)
+**2. Test The Link To The AKD1500**
+
+The CLI hardware test drives the firmware shell over UART and confirms the AKD1500
+device ID, its SRAM and the external SPI flash, which is the communication this
+setup has to get right. Testcases 1 to 7 in [README.md](../README.md#implemented-test-cases)
+say what each one checks.
+
+```
+./scripts/run.sh -d -t
+```
+
+A passing run ends with `ALL TESTCASES PASSED`.
 
 ---
 
-**2. Akida Simple App**
+**3. Send A Model Over BLE And Infer**
 
-This app will confirm that there is communication established between nRF5340 DK and AKD1500.
-
-```
-# build
-./scripts/run.sh -d -b --app akida_simple_app
-
-# flash
-./scripts/run.sh -d -f --app akida_simple_app
-```
-
-The application flashed already contains a kws model. This flashed code will loads the model to Akida and run a single inference. You should see the following output on the UART
+Fetch and convert the kws model, then send it to the Akida external flash over BLE.
+[src/README.md](../src/README.md) covers the model workflow and its config
+files in full.
 
 ```
-# replace /dev/ttyUSB0 with endpoint at your system
-minicom -D /dev/ttyUSB0
+# fetch, convert, generate info.yaml and the model bundle .zip
+./scripts/run.sh -d \
+    --fetch_model .env/demo_apps/kws.yaml \
+    --generate_info .env/demo_apps/kws.yaml
+
+# send the model over BLE from the host
+./scripts/run.sh --send_ble \
+    --info models/kws/kws_program_info.bin \
+    --bin  models/kws/kws_program_data.bin \
+    --yaml models/kws/info.yaml
 ```
 
+Once the transfer completes, run the inference test to confirm the model loads from
+external flash and infers (Testcase 8).
+
 ```
-Welcome to minicom 2.8
-
-OPTIONS: I18n
-Port /dev/ttyUSB0, 21:54:50
-
-Press CTRL-A Z for help on special keys
-
-E: JEDEC id [ff ff ff] expect [c2 28 17]
-*** Booting My Application v2.6.0-b3a1d8f06189 ***
-*** Using nRF Connect SDK v3.1.1-e2a97fe2578a ***
-*** Using Zephyr OS v4.1.99-ff8f0c579eeb ***
-SPI initialized in ZephyrSpiDriver constructor.
-
-uart:~$ Starting Bluetooth Peripheral LBS example
-I: 2 Sectors of 4096 bytes
-I: alloc wra: 0, f98
-I: data wra: 0, 8c
-I: HW Platform: Nordic Semiconductor (0x0002)
-I: HW Variant: nRF53x (0x0003)
-I: Firmware: Standard Bluetooth controller (0x00) Version 252.16862 Build 1121034987
-I: No ID address. App must call settings_load()
-Bluetooth initialized
-I: HCI transport: IPC
-I: Identity: E6:EE:31:07:78:41 (random)
-I: HCI: version 6.1 (0x0f) revision 0x2069, manufacturer 0x0059
-I: LMP: version 6.1 (0x0f) subver 0x2069
-Advertising successfully started
-Enabling external host as SPI master
-Akida Device ID:
-Word 0: 0x0903A1BC
-Sanity test of 1 MB SRAM is passed
-Device Version: v3.9
-Program Version: v3.9
-model program time= 4294850211 dma cycles, model_prog_time = 1912 ms
-input Shape = 49x10x1
-
-inference time= 117085 dma cycles, time = 29 ms
-Output-0 = -48
-Output-1 = -44
-Output-2 = -14
-Output-3 = -19
-Output-4 = -8
-Output-5 = -25
-Output-6 = -38
-Output-7 = -15
-Output-8 = 66
-Output-9 = 7
-Output-10 = -29
-Output-11 = 21
-Output-12 = -9
-Output-13 = -55
-Output-14 = -31
-Output-15 = -28
-Output-16 = -14
-Output-17 = 7
-Output-18 = -2
-Output-19 = -31
-Output-20 = -45
-Output-21 = -29
-Output-22 = -22
-Output-23 = -10
-Output-24 = -9
-Output-25 = -13
-Output-26 = -19
-Output-27 = 3
-Output-28 = -10
-Output-29 = -32
-Output-30 = -10
-Output-31 = -24
-Output-32 = 1
-
-Class : 8
-Word : four
+./scripts/run.sh -d -t --infer-test
 ```
+
+You can also type `infer kws` yourself on the minicom session to infer again.
 
 ---
 
-**3. Akida SPI Flash App**
+**4. BLE FOTA**
 
-This app will confirm there model can be stored in Akida External Flash and then loaded to Akida for inference. It also confirm that model can be updated over BLE to Akida External Flash. It also demonstrates BLE FOTA update for an application with nRF Connect Mobile App.
+To check that a firmware update over BLE also works, make a change to the app and
+rebuild it, then find `dfu_application.zip` in the build directory
+(`build_docker/demo_apps/` for a Docker build). Upload it to the board with the
+nRF Connect Mobile App; the FOTA section of
+[src/README.md](../src/README.md) walks through the app.
 
-```
-# build
-./scripts/run.sh -d -b --app akida_spi_flash_app
-
-# flash
-./scripts/run.sh -d -f --app akida_spi_flash_app
-```
-
-After flashing, run the following through the host where BLE is present and model is present. 
-
-```
-./scripts/run.sh -d --app akida_spi_flash_app --bin samples/akida_spi_flash_app/external/model_files/kws/kws_program_data.bin
-```
-
-Upon running the script, it will scan for BLE devices.Write the index number for the Nordic Device from the list of devices it prints. 
-
-After successful connection, you should see the transfer in progress. Once the transfer is complete, head over to minicom to see if the app has made a single inference of the model.
-
-```
-# replace /dev/ttyUSB0 with endpoint at your system
-minicom -D /dev/ttyUSB0
-```
-
-On the same minicom, you can also type in commands to infer again. Type `infer kws` to infer above programmed kws model again. Similarly if you transferred mnist model then type `infer mnist` to infer the mnist model that was transfer to external flash.
-
-Upon this successful test, to check if BLE FOTA is also successful, make a change to the app and rebuild the app. After successful rebuild, head over to the folder where the build is kept and search for `dfu_application.zip`. Download the file on the mobile device that has nRF Connect Mobile App. Connect with the Nordic Device on the app and upload this `dfu_application.zip`. After successful upload, the board will reboot and you should see the changes that you must have made.
+To update a board over its USB-C cable instead, with no phone and no debug probe, see
+[firmware-update-over-usb.md](./firmware-update-over-usb.md).
 
 *Tip: A simple change that I make is adding a print statement in main.cpp*
 
@@ -294,11 +222,11 @@ Upon this successful test, to check if BLE FOTA is also successful, make a chang
 
 Run script from project root to install the above file
 
-`./script/install-nrfutil.sh`
+`./scripts/install_nrfutil.sh`
 
 Add nrfutil to path - environment variable for further steps 
 
-`source ./script/env.sh`
+`source ./scripts/env.sh`
 
 
 **Install nrfutil sdk-manager and device**

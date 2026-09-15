@@ -1,6 +1,6 @@
-# Project Spark – Embedded Firmware
+# AkidaTag – Embedded Firmware
 
-This repository contains the **embedded firmware** for **Project Spark**, an ultra-low-power AIoT platform built on Nordic Semiconductor MCUs and BrainChip Akida™ AI acceleration.
+This repository contains the **embedded firmware** for **AkidaTag**, an ultra-low-power AIoT platform built on Nordic Semiconductor MCUs and BrainChip Akida™ AI acceleration.
 
 The firmware is responsible for:
 - Device bring-up and power management
@@ -38,9 +38,10 @@ have landed on `main` but are not yet in a release.
 
 # Hardware-in-the-Loop (HIL) Testing
 
-This repository includes an automated **Hardware-in-the-Loop (HIL)
-testing pipeline** that validates firmware functionality on real
-hardware using CLI commands and log verification.
+This repository includes a **Hardware-in-the-Loop (HIL) testing
+pipeline** that validates firmware functionality on real hardware using
+CLI commands and log verification. It runs when someone asks for it, not
+on every pull request; see [CI Trigger](#ci-trigger) below.
 
 The tests are executed on a **self-hosted GitHub Actions runner**
 connected to the target hardware.
@@ -186,7 +187,7 @@ The script verifies that the output contains:
 ## Full Hardware Test
 
 Runs **Testcases 1--7**.
-    ./scripts/run.sh -d -t (python source/utils/hil_test.py --port /dev/ttyUSB0)
+    ./scripts/run.sh -d -t (python src/utils/hil_test.py --port /dev/ttyUSB0)
 
 ------------------------------------------------------------------------
 
@@ -195,7 +196,7 @@ Runs **Testcases 1--7**.
 Runs **Testcase 8 only** (typically executed after the model is
 uploaded).
 
-    ./scripts/run.sh -d -t --infer-test (python source/utils/hil_test.py --port /dev/ttyUSB0 --only-infer)
+    ./scripts/run.sh -d -t --infer-test (python src/utils/hil_test.py --port /dev/ttyUSB0 --only-infer)
 
 ------------------------------------------------------------------------
 
@@ -211,15 +212,20 @@ If any testcase fails or times out, the **CI pipeline fails**.
 
 # CI Trigger
 
-The Hardware-in-the-Loop (HIL) CI pipeline runs automatically when:
+The Hardware-in-the-Loop (HIL) pipeline does **not** run on its own. A
+run takes minutes of exclusive time on a board that has to be plugged in
+and free, so it is asked for once someone has read the change and decided
+it is worth spending the hardware on:
 
--   A **pull request is opened**
--   A **pull request is updated**
+-   Comment `/dk-test` on the pull request, on its own line.
+-   Or start it from the **Actions** tab, or with
+    `gh workflow run hardware.yml --ref <branch>`.
 
-against the **main branch**.
-
-This ensures firmware changes are validated on **real hardware before
-merging**.
+Only a maintainer of this repository can start a run, and only against a
+branch that lives in this repository rather than a fork. The comment is
+acknowledged with a 👀 reaction, and the outcome comes back as a check
+named `hardware` on the pull request, beside `format` and `lint`. That
+check is not required, so an unplugged board never blocks a merge.
 
 ------------------------------------------------------------------------
 
@@ -227,13 +233,12 @@ merging**.
 
 The GitHub Actions workflow performs the following steps:
 
-1.  Generate firmware signing key
-2.  Download and prepare the model
-3.  Build firmware
-4.  Flash firmware to the device
-5.  Run CLI hardware tests (Testcases 1--7)
-6.  Upload model via BLE
-7.  Run inference validation (Testcase 8)
+1.  Download and prepare the model
+2.  Build firmware
+3.  Flash firmware to the device
+4.  Run CLI hardware tests (Testcases 1--7)
+5.  Upload model via BLE
+6.  Run inference validation (Testcase 8)
 
 This ensures that the firmware, peripherals, and **Akida KWS inference
 pipeline** function correctly on the target hardware.
@@ -248,20 +253,29 @@ pipeline** function correctly on the target hardware.
 
 ```text
 .
-├── source/            # Core firmware and app related code
+├── src/               # Core firmware and app related code
    ├── apps/           # Application related code
-   ├── boards/         # Configuration files for nRF5340 DK
+   ├── boards/         # Board overlays and config for the AkidaTag board and nRF5340 DK
    ├── core/           # CMake scripts, SPI communication, BLE services, boot management, etc
+   ├── deps/           # Imported code: the Akida engine, FlatBuffers headers, kissfft
    ├── include/        # Header files
    ├── sysbuild/       # Configuration settings
    ├── utils/          # Utilities for BLE communication, models, etc
-├── samples/           # Samples builds for quick tests
 ├── scripts/           # Build, flash, and utility scripts
 ├── docs/              # Setup, Architecture and design documentation
-├── .env/              # Environment related file, signing keys not to be pushed
+├── .env/              # Local-only files, plus the committed development signing key
 ├── .github/           # CI, CODEOWNERS, repo configuration
 ├── CHANGELOG.md       # Cumulative change history, source of release notes
 ├── README.md
 ├── CONTRIBUTING.md
+├── NOTICE             # Copyright and licence statements of the code under src/deps
+├── LICENSE-APACHE-2.0 # Licence text the Apache-2.0 files under src/deps reference
 └── LICENSE
 ```
+
+## Licensing
+
+This repository is licensed under `LICENSE`. It also tracks imported code under
+`src/deps`, which carries its own licences: `NOTICE` records what those files
+declare and which paths each statement covers, and `src/deps/VENDORING.md`
+records where each tree came from and how to upgrade it.

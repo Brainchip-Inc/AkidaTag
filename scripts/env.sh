@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Load local tools for Project Spark
+# Load local tools for AkidaTag
+
+# This script is sourced, so `return ... || exit ...` is how it stops in both
+# cases; shellcheck reads the exit as dead code.
+# shellcheck disable=SC2317
 
 # set -e
 
@@ -27,7 +31,18 @@ EOF
 # Defaults
 # ----------------------------------------------------------
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Only the sourcing shell knows which file is being sourced: bash reports it in
+# BASH_SOURCE and zsh in the %x prompt escape, which eval hides from bash.
+if [ -n "${ZSH_VERSION:-}" ]; then
+    eval 'ENV_SCRIPT=${(%):-%x}'
+elif [ -n "${BASH_SOURCE:-}" ]; then
+    ENV_SCRIPT="${BASH_SOURCE}"
+else
+    echo "Error: cannot locate scripts/env.sh in this shell; source it from bash or zsh" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+PROJECT_ROOT="$(cd "$(dirname "$ENV_SCRIPT")/.." && pwd)"
 TOOLS_DIR="$PROJECT_ROOT/tools"
 
 BOARD="nrf5340dk/nrf5340/cpuapp"
@@ -107,7 +122,7 @@ case ":$PATH:" in
         ;;
 esac
 
-echo "Project Spark environment loaded."
+echo "AkidaTag environment loaded."
 echo "TOOLS_DIR loaded: $TOOLS_DIR"
 
 # ----------------------------------------------------------
@@ -120,10 +135,11 @@ if [ "$BUILD" = true ]; then
 
     # source zephyr env
     echo "==> Entering Zephyr dir: $NCS_ZEPHYR_DIR"
-    cd "$NCS_ZEPHYR_DIR"
+    cd "$NCS_ZEPHYR_DIR" || return 1
     echo "==> Sourcing Zephyr env: $ZEPHYR_ENV_SCRIPT"
+    # shellcheck source=/dev/null
     source "$ZEPHYR_ENV_SCRIPT"
-    cd "$PROJECT_ROOT"
+    cd "$PROJECT_ROOT" || return 1
     echo "==> Returned to: $PROJECT_ROOT"
 
     echo "==> Setting environment for build"
