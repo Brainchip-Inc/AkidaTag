@@ -278,7 +278,11 @@ union _data {
     uint32_t uint_data;
 };
 
-uint32_t flash_offsets[] = {AKD_FLASH_OFFSET, AKD_FLASH_OFFSET + AKD_MODEL_OFFSET};
+/* Reference table only — the live model-load path (file_transfer.c /
+ * infer()) programs from model_meta_t.flash_address, which comes from each
+ * model's own info.yaml, not from this array. Kept in sync with
+ * AKD_KWS_MODEL_OFFSET / AKD_FALL_MODEL_OFFSET for documentation. */
+uint32_t flash_offsets[] = {AKD_FLASH_OFFSET, AKD_KWS_MODEL_OFFSET, AKD_FALL_MODEL_OFFSET};
 int app_index = -1;
 
 /**

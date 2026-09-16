@@ -1,5 +1,6 @@
 #include "ble_services/file_transfer.h"
 #include "akd_spi_flash_handler.h"
+#include "ble_services/ble_initialization.h"
 
 #include "led_init.h"
 
@@ -199,20 +200,24 @@ extern int infer(int app_index_l);
  * ---------------------------------------------------------------------- */
 static model_meta_t current_meta;
 
-/* LittleFS file 1: model_meta_t header struct (app 0 = KWS/EL)
+/* LittleFS file 1: model_meta_t header struct.
+ * Index == app slot ( APP_SLOT_KWS=0 / APP_SLOT_FALL = 1).
  */
-static const char* meta_hdr_paths[] = {
+static const char* meta_hdr_paths[MAX_APP_SLOTS] = {
     "/ext/kws_model_hdr",
+    "/ext/fall_model_hdr",
 };
 
 /* LittleFS file 2: raw program_info binary (loaded into sram_upload_buffer) */
-static const char* model_info_paths[] = {
+static const char* model_info_paths[MAX_APP_SLOTS] = {
     "/ext/kws_model_info",
+    "/ext/fall_model_info",
 };
 
 /* LittleFS file 3: model_data_meta_t (CRC,  length, name) */
-static const char* model_data_meta_paths[] = {
+static const char* model_data_meta_paths[MAX_APP_SLOTS] = {
     "/ext/kws_model_data_hdr",
+    "/ext/fall_model_data_hdr",
 };
 
 /* -------------------------------------------------------------------------
@@ -244,7 +249,7 @@ static bool build_fs_paths_from_name(const char* fs_name) {
 
     /* Validate against hardcoded whitelist */
     dyn_app_slot = -1;
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < MAX_APP_SLOTS; i++) {
         if (strcmp(dyn_hdr_path, meta_hdr_paths[i]) == 0) {
             dyn_app_slot = i;
             LOG_INF("Model name '%s' → slot %d (hdr=%s)\n", name, i, dyn_hdr_path);
@@ -395,7 +400,7 @@ ssize_t get_app_index(struct bt_conn* conn, const struct bt_gatt_attr* attr, con
         return -1;
     }
     uint8_t app_index_local = *(const uint8_t*)app;
-    if (app_index_local > 0) {
+    if (app_index_local >= MAX_APP_SLOTS) {
         LOG_ERR("Illegal app index: %d\n", app_index_local);
         return -1;
     }
@@ -817,7 +822,11 @@ ssize_t file_transfer_write(struct bt_conn* conn, const struct bt_gatt_attr* att
             if (infer(app_index) != 0) {
                 led_set_state(LED_STATE_UPDATE_FAILED);
                 LOG_ERR("akida_program_infer failed\n");
-                return 1;
+
+                total_received = 0;
+                app_flash_offset = meta_flash_address;
+                ble_pgm_offset = 0;
+                return len;
             }
             total_received = 0;
             app_flash_offset = meta_flash_address;
@@ -854,7 +863,7 @@ ssize_t file_transfer_write(struct bt_conn* conn, const struct bt_gatt_attr* att
  *   -1  read error or CRC mismatch – caller should use compiled defaults
  * ---------------------------------------------------------------------- */
 int file_transfer_load_meta(int app_idx, model_meta_t* meta_out) {
-    if (app_idx < 0 || app_idx > 0 || meta_out == NULL) {
+    if (app_idx < 0 || app_idx >= MAX_APP_SLOTS || meta_out == NULL) {
         LOG_ERR("incorrect app_idx %d", app_idx);
         return -1;
     }
@@ -969,7 +978,7 @@ void shared_buf_init(void) {
  * validation so the buffer is not clobbered before program_info is loaded.
  * ---------------------------------------------------------------------- */
 int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t* meta_out) {
-    if (app_idx < 0 || app_idx > 0 || meta_out == NULL) {
+    if (app_idx < 0 || app_idx >= MAX_APP_SLOTS || meta_out == NULL) {
         LOG_ERR("incorrect app_idx %d", app_idx);
         return -1;
     }
@@ -1000,7 +1009,7 @@ int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t* meta_out) {
  * Reads the model_data_meta_t file (3rd LittleFS file) for the given slot.
  * ---------------------------------------------------------------------- */
 int file_transfer_load_data_meta(int app_idx, model_data_meta_t* dm_out) {
-    if (app_idx < 0 || app_idx > 0 || dm_out == NULL) {
+    if (app_idx < 0 || app_idx >= MAX_APP_SLOTS || dm_out == NULL) {
         return -1;
     }
 
@@ -1084,7 +1093,7 @@ int file_transfer_validate_flash_data(uint32_t flash_addr, const model_data_meta
  * hardcoded path for app_idx.  Returns 0 if valid, -1 otherwise.
  * ---------------------------------------------------------------------- */
 int file_transfer_check_model_name(int app_idx, const char* model_name) {
-    if (app_idx < 0 || app_idx > 0 || model_name == NULL || model_name[0] == '\0') {
+    if (app_idx < 0 || app_idx >= MAX_APP_SLOTS || model_name == NULL || model_name[0] == '\0') {
         return -1;
     }
     char constructed[80];

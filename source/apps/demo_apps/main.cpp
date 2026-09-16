@@ -29,6 +29,7 @@
 #include <akd1500/akd1500_spi_driver.h>
 #include <hardware_device_impl.h>
 #include <infra/system.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <zephyr/device.h>
@@ -46,6 +47,7 @@
 #include "akida/hardware_device.h"
 #include "io_objects.h"
 #include "nrf_spi.h"
+#include "sample_input/fall/fall_inputs.h"
 #include "sample_input/kws/kws_inputs.h"
 
 #include "infer_utils.h"
@@ -59,6 +61,7 @@ extern "C" {
 #include "ble_services/file_transfer.h"
 #include "boot_manager.h"
 #include "error.h"
+#include "fall_app.h"
 #include "kws_app.h"
 #include "kws_config.h"
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
@@ -724,7 +727,9 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
 
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
 
-const unsigned char* inputs[] = {kws_inputs};
+/* Indexed by app slot (APP_SLOT_KWS / APP_SLOT_FALL) */
+const unsigned char* inputs[] = {kws_inputs, fall_inputs};
+static const int64_t* const input_lens[] = {&kws_inputs_len, &fall_inputs_len};
 
 uint32_t g_num_classes = 0;
 uint32_t g_num_neurons_per_class = 1;
@@ -739,6 +744,58 @@ static uint8_t is_el_model = 0;
 /*Metadata of the loaded model used for app_info reporting*/
 model_meta_t kws_meta;
 model_data_meta_t kws_data_meta;
+
+/* The g_active_model is which one the currently-programmed in the mesh */
+enum active_model_t { ACTIVE_MODEL_KWS = APP_SLOT_KWS, ACTIVE_MODEL_FALL = APP_SLOT_FALL };
+static enum active_model_t g_active_model = ACTIVE_MODEL_KWS;
+
+/* Metadata of the loaded fall model */
+model_meta_t fall_meta;
+
+/* True once infer(APP_SLOT_FALL) has successfully programmed the fall model
+ * at least once this boot */
+static bool fall_model_present = false;
+/* True while continuous IMU-driven fall inference is engaged distinct
+ * from imu_fall_capture_is_active() in imu.c, which only tracks whether samples are being pushed
+ * into the window; this additionally reflects that the mesh is currently programmed with the fall
+ * model. */
+static bool fall_inference_engaged = false;
+/* Whether the KWS pipeline was running before fall_start() paused it, so
+ * fall_stop() knows whether to resume it. */
+static bool fall_saved_kws_was_running = false;
+/* "After calibration only fall detection must start." True once
+ * fall_calibrate_and_start() has completed imu_calibrate_for_fall()
+ * successfully at least once THIS boot.*/
+static bool fall_calibration_done = false;
+
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+/* Akida input tensor is [1, FALL_WINDOW_LEN, FALL_FEATURE_COUNT, 1]
+ * FALL_FEATURE_COUNT is 8 */
+#define FALL_FEATURE_COUNT 8
+static const uint32_t fall_dims[] = {FALL_WINDOW_LEN, FALL_FEATURE_COUNT, 1};
+
+/**
+ * @brief Mean values used to normalize the fall-detection input features.
+ *
+ * These values are calculated during the model preprocessing/training stage
+ * and must match the values used when the fall model was trained.
+ *
+ * Feature order:
+ * [ax, ay, az, acc_mag, gx, gy, gz, gyro_mag].
+ */
+static const float fall_feature_mean[FALL_FEATURE_COUNT] = {
+    -0.3150162398815155f, 0.32129576802253723f, -0.371142715215683f, 2.5211660861968994f,
+    68.25862121582031f,   55.33150863647461f,   3.8555378913879395f, 253.74557495117188f,
+};
+static const float fall_feature_std[FALL_FEATURE_COUNT] = {
+    7.83920955657959f,   5.581924915313721f, 5.294520854949951f, 10.692571640014648f,
+    1641.2286376953125f, 513.5389404296875f, 646.242431640625f,  1817.2191162109375f,
+};
+
+#define FALL_Z_CLIP 4.0f                        /* preprocessing.z_min/z_max */
+#define FALL_RESCALE_SCALE 0.03137254901960784f /* preprocessing.rescaling.scale (8/255) */
+#define FALL_RESCALE_OFFSET (-4.0f)             /* preprocessing.rescaling.offset */
+#endif
 
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 /* IMU thread variables*/
@@ -820,10 +877,16 @@ static int g_unknown_class = -1;
 #define SMOOTHING_ALPHA 0.7f
 #define SCORE_THRESHOLD 0.5f
 #define CHIMING_THRESHOLD 3
+/* Fall-only chiming threshold. A real fall only ever produces a single
+ * well-centered "fall" tick */
+#define FALL_CHIMING_THRESHOLD 1
 
-float smoothing_alpha = SMOOTHING_ALPHA;    // EMA factor (0.0-1.0, higher = less smoothing)
-float score_threshold = SCORE_THRESHOLD;    // Smoothed softmax score threshold
-int chiming_threshold = CHIMING_THRESHOLD;  // Consecutive detections needed to trigger
+float smoothing_alpha = SMOOTHING_ALPHA;  // EMA factor (0.0-1.0, higher = less smoothing)
+float score_threshold = SCORE_THRESHOLD;  // Smoothed softmax score threshold
+int chiming_threshold =
+    CHIMING_THRESHOLD;  // KWS chiming threshold (NVS-persisted, `app chiming <n>`)
+int fall_chiming_threshold =
+    FALL_CHIMING_THRESHOLD;  // Fall-only chiming threshold (`app fallchiming <n>`)
 
 static float* smoothed_scores = nullptr;
 static int* chiming_counters = nullptr;
@@ -880,6 +943,58 @@ void do_inference(int spectrogram_index) {
         kws_edge_state[cur_kws_edge_state].on_mfcc_output((uint8_t*)akida_input, (uint32_t*)dims);
     }
 }
+
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+/**
+ * @brief Preprocesses an IMU window and runs fall/no-fall inference.
+ *
+ * Converts the 6-axis IMU data into 8 features:
+ * [ax, ay, az, acc_mag, gx, gy, gz, gyro_mag].
+ *
+ * Each feature is normalized using the preprocessing mean and standard
+ * deviation, clipped to the configured range, and converted to uint8
+ * values expected by the Akida model.
+ *
+ * The resulting [FALL_WINDOW_LEN][FALL_FEATURE_COUNT] input buffer is
+ * passed to the Akida inference engine.
+ *
+ * @param window Input IMU window containing accelerometer and gyroscope data.
+ *
+ * @note Inference is performed only when the fall-detection model is active.
+ */
+static void do_fall_inference(const float window[FALL_WINDOW_LEN][FALL_AXIS_COUNT]) {
+    if (g_active_model != ACTIVE_MODEL_FALL) {
+        return;
+    }
+
+    __aligned(32) static uint8_t fall_akida_input[FALL_WINDOW_LEN][FALL_FEATURE_COUNT];
+    for (int i = 0; i < FALL_WINDOW_LEN; i++) {
+        float ax = window[i][0], ay = window[i][1], az = window[i][2];
+        float gx = window[i][3], gy = window[i][4], gz = window[i][5];
+        float feat[FALL_FEATURE_COUNT] = {
+            ax, ay, az, sqrtf(ax * ax + ay * ay + az * az),
+            gx, gy, gz, sqrtf(gx * gx + gy * gy + gz * gz),
+        };
+        for (int j = 0; j < FALL_FEATURE_COUNT; j++) {
+            /* z = (feat_8ch - mu) / sig */
+            float z = (feat[j] - fall_feature_mean[j]) / fall_feature_std[j];
+            /* clip(z, -4, +4) - symmetric, unlike the old model's ReLU floor */
+            if (z < -FALL_Z_CLIP)
+                z = -FALL_Z_CLIP;
+            else if (z > FALL_Z_CLIP)
+                z = FALL_Z_CLIP;
+            /* Inverse of the on-chip Rescaling layer: maps [-4,+4] -> [0,255] */
+            float q = roundf((z - FALL_RESCALE_OFFSET) / FALL_RESCALE_SCALE);
+            if (q < 0.0f)
+                q = 0.0f;
+            else if (q > 255.0f)
+                q = 255.0f;
+            fall_akida_input[i][j] = (uint8_t)q;
+        }
+    }
+    inference_on_mfcc_output((uint8_t*)fall_akida_input, (uint32_t*)fall_dims);
+}
+#endif /* CONFIG_IMU_ENABLE_THREAD */
 
 K_THREAD_STACK_DEFINE(capture_stack, CAPTURE_STACK_SIZE);
 K_THREAD_STACK_DEFINE(process_stack, PROCESS_STACK_SIZE);
@@ -1238,6 +1353,55 @@ static int initiate_kws_inference(uint8_t is_el_model_l) {
     kws_app_running = true;
     return SUCCESS;
 }
+
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+/**
+ * @brief Starts fall-detection inference and IMU data capture.
+ *
+ * Selects the fall model, resets previous inference data, registers the
+ * fall-inference callback, and starts the IMU with the configured
+ * fall-detection ODR and full-scale settings.
+ *
+ * @return SUCCESS on successful start.
+ * @return Error code if fall IMU capture fails.
+ */
+static int initiate_fall_inference(void) {
+    g_active_model = ACTIVE_MODEL_FALL;
+    reset_stale_inference_data();
+
+    imu_register_fall_callback(do_fall_inference);
+    /* CONFIG_FALL_ACC_ODR/FS and CONFIG_FALL_GYRO_ODR/FS (208 Hz, +-8g /
+     * 1000 dps) are fall-specific. */
+    int rc = imu_fall_capture_start(CONFIG_FALL_ACC_ODR, CONFIG_FALL_ACC_FS, CONFIG_FALL_GYRO_ODR,
+                                    CONFIG_FALL_GYRO_FS);
+    if (rc != 0) {
+        LOG_ERR("initiate_fall_inference: imu_fall_capture_start failed (%d)", rc);
+        g_active_model = ACTIVE_MODEL_KWS;
+        return rc;
+    }
+
+    fall_inference_engaged = true;
+    LOG_INF("fall detection: started (window=%d samples, %d axes)", FALL_WINDOW_LEN,
+            FALL_AXIS_COUNT);
+    return SUCCESS;
+}
+
+/**
+ * @brief Stops fall-detection inference and IMU data capture.
+ *
+ * Stops the fall IMU capture and disables fall-detection inference if it
+ * is currently active.
+ */
+static void stop_fall_inference(void) {
+    if (!fall_inference_engaged) {
+        return;
+    }
+    imu_fall_capture_stop();
+    fall_inference_engaged = false;
+    LOG_INF("fall detection: stopped");
+}
+#endif
+
 #if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
 static int start_imu_proc(void) {
     imu_tid = k_thread_create(&imu_thread, imu_stack, IMU_STACK_SIZE, imu_data_thread, NULL, NULL,
@@ -1305,7 +1469,7 @@ static int start_current_proc(void) {
  * apply the inference mode carried in the model metadata. */
 void akida_init(int mode);
 
-static int update_model_params(model_meta_t kws_meta) {
+static int update_model_params(model_meta_t kws_meta, int app_slot) {
     g_input_size = kws_meta.input_shape[0] * kws_meta.input_shape[1] * kws_meta.input_shape[2];
     g_num_classes = kws_meta.output_shape[0] * kws_meta.output_shape[1] * kws_meta.output_shape[2];
 
@@ -1352,16 +1516,25 @@ static int update_model_params(model_meta_t kws_meta) {
         return -EFAILURE;
     }
 
-    /* mfcc_fs is mandatory: it divides every input feature, so a missing/zero
-     * value (model uploaded without mfcc_fs in info.yaml) would produce garbage
-     * inference. Reject such a model instead of guessing a default. */
-    if (kws_meta.mfcc_fs_bits == 0) {
-        LOG_ERR(
-            "KWS model metadata missing mfcc_fs — refusing to run. "
-            "Regenerate the model with mfcc_fs in info.yaml.");
-        return -EFAILURE;
+    /* mfcc_fs is mandatory for KWS: it divides every spectrogram input feature
+     * (see do_inference()), so a missing/zero value (model uploaded without
+     * mfcc_fs in info.yaml) would produce garbage inference. Reject such a
+     * model instead of guessing a default.
+     *
+     * The fall model does NOT use mfcc_fs - its input pipeline
+     * (do_fall_inference()) Z-score normalizes and 8-bit-quantizes using its
+     * own compiled-in fall_feature_mean/std/FALL_Z_CLIP/FALL_RESCALE_*
+     * constants instead, so this check (and the mfcc_fs assignment) is
+     * skipped for it. */
+    if (app_slot == APP_SLOT_KWS) {
+        if (kws_meta.mfcc_fs_bits == 0) {
+            LOG_ERR(
+                "KWS model metadata missing mfcc_fs — refusing to run. "
+                "Regenerate the model with mfcc_fs in info.yaml.");
+            return -EFAILURE;
+        }
+        memcpy(&mfcc_fs, &kws_meta.mfcc_fs_bits, sizeof(float));
     }
-    memcpy(&mfcc_fs, &kws_meta.mfcc_fs_bits, sizeof(float));
 
     g_silence_class = (int)kws_meta.silence_class;
     g_unknown_class = (int)kws_meta.unknown_class;
@@ -1701,7 +1874,7 @@ int main(void) {
 
     akida_batch_size(1, true);
     kws_model_present = true;
-    if (update_model_params(kws_meta) != SUCCESS) {
+    if (update_model_params(kws_meta, APP_SLOT_KWS) != SUCCESS) {
         kws_model_present = false;
         return -1;
     }
@@ -1797,6 +1970,17 @@ static void reset_kws_spectrogram(void) {
     reset_spectrogram_index();
 }
 
+/* Tag-table lookup shared by kws_post_processing() for whichever model is
+ * currently active (see g_active_model) */
+static const char* active_tag_for(int class_id) {
+    if (g_active_model == ACTIVE_MODEL_FALL) {
+        return (class_id >= 0 && class_id < fall_tags_count) ? fall_tags[class_id] : "?";
+    }
+    return (class_id >= 0 && class_id < kws_new_tags_count) ? kws_new_tags[class_id] : "?";
+}
+
+/* Runs for whichever model is currently programmed into the mesh (KWS or
+ * fall/no-fall — see g_active_model) */
 static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
     // Step 1: Per-class max pooling from dequantized output
     int num_cls_capped = (int)g_num_classes;
@@ -1822,6 +2006,11 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
 
     // Step 4: Update chiming counters for keyword classes
     // (skip silence and unknown classes)
+    /* Fall and KWS each get their own chiming threshold — the mesh only ever
+     * runs one model at a time (see g_active_model), so exactly one of these
+     * is meaningful on any given call. */
+    const int active_chiming_threshold =
+        (g_active_model == ACTIVE_MODEL_FALL) ? fall_chiming_threshold : chiming_threshold;
     int triggered_class = -1;
     float triggered_score = 0.0f;
     for (int c = 0; c < num_cls_capped; c++) {
@@ -1836,40 +2025,39 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
             chiming_counters[c] = 0;
         }
         // Check if this class has reached the chiming threshold
-        if (chiming_counters[c] >= chiming_threshold) {
+        if (chiming_counters[c] >= active_chiming_threshold) {
             if (triggered_class == -1 || smoothed_scores[c] > triggered_score) {
                 triggered_class = c;
                 triggered_score = smoothed_scores[c];
             }
         }
     }
-
     if (verbose_on) {
         LOG_INF(
             "scores: argmax=%d (%s) softmax=%.2f smoothed=%.2f "
             "chiming=%d/%d",
-            found, (found < kws_new_tags_count) ? kws_new_tags[found] : "?", softmax_scores[found],
-            smoothed_scores[found], (found < num_cls_capped) ? chiming_counters[found] : 0,
-            chiming_threshold);
+            found, active_tag_for(found), softmax_scores[found], smoothed_scores[found],
+            (found < num_cls_capped) ? chiming_counters[found] : 0, active_chiming_threshold);
     }
 
     // Step 5: Trigger if chiming threshold reached
     if (triggered_class >= 0) {
         if (verbose_on) {
-            LOG_INF("trigger: keyword=%s chiming=%d/%d",
-                    (triggered_class < kws_new_tags_count) ? kws_new_tags[triggered_class] : "?",
-                    chiming_counters[triggered_class], chiming_threshold);
+            LOG_INF("trigger: label=%s chiming=%d/%d", active_tag_for(triggered_class),
+                    chiming_counters[triggered_class], active_chiming_threshold);
         }
         current_class = triggered_class;
         float confidence = smoothed_scores[triggered_class];
+        float confidence_pct = confidence * 100.0f;
+        const char* label = active_tag_for(triggered_class);
+        bool is_fall = (g_active_model == ACTIVE_MODEL_FALL);
 
-        LOG_INF("Keyword Detected: %s",
-                (triggered_class < kws_new_tags_count) ? kws_new_tags[triggered_class] : "?");
+        LOG_INF("%s: %s", is_fall ? "Fall Event" : "Keyword Detected", label);
         if (metrics_on) {
             LOG_INF(
                 "  confidence=%.1f%% smoothed=%.1f%% chiming=%d cpu=%ums "
                 "dma=%uus",
-                confidence * 100.0f, triggered_score * 100.0f, chiming_counters[triggered_class],
+                confidence_pct, triggered_score * 100.0f, chiming_counters[triggered_class],
                 inf_time, dma_time);
 #ifdef CONFIG_SPARK_BOARD
             current_sense_reading_t pwr;
@@ -1878,10 +2066,11 @@ static void kws_post_processing(uint32_t dma_time, uint32_t inf_time) {
                     (double)pwr.power_mw[CURRENT_RAIL_0V8]);
 #endif
         }
-        /* KWS data is sent only when BLE is connected and the KWS application
-         * is deployed */
+        /* Event data is sent only when BLE is connected and the corresponding
+         * application is deployed. Fall detection reuses the same
+         * CMD_DEPLOY_START event as KWS keywords. */
         if (is_ble_connected() && event_flag) {
-            send_event(CMD_DEPLOY_START, kws_new_tags[triggered_class], confidence * 100.0f);
+            send_event(CMD_DEPLOY_START, label, confidence_pct);
         }
         last_trigger_time_ms = time_ms();
 #ifdef CONFIG_SPARK_BOARD
@@ -1945,7 +2134,11 @@ static int32_t inference_on_mfcc_output(uint8_t* input, uint32_t* input_shape) {
                     akd_async_wake_give();
                 }
                 ret = EFAILURE;
-                learn_utterance_complete();  // graceful abort
+                /* learn_utterance_complete() is KWS edge-learning bookkeeping
+                 * it has no meaning for a fall-detection enqueue timeout. */
+                if (g_active_model != ACTIVE_MODEL_FALL) {
+                    learn_utterance_complete();  // graceful abort
+                }
                 break;
             }
         } while (ret);
@@ -2637,7 +2830,7 @@ static void learning_on_user_input(int input_type) {
 
 /* function to run the inference */
 extern "C" int infer(int app_index_l) {
-    if (app_index_l > 0) {
+    if (app_index_l < 0 || app_index_l >= MAX_APP_SLOTS) {
         LOG_ERR("Illegal model index %d", app_index_l);
         return -1;
     }
@@ -2690,7 +2883,7 @@ extern "C" int infer(int app_index_l) {
         LOG_ERR("Metadata reload failed (err %d)", meta_ret);
         return -1;
     }
-    if (update_model_params(infer_meta) != SUCCESS) {
+    if (update_model_params(infer_meta, app_index_l) != SUCCESS) {
         return -1;
     }
 
@@ -2708,6 +2901,9 @@ extern "C" int infer(int app_index_l) {
 
     akida_batch_size(1, true);
     app_index = app_index_l;
+    /* Which model the mesh now holds — set before any post-processing below
+     * picks a tag table off it. */
+    g_active_model = (app_index_l == APP_SLOT_FALL) ? ACTIVE_MODEL_FALL : ACTIVE_MODEL_KWS;
 
     if (check_model_compatibility(is_el_model, infer_meta) != SUCCESS) {
         return -1;
@@ -2738,8 +2934,20 @@ extern "C" int infer(int app_index_l) {
     s_dma_cycls = akida_get_clock_counter();
     uint32_t fwd_cyc0 = k_cycle_get_32();
     s_tick = time_ms();
-    int ret =
-        akida_forward((uint8_t*)inputs[app_index_l], inp_shap, (uint8_t*)akida_output, akd_op_size);
+    /* One-shot smoke-test forward pass, same for both models */
+    uint32_t expected_input_bytes = inp_shap[0] * inp_shap[1] * inp_shap[2];
+    int64_t available_input_bytes = *input_lens[app_index_l];
+    int ret;
+    if ((int64_t)expected_input_bytes > available_input_bytes) {
+        LOG_ERR(
+            "self-test sample too small for slot %d: model input_shape wants %u "
+            "bytes, compiled-in sample is only %lld bytes",
+            app_index_l, expected_input_bytes, (long long)available_input_bytes);
+        ret = EFAILURE;
+    } else {
+        ret = akida_forward((uint8_t*)inputs[app_index_l], inp_shap, (uint8_t*)akida_output,
+                            akd_op_size);
+    }
     e_tick = time_ms();
     uint32_t fwd_wall_us = (uint32_t)k_cyc_to_us_floor64(k_cycle_get_32() - fwd_cyc0);
     e_dma_cycls = akida_get_clock_counter();
@@ -2751,7 +2959,7 @@ extern "C" int infer(int app_index_l) {
         LOG_ERR(" inference failed ");
         return -1;
     }
-    if (app_index_l == 0) {  // kws
+    if (app_index_l == APP_SLOT_KWS) {
         LOG_PRINTK("Class : %d\n", class_id);
         LOG_PRINTK("Word : %s\n",
                    (class_id >= 0 && class_id < kws_new_tags_count) ? kws_new_tags[class_id] : "?");
@@ -2764,11 +2972,28 @@ extern "C" int infer(int app_index_l) {
             kws_model_present = false;
         }
     }
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+    else if (app_index_l == APP_SLOT_FALL) {
+        LOG_PRINTK("Class : %d\n", class_id);
+        LOG_PRINTK("Label : %s\n",
+                   (class_id >= 0 && class_id < fall_tags_count) ? fall_tags[class_id] : "?");
+        fall_model_present = true;
+        if (!fall_inference_engaged && fall_calibration_done) {
+            initiate_fall_inference();
+        } else if (!fall_calibration_done) {
+            LOG_INF(
+                "fall model programmed but not calibrated yet - "
+                "run `fall_calibrate` to start detection");
+        }
+    }
+#endif
 
     /* [bench] consolidated per-frequency breakdown for the SPI-clock sweep. */
     uint32_t app_ms = (uint32_t)(time_ms() - bench_t0);
+    const char* const* active_tags = (app_index_l == APP_SLOT_FALL) ? fall_tags : kws_new_tags;
+    int active_tags_count = (app_index_l == APP_SLOT_FALL) ? fall_tags_count : kws_new_tags_count;
     const char* word =
-        (class_id >= 0 && class_id < kws_new_tags_count) ? kws_new_tags[class_id] : "?";
+        (class_id >= 0 && class_id < active_tags_count) ? active_tags[class_id] : "?";
     LOG_PRINTK("[bench] SPI=%u Hz (FREQ.reg=0x%08X)\n", akd_spi_get_frequency(),
                akd_spi_read_freq_reg());
     LOG_PRINTK(
@@ -2798,25 +3023,293 @@ static int cmd_infer(const struct shell* shell, size_t argc, char** argv) {
 
     char* string = argv[1];
     if (!strcmp(string, "kws")) {
-        app_index = 0;
+        app_index = APP_SLOT_KWS;
         LOG_INF("inference kws requested, app index %d", app_index);
+    } else if (!strcmp(string, "fall")) {
+        app_index = APP_SLOT_FALL;
+        LOG_INF("inference fall requested, app index %d", app_index);
     } else {
         LOG_ERR("Illegal model inference request");
         return -EINVAL;
     }
 
     /* Pause the background continuous-KWS threads so this one-shot infer does not
-     * race the async thread on the single shared Akida device / SPI bus. */
+     * race the async thread on the single shared Akida device / SPI bus. Fall
+     * capture is stopped the same way further down in fall_start/fall_stop;
+     * a one-shot `infer fall` from the shell while fall capture is already
+     * engaged would otherwise fight it for the mesh, so guard that too. */
     bool was_running = kws_app_running;
     if (was_running) {
         kws_app_stop();
     }
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+    bool fall_was_engaged = fall_inference_engaged;
+    if (fall_was_engaged) {
+        stop_fall_inference();
+    }
+#endif
     int rc = infer(app_index);
     if (was_running) {
         kws_app_start();
     }
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+    /* infer(APP_SLOT_FALL) above already re-engaged fall capture if that is
+     * what was requested; only reprogram back to fall here if some *other*
+     * one-shot request (e.g. "infer kws") interrupted an already-running
+     * fall session. */
+    if (fall_was_engaged && app_index != APP_SLOT_FALL) {
+        infer(APP_SLOT_FALL);
+    }
+#endif
     return rc;
 }
+
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+/**
+ * @brief Starts the fall-detection application.
+ *
+ * Stops KWS if it is running, loads the fall model, and starts fall
+ * detection. If fall-model loading fails, the KWS model is restored.
+ *
+ * @return 0 on success or if fall detection is already running.
+ * @return Error code if the fall model cannot be loaded.
+ */
+extern "C" int fall_app_start(void) {
+    if (fall_inference_engaged) {
+        return 0;
+    }
+
+    fall_saved_kws_was_running = kws_app_running;
+    if (fall_saved_kws_was_running) {
+        kws_app_stop();
+    }
+
+    int rc = infer(APP_SLOT_FALL);
+    if (rc != 0) {
+        LOG_ERR(
+            "fall_app_start: infer(APP_SLOT_FALL) failed (%d) - is a fall model flashed at "
+            "slot %d?",
+            rc, APP_SLOT_FALL);
+        /* Reprogramming failed partway through, so the mesh state is not
+         * trustworthy; put it back on a known-good model rather than leave
+         * it wherever infer() gave up. */
+        if (fall_saved_kws_was_running) {
+            infer(APP_SLOT_KWS);
+            kws_app_start();
+        }
+        return rc;
+    }
+
+    LOG_INF("fall detection started (window=%d samples)", FALL_WINDOW_LEN);
+    return 0;
+}
+/**
+ * @brief Stops the fall-detection application.
+ *
+ * Stops fall detection, restores the KWS model, and restarts KWS if it
+ * was running before fall detection was started.
+ *
+ * @return 0 on success.
+ * @return Error code if the KWS model cannot be restored.
+ */
+extern "C" int fall_app_stop(void) {
+    if (!fall_inference_engaged) {
+        return 0;
+    }
+
+    stop_fall_inference();
+    int rc = infer(APP_SLOT_KWS);
+    if (fall_saved_kws_was_running) {
+        kws_app_start();
+    }
+    if (rc != 0) {
+        LOG_ERR("fall_app_stop: infer(APP_SLOT_KWS) failed (%d)", rc);
+    }
+    return rc;
+}
+
+/**
+ * @brief Checks whether the fall-detection model is currently active.
+ *
+ * @return true if the fall model is active, otherwise false.
+ */
+extern "C" bool fall_app_is_running(void) {
+    return g_active_model == ACTIVE_MODEL_FALL;
+}
+
+/**
+ * @brief Calibrates the IMU and starts fall detection.
+ *
+ * Configures and calibrates the IMU using the fall-detection settings,
+ * then loads the fall model and starts fall detection.
+ *
+ * @return 0 on success.
+ * @return Error code if calibration or fall detection startup fails.
+ */
+extern "C" int fall_calibrate_and_start(void) {
+    int32_t rc = imu_calibrate_for_fall();
+    if (rc != 0) {
+        LOG_ERR("fall_calibrate_and_start: imu_calibrate_for_fall failed (%d)", rc);
+        return rc;
+    }
+
+    fall_calibration_done = true;
+    LOG_INF("IMU calibration complete - starting fall detection");
+
+    int start_rc = fall_app_start();
+    if (start_rc != 0) {
+        LOG_ERR("fall_calibrate_and_start: fall_app_start failed (%d)", start_rc);
+        return start_rc;
+    }
+    return 0;
+}
+/**
+ * @brief Checks whether the IMU has completed fall-detection calibration.
+ *
+ * @return true if calibration is complete, otherwise false.
+ */
+extern "C" bool fall_calibration_is_done(void) {
+    return fall_calibration_done;
+}
+/**
+ * @brief Returns the number of fall-detection classes.
+ *
+ * @return Number of classes supported by the fall model.
+ */
+extern "C" int fall_class_count(void) {
+    return fall_tags_count;
+}
+
+/**
+ * @brief Returns the name of a fall-detection class.
+ *
+ * @param index Class index.
+ *
+ * @return Class name if the index is valid, otherwise "?".
+ */
+extern "C" const char* fall_class_name(int index) {
+    return (index >= 0 && index < fall_tags_count) ? fall_tags[index] : "?";
+}
+
+/**
+ * @brief Starts fall detection from the shell command.
+ *
+ * Starts the fall-detection application and reports the result through
+ * the shell.
+ *
+ * @return 0 on success or if fall detection is already running.
+ * @return Error code if startup fails.
+ */
+static int cmd_fall_start(const struct shell* shell, size_t argc, char** argv) {
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+
+    if (fall_inference_engaged) {
+        shell_print(shell, "fall detection already running");
+        return 0;
+    }
+
+    int rc = fall_app_start();
+    if (rc != 0) {
+        shell_print(shell, "fall_start failed (%d) - is a fall model flashed at slot %d?", rc,
+                    APP_SLOT_FALL);
+        return rc;
+    }
+
+    shell_print(shell, "fall detection started (window=%d samples)", FALL_WINDOW_LEN);
+    return 0;
+}
+/**
+ * @brief Stops fall detection from the shell command.
+ *
+ * Stops fall detection and restores the KWS model.
+ *
+ * @return 0 on success.
+ * @return Error code if stopping or KWS restoration fails.
+ */
+static int cmd_fall_stop(const struct shell* shell, size_t argc, char** argv) {
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+
+    if (!fall_inference_engaged) {
+        shell_print(shell, "fall detection not running");
+        return 0;
+    }
+
+    int rc = fall_app_stop();
+    shell_print(shell, "fall detection stopped%s", rc == 0 ? "" : " (KWS reprogram failed)");
+    return rc;
+}
+
+/**
+ * @brief Calibrates the IMU and starts fall detection from the shell.
+ *
+ * Instructs the user to keep the device still on a flat, stable surface,
+ * performs IMU calibration, and starts fall detection after calibration
+ * completes successfully.
+ *
+ * @return 0 on successful calibration and startup.
+ * @return Error code if calibration or startup fails.
+ */
+static int cmd_fall_calibrate(const struct shell* shell, size_t argc, char** argv) {
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+
+    shell_print(shell, "Calibrating IMU - keep the device still on a flat, stable surface...");
+    int rc = fall_calibrate_and_start();
+    if (rc != 0) {
+        shell_print(shell, "fall_calibrate failed (%d)", rc);
+        return rc;
+    }
+
+    shell_print(shell, "Calibration complete - fall detection started");
+    return 0;
+}
+
+/* shell cli function: print fall-detection status/config. */
+static int cmd_fall_show(const struct shell* shell, size_t argc, char** argv) {
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+
+    shell_print(shell, "fall model present : %s", fall_model_present ? "yes" : "no");
+    shell_print(shell, "fall engaged       : %s", fall_inference_engaged ? "yes" : "no");
+    shell_print(shell, "calibrated         : %s", fall_calibration_done ? "yes" : "no");
+    shell_print(shell, "active model       : %s",
+                g_active_model == ACTIVE_MODEL_FALL ? "fall" : "kws");
+    shell_print(shell, "window             : %d samples x %d axes (%d-sample 50%% overlap stride)",
+                FALL_WINDOW_LEN, FALL_AXIS_COUNT, FALL_WINDOW_STRIDE);
+    return 0;
+}
+#else
+/**
+ * @brief Fall-detection API stubs used when CONFIG_IMU_ENABLE_THREAD is disabled.
+ *
+ * Returns an error or inactive state because CONFIG_IMU_ENABLE_THREAD support is
+ * not enabled in the current build configuration.
+ */
+extern "C" int fall_app_start(void) {
+    return -EINVAL;
+}
+extern "C" int fall_app_stop(void) {
+    return -EINVAL;
+}
+extern "C" bool fall_app_is_running(void) {
+    return false;
+}
+extern "C" int fall_calibrate_and_start(void) {
+    return -EINVAL;
+}
+extern "C" bool fall_calibration_is_done(void) {
+    return false;
+}
+extern "C" int fall_class_count(void) {
+    return 0;
+}
+extern "C" const char* fall_class_name(int index) {
+    ARG_UNUSED(index);
+    return "?";
+}
+#endif /* CONFIG_IMU_ENABLE_THREAD */
 
 /* shell cli function to set external host MCU/AKD1500 as SPI master */
 static int cmd_set(const struct shell* shell, size_t argc, char** argv) {
@@ -3303,6 +3796,11 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
             if (score_threshold > 1.0f)
                 score_threshold = 1.0f;
             LOG_INF("score_threshold = %.2f", score_threshold);
+        } else if (argc > 2 && !strcmp(argv[1], "fallchiming")) {
+            fall_chiming_threshold = atoi(argv[2]);
+            if (fall_chiming_threshold < 1)
+                fall_chiming_threshold = 1;
+            LOG_INF("fall_chiming_threshold = %d", fall_chiming_threshold);
         } else if (argc > 2 && !strcmp(argv[1], "speech")) {
             kws_cfg_err_t e = kws_config_set_from_string(KWS_PARAM_SPEECH_TIMEOUT, argv[2]);
             if (e == KWS_CFG_OK || e == KWS_CFG_ERR_NVS)
@@ -3346,7 +3844,10 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
             LOG_INF("  debounce_time    = %u ms       [app debounce <ms>]", kws_debounce_time);
             LOG_INF("  smoothing_alpha  = %.2f        [app alpha <0.0-1.0>]", smoothing_alpha);
             LOG_INF("  score_threshold  = %.2f        [app score <0.0-1.0>]", score_threshold);
-            LOG_INF("  chiming_threshold= %d          [app chiming <n>]", chiming_threshold);
+            LOG_INF("  chiming_threshold= %d          [app chiming <n>] (KWS-only)",
+                    chiming_threshold);
+            LOG_INF("  fall_chiming     = %d          [app fallchiming <n>] (fall-only)",
+                    fall_chiming_threshold);
             LOG_INF("  speech_timeout   = %d ms       [app speech <ms>]", speech_active_time_ms);
             LOG_INF("  metrics          = %d          [app metrics <0|1>]", metrics_on);
             LOG_INF("  block_size       = %u ms       [app blkms <20|40|60|80>]",
@@ -3359,7 +3860,8 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
             LOG_INF("  app debounce <ms>");
             LOG_INF("  app alpha <0.0-1.0>");
             LOG_INF("  app score <0.0-1.0>");
-            LOG_INF("  app chiming <n>");
+            LOG_INF("  app chiming <n>          (KWS-only)");
+            LOG_INF("  app fallchiming <n>      (fall-only)");
             LOG_INF("  app speech <ms>");
             LOG_INF("  app reset                (restore all KWS params to defaults)");
             LOG_INF("  app metrics <0|1>");
@@ -3525,6 +4027,20 @@ SHELL_CMD_REGISTER(set, NULL, "Set MCU/AKD1500 as SPI-Master: set <bool> (0:AKD1
                    cmd_set);
 SHELL_CMD_REGISTER(spi_freq, NULL, "Set AKD1500 host SPI clock (Hz): spi_freq <hz>", cmd_spi_freq);
 SHELL_CMD_REGISTER(infer, NULL, "Start the Inference: infer", cmd_infer);
+
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+SHELL_CMD_REGISTER(fall_start, NULL,
+                   "Reprogram Akida with the fall/no-fall model and start continuous "
+                   "IMU-driven inference",
+                   cmd_fall_start);
+SHELL_CMD_REGISTER(fall_stop, NULL, "Stop fall detection and reprogram Akida back to KWS",
+                   cmd_fall_stop);
+SHELL_CMD_REGISTER(fall_show, NULL, "Show fall-detection status/config", cmd_fall_show);
+SHELL_CMD_REGISTER(fall_calibrate, NULL,
+                   "Calibrate the IMU (208 Hz / +-8g / 208 Hz / +-1000 dps) then start fall "
+                   "detection - requirement 1.1",
+                   cmd_fall_calibrate);
+#endif
 
 /* --- AKD1500 high-freq SPI investigation commands (exploration) --- */
 SHELL_CMD_REGISTER(akida_rd, NULL, "Read AKD reg: akida_rd <hexaddr>", cmd_akida_rd);

@@ -735,6 +735,22 @@ unknown_class: 11
 inference_mode: async                            # sync | async (DK board falls back to sync)
 ```
 
+```yaml
+# .env/demo_apps/fall.yaml
+app: demo_apps                                   # generate_info profile
+model_name: fall                                 # model_name = "fall",
+output_dir: source/external/model_files/fall     
+model_url: ./fall_detect_akida_qat.fbz           # Point this at wherever your fall_model.fbz is actually reachable from.
+map_mode: 2                                      
+neurons_per_class: 1                             # no edge learning here, so 1
+num_el_classes: 0                                # edge-learning novel classes — 0, not used
+flash_address: "0x201000"                        # AKD_FALL_MODEL_OFFSET 
+mfcc_fs: 123.56967163085938                      
+silence_class: 0                                 # index of "no_fall" in the model's output
+unknown_class: 255                               # unused for a 2-class model; out of range on purpose
+inference_mode: sync                             # fall windows arrive far slower than audio frames
+```
+
 Required keys: `app`, `model_name`, `output_dir` plus everything the chosen `app` profile needs
 (for `demo_apps`: `flash_address`, `neurons_per_class`, `num_el_classes`, `mfcc_fs`,
 `silence_class`, `unknown_class`, `inference_mode`). Optional: `map_mode` (default 1),
@@ -1096,3 +1112,211 @@ The scoring pipeline uses **dequantized inference** with **softmax EMA smoothing
 4. **EMA smoothing** — An exponential moving average filter smooths the softmax scores across consecutive inference frames, controlled by the `alpha` parameter (`smoothed = alpha × current + (1 - alpha) × previous`). Higher alpha values respond faster but are noisier.
 
 5. **Chiming trigger** — A per-class counter increments each time the smoothed score exceeds the `score` threshold and resets to zero when it falls below. A keyword is triggered when any class counter reaches the `chiming` threshold. All counters reset after a trigger and during the debounce cooldown.
+
+
+# Fall Detection
+
+The fall detection system uses the **ISM330DHCX IMU sensor** to continuously collect accelerometer and gyroscope data. The processed sensor data is given to the **AKD1500** for fall/no-fall inference.
+
+## Fall Detection Model
+
+| Parameter | Value |
+|---|---|
+| IMU Sensor | ISM330DHCX |
+| Accelerometer ODR | 208 Hz |
+| Accelerometer Full Scale | ±8 g |
+| Gyroscope ODR | 208 Hz |
+| Gyroscope Full Scale | ±1000 dps |
+| Preprocessing Loop Time | 5 ms |
+| Model Input Shape | `[200, 8, 1]` |
+| Model Output Shape | `[1, 1, 2]` |
+| Output Classes | Fall / No Fall |
+
+## Fall Detection Configuration
+
+When fall detection is started:
+
+- The **ISM330DHCX IMU** is configured specifically for fall detection.
+- The accelerometer is configured at **208 Hz with ±8 g** full scale.
+- The gyroscope is configured at **208 Hz with ±1000 dps** full scale.
+- The fall detection model is loaded and programmed into the **AKD1500**.
+- Sensor data capture and inference are then started.
+- The preprocessing loop runs with a **5 ms timing interval**.
+
+## IMU Calibration
+
+Before starting fall detection, the IMU is calibrated.
+
+During calibration:
+
+- Keep the device **stationary on a flat surface**.
+- Accelerometer and gyroscope samples are collected.
+- The average sensor values are calculated.
+- These values are used to remove sensor bias/offset.
+- For the accelerometer, the **Z-axis gravity component** is also taken into account.
+
+Calibration is important because the fall detection model expects **bias-corrected sensor data**. Without calibration, sensor offsets can affect the model input and may reduce detection accuracy.
+
+## Sensor Data Preprocessing
+
+After calibration, the IMU continuously provides raw accelerometer and gyroscope data.
+
+The preprocessing flow is:
+
+**Raw IMU Data → Timestamping → Resampling → Feature Extraction → Normalization → 8-bit Model Input**
+
+### Timestamping and Resampling
+
+The raw IMU samples may not arrive at exactly equal time intervals because of normal firmware loop timing variations.
+
+Therefore:
+
+- Each raw sample is stored together with its timestamp.
+- A small buffer keeps the latest raw samples.
+- Cubic spline interpolation is used to calculate samples at the required fixed time interval.
+- This produces evenly spaced samples for the fall detection model.
+
+The original raw sensor data and timestamps are not modified. The spline calculation generates the processed sample used for inference.
+
+### Feature Extraction
+
+For every processed IMU sample, the following **8 features** are generated:
+
+1. Accelerometer X
+2. Accelerometer Y
+3. Accelerometer Z
+4. Accelerometer magnitude
+5. Gyroscope X
+6. Gyroscope Y
+7. Gyroscope Z
+8. Gyroscope magnitude
+
+These 8 features form the input data for the fall detection model.
+
+## Data Windowing
+
+The processed sensor data is collected into a fixed-size window.
+
+The model input shape is:
+
+```text
+[200, 8, 1]
+```
+
+This represents:
+
+- **200 samples**
+- **8 features per sample**
+- **1 input channel**
+
+Once 200 processed samples are available, the window is sent for inference.
+
+The window then moves forward and collects new samples, allowing fall detection to run continuously.
+
+## Normalization and Quantization
+
+Before sending the data to the AKD1500:
+
+- Each feature is normalized using the predefined **mean and standard deviation** from model development.
+- The normalized values are clipped to the expected range.
+- The values are converted to the **8-bit model input format (0–255)**.
+
+This ensures that the sensor data is in the same format used during model training and quantization.
+
+## Fall Detection Inference
+
+The processed 8-bit sensor window is sent to the **AKD1500**.
+
+The model output shape is:
+
+```text
+[1, 1, 2]
+```
+
+The two output classes represent:
+
+- **Fall**
+- **No Fall**
+
+The inference result is returned to the firmware.
+
+## Sending the Result to the Mobile Application
+
+When the model detects a fall:
+
+**AKD1500 → Firmware → BLE → Mobile Application**
+
+The firmware sends the fall detection result through BLE to the mobile application.
+
+The mobile application displays:
+
+```text
+Fall Detected + Confidence
+```
+
+When no fall is detected, the application remains in:
+
+```text
+Detecting…
+```
+
+The mobile application displays the current fall detection status based on the result received from the firmware.
+
+## 8. Complete Fall Detection Flow
+
+```text
+Start Fall Detection
+        ↓
+Configure ISM330DHCX
+208 Hz / ±8 g Accel
+208 Hz / ±1000 dps Gyro
+        ↓
+Calibrate IMU
+        ↓
+Load Fall Detection Model
+        ↓
+Program Model into AKD1500
+        ↓
+Start IMU Data Capture
+        ↓
+Collect Raw Accel + Gyro Data
+        ↓
+Timestamp Raw Samples
+        ↓
+Resample Using Cubic Spline
+        ↓
+Generate 8 Features
+        ↓
+Create 200-Sample Window
+        ↓
+Normalize Data
+        ↓
+Convert to 8-bit Model Input
+        ↓
+AKD1500 Inference
+        ↓
+Fall / No Fall
+        ↓
+Firmware Receives Result
+        ↓
+Send Result Through BLE
+        ↓
+Mobile Application
+        ↓
+Fall Detected / Detecting…
+```
+
+## 9. Fall Detection Metadata
+
+The fall detection model information is stored in the **external flash** as metadata.
+
+The metadata is used by the firmware to identify and manage the installed fall detection model.
+
+The stored fall detection information includes:
+
+- Fall model metadata
+- Model data information
+- Model size and loading information
+- Fall model storage information
+
+The firmware uses this metadata when loading and programming the fall detection model into the **AKD1500**.

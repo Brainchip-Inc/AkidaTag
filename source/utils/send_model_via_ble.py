@@ -172,10 +172,12 @@ def detect_app_index(bin_path):
 
     if "kws" in filename:
         return 0
+    elif "fall" in filename or "imu" in filename:
+        return 1
     else:
         raise ValueError(
             f"Unknown model type in file '{filename}'. "
-            f"Expected filename to contain 'kws'."
+            f"Expected filename to contain 'kws' or 'fall'/'imu'."
         )
 
 
@@ -446,7 +448,7 @@ async def send_file(address, filepath, info_path, write_to_sram,
         print(f"Connected to {address}")
         await client.start_notify(ACK_CHAR_UUID, handle_ack)
 
-        print("Selected app:", "KWS")
+        print("Selected app:", "KWS" if APP == 0 else "Fall/IMU" if APP == 1 else f"slot {APP}")
         await client.write_gatt_char(APP_CHAR_UUID, APP.to_bytes(1, byteorder="little"), response=True)
         print(f"Sent APP index ({APP})")
 

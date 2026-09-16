@@ -24,8 +24,8 @@
  * Combined value = (high << 64) | low
  */
 typedef struct {
-  uint64_t high;
-  uint64_t low;
+    uint64_t high;
+    uint64_t low;
 } device_id_128_t;
 
 /**
@@ -33,22 +33,23 @@ typedef struct {
  * Used to identify and handle commands received from the mobile application.
  */
 typedef enum {
-  CMD_STREAM_STS = -1,
-  CMD_BATTERY = 0,
-  CMD_DEVICE_INFO = 1,
-  CMD_APPS = 2,
-  CMD_NOTIFY = 3,
-  CMD_CONFIG = 4,
-  CMD_APP_INFO = 5,
-  CMD_UNINSTALL = 6,
-  CMD_RESET = 7,
-  CMD_DEPLOY_START = 8,
-  CMD_STREAM_START = 9,
-  CMD_DEPLOY_STOP = 10,
-  CMD_STREAM_STOP = 11,
-  CMD_STREAM_WAVE = 12,
-  CMD_CURRENT_START = 13,
-  CMD_CURRENT_STOP = 14
+    CMD_STREAM_STS = -1,
+    CMD_BATTERY = 0,
+    CMD_DEVICE_INFO = 1,
+    CMD_APPS = 2,
+    CMD_NOTIFY = 3,
+    CMD_CONFIG = 4,
+    CMD_APP_INFO = 5,
+    CMD_UNINSTALL = 6,
+    CMD_RESET = 7,
+    CMD_DEPLOY_START = 8,
+    CMD_STREAM_START = 9,
+    CMD_DEPLOY_STOP = 10,
+    CMD_STREAM_STOP = 11,
+    CMD_STREAM_WAVE = 12,
+    CMD_CURRENT_START = 13,
+    CMD_CURRENT_STOP = 14,
+    CMD_CALIBRATE = 15
 } command_type_t;
 
 /* Structure representing a parsed command frame received from the host.
@@ -58,11 +59,11 @@ typedef enum {
  * frame has no ':' separator. Only valid until the receive buffer is reused.
  */
 typedef struct {
-  uint8_t frame_type;
-  uint8_t index;
-  uint8_t size;
-  uint8_t command;
-  const char *payload;
+    uint8_t frame_type;
+    uint8_t index;
+    uint8_t size;
+    uint8_t command;
+    const char* payload;
 } parsed_frame_t;
 
 /* Flag indicating whether deployment mode is active.
@@ -88,10 +89,14 @@ extern uint8_t current_stream_flag;
 /* Access in main.c, and variable changes based on info.yaml */
 extern model_meta_t kws_meta;
 extern model_data_meta_t kws_data_meta;
+/* Metadata of the loaded fall/no-fall model, Used by app_info_fall() to report the fall model's
+ * input shape.*/
+extern model_meta_t fall_meta;
 extern uint32_t g_num_classes;
 extern uint8_t adv_manufacturer_data[];
 
 int ble_init(void);
+void app_display(void);
 /*
  * Send a binary PCM waveform frame to the phone over NUS.
  *
@@ -107,7 +112,7 @@ int ble_init(void);
  * Decimation fallback (n_samples=32): every-30th-sample decimation of the same
  *   block - 70 bytes total. Firmware picks the mode via wave_fallback_active().
  */
-void send_pcm_wave(const int16_t *samples, uint16_t n_samples);
+void send_pcm_wave(const int16_t* samples, uint16_t n_samples);
 
 /*
  * Returns true when the BLE link cannot sustain the full envelope payload
@@ -120,7 +125,7 @@ bool wave_fallback_active(void);
  * @brief Send current value to phone for real-time monitoring
  * @param data Pointer to string containing current reading
  */
-void send_current_value(char *);
+void send_current_value(char*);
 #endif
 
 typedef enum { FLAG_DISABLE = 0, FLAG_ENABLE = 1 } flag_state_t;
@@ -128,5 +133,5 @@ typedef enum { FLAG_DISABLE = 0, FLAG_ENABLE = 1 } flag_state_t;
  * Send a keyword spotting (KWS) detection event to the phone.
  * Includes the detected keyword and its confidence score.
  */
-void send_event(int cmd, const char *label, float value);
+void send_event(int cmd, const char* label, float value);
 #endif /* BLE_INITIALIZATION_H */
