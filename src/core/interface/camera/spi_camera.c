@@ -32,17 +32,15 @@ LOG_MODULE_REGISTER(spi_camera, LOG_LEVEL_INF);
  *          exceed the available RAM and are NOT supported.
  * =========================================================== */
 typedef struct {
-  const char *name;
-  uint16_t width;
-  uint16_t height;
-  uint8_t reg_val;
+    const char* name;
+    uint16_t width;
+    uint16_t height;
+    uint8_t reg_val;
 } cam_res_t;
 
 static const cam_res_t cam_res_table[3] = {
-    {"96x96", 96, 96,
-     CAM_SET_CAPTURE_MODE | CAM_IMAGE_MODE_96X96_LEGACY}, /* 1 */
-    {"128x128", 128, 128,
-     CAM_SET_CAPTURE_MODE | CAM_IMAGE_MODE_128X128_LEGACY}, /* 2 */
+    {"96x96", 96, 96, CAM_SET_CAPTURE_MODE | CAM_IMAGE_MODE_96X96_LEGACY},       /* 1 */
+    {"128x128", 128, 128, CAM_SET_CAPTURE_MODE | CAM_IMAGE_MODE_128X128_LEGACY}, /* 2 */
 };
 
 /* -1 = not set. Must call camera_set_pixel before camera_start. */
@@ -66,18 +64,17 @@ static uint8_t camera_satrt_flg = false;
 
 /* SPI device used to communicate with the camera */
 
-const struct device *spi3_dev = DEVICE_DT_GET(DT_NODELABEL(spi3));
+const struct device* spi3_dev = DEVICE_DT_GET(DT_NODELABEL(spi3));
 
 /* SPI configuration for the camera */
 
 static struct spi_config spi_cfg_camera = {
-    .frequency = 8000000,                            // SPI frequency: 8 MHz
-    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB, // 8-bit MSB first
+    .frequency = 8000000,                             // SPI frequency: 8 MHz
+    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB,  // 8-bit MSB first
     .slave = 0,
     .cs =
         {
-            .gpio =
-                SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(camera)), // Camera CS pin
+            .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(camera)),  // Camera CS pin
             .delay = 0,
         },
 };
@@ -91,10 +88,10 @@ static struct spi_config spi_cfg_camera = {
  */
 
 static void camera_write_reg(uint8_t addr, uint8_t val) {
-  uint8_t tx[2] = {addr | 0x80, val};
-  struct spi_buf buf = {.buf = tx, .len = 2};
-  struct spi_buf_set set = {.buffers = &buf, .count = 1};
-  spi_write(spi3_dev, &spi_cfg_camera, &set);
+    uint8_t tx[2] = {addr | 0x80, val};
+    struct spi_buf buf = {.buf = tx, .len = 2};
+    struct spi_buf_set set = {.buffers = &buf, .count = 1};
+    spi_write(spi3_dev, &spi_cfg_camera, &set);
 }
 
 /**
@@ -105,14 +102,14 @@ static void camera_write_reg(uint8_t addr, uint8_t val) {
  */
 
 static uint8_t camera_read_reg(uint8_t addr) {
-  uint8_t tx[3] = {addr & 0x7F, 0, 0};
-  uint8_t rx[3] = {0};
-  struct spi_buf txb = {.buf = tx, .len = 3};
-  struct spi_buf rxb = {.buf = rx, .len = 3};
-  struct spi_buf_set txs = {.buffers = &txb, .count = 1};
-  struct spi_buf_set rxs = {.buffers = &rxb, .count = 1};
-  spi_transceive(spi3_dev, &spi_cfg_camera, &txs, &rxs);
-  return rx[2];
+    uint8_t tx[3] = {addr & 0x7F, 0, 0};
+    uint8_t rx[3] = {0};
+    struct spi_buf txb = {.buf = tx, .len = 3};
+    struct spi_buf rxb = {.buf = rx, .len = 3};
+    struct spi_buf_set txs = {.buffers = &txb, .count = 1};
+    struct spi_buf_set rxs = {.buffers = &rxb, .count = 1};
+    spi_transceive(spi3_dev, &spi_cfg_camera, &txs, &rxs);
+    return rx[2];
 }
 
 /**
@@ -127,11 +124,11 @@ static uint8_t camera_read_reg(uint8_t addr) {
  */
 
 static void wait_i2c_idle(void) {
-  for (int i = 0; i < I2C_IDLE_TIMEOUT_MS; i++) {
-    if ((camera_read_reg(CAM_REG_SENSOR_STATE) & 0x03) == CAM_SENSOR_STATE_IDLE)
-      return;
-    k_msleep(1);
-  }
+    for (int i = 0; i < I2C_IDLE_TIMEOUT_MS; i++) {
+        if ((camera_read_reg(CAM_REG_SENSOR_STATE) & 0x03) == CAM_SENSOR_STATE_IDLE)
+            return;
+        k_msleep(1);
+    }
 }
 
 /**
@@ -141,8 +138,8 @@ static void wait_i2c_idle(void) {
  */
 
 static uint32_t fifo_length(void) {
-  return (camera_read_reg(FIFO_SIZE3) << 16) |
-         (camera_read_reg(FIFO_SIZE2) << 8) | camera_read_reg(FIFO_SIZE1);
+    return (camera_read_reg(FIFO_SIZE3) << 16) | (camera_read_reg(FIFO_SIZE2) << 8) |
+           camera_read_reg(FIFO_SIZE1);
 }
 
 /**
@@ -152,18 +149,16 @@ static uint32_t fifo_length(void) {
  * @param len Number of bytes to read
  */
 
-static void fifo_read(uint8_t *buf, uint32_t len) {
-  uint8_t cmd = BURST_FIFO_READ;
-  uint8_t dummy = 0;
-  struct spi_buf txb[] = {{.buf = &cmd, .len = 1},
-                          {.buf = &dummy, .len = 1},
-                          {.buf = NULL, .len = len}};
-  struct spi_buf rxb[] = {{.buf = NULL, .len = 1},
-                          {.buf = NULL, .len = 1},
-                          {.buf = buf, .len = len}};
-  struct spi_buf_set tx = {.buffers = txb, .count = 3};
-  struct spi_buf_set rx = {.buffers = rxb, .count = 3};
-  spi_transceive(spi3_dev, &spi_cfg_camera, &tx, &rx);
+static void fifo_read(uint8_t* buf, uint32_t len) {
+    uint8_t cmd = BURST_FIFO_READ;
+    uint8_t dummy = 0;
+    struct spi_buf txb[] = {
+        {.buf = &cmd, .len = 1}, {.buf = &dummy, .len = 1}, {.buf = NULL, .len = len}};
+    struct spi_buf rxb[] = {
+        {.buf = NULL, .len = 1}, {.buf = NULL, .len = 1}, {.buf = buf, .len = len}};
+    struct spi_buf_set tx = {.buffers = txb, .count = 3};
+    struct spi_buf_set rx = {.buffers = rxb, .count = 3};
+    spi_transceive(spi3_dev, &spi_cfg_camera, &tx, &rx);
 }
 
 /* ==================== Camera Initialization & Capture ==================== */
@@ -179,54 +174,53 @@ static void fifo_read(uint8_t *buf, uint32_t len) {
  */
 
 int camera_init(void) {
-  if (!device_is_ready(spi3_dev)) {
-    LOG_ERR("ERROR: SPI not ready");
-    return -ENODEV;
-  }
-  k_msleep(100);
+    if (!device_is_ready(spi3_dev)) {
+        LOG_ERR("ERROR: SPI not ready");
+        return -ENODEV;
+    }
+    k_msleep(100);
 
-  camera_write_reg(ARDUCHIP_TEST1, 0x55);
-  if (camera_read_reg(ARDUCHIP_TEST1) != 0x55) {
-    LOG_ERR("ERROR: SPI test failed");
-    return -1;
-  }
+    camera_write_reg(ARDUCHIP_TEST1, 0x55);
+    if (camera_read_reg(ARDUCHIP_TEST1) != 0x55) {
+        LOG_ERR("ERROR: SPI test failed");
+        return -1;
+    }
 
-  /* Full reset */
-  camera_write_reg(CAM_REG_SENSOR_RESET, CAM_SENSOR_RESET_ALL);
-  wait_i2c_idle();
-  k_msleep(100);
+    /* Full reset */
+    camera_write_reg(CAM_REG_SENSOR_RESET, CAM_SENSOR_RESET_ALL);
+    wait_i2c_idle();
+    k_msleep(100);
 
-  uint8_t id = camera_read_reg(CAM_REG_SENSOR_ID);
-  LOG_INF("Camera ID: 0x%02X", id);
+    uint8_t id = camera_read_reg(CAM_REG_SENSOR_ID);
+    LOG_INF("Camera ID: 0x%02X", id);
 
-  /* ISP tuning */
-  camera_write_reg(CAM_REG_BRIGHTNESS, ISP_BRIGHTNESS);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_CONTRAST, ISP_CONTRAST);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_SATURATION, ISP_SATURATION);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_EV, ISP_EV);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_SHARPNESS, ISP_SHARPNESS);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_WHITE_BALANCE, ISP_WHITE_BALANCE);
-  wait_i2c_idle();
+    /* ISP tuning */
+    camera_write_reg(CAM_REG_BRIGHTNESS, ISP_BRIGHTNESS);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_CONTRAST, ISP_CONTRAST);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_SATURATION, ISP_SATURATION);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_EV, ISP_EV);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_SHARPNESS, ISP_SHARPNESS);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_WHITE_BALANCE, ISP_WHITE_BALANCE);
+    wait_i2c_idle();
 
-  /* Manual exposure/gain */
-  camera_write_reg(CAM_REG_EXPOSURE_GAIN_WB_CONTROL, 0x01);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_MANUAL_EXPOSURE_BIT_15_8,
-                   (MANUAL_EXPOSURE >> 8) & 0xFF);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_MANUAL_EXPOSURE_BIT_7_0, MANUAL_EXPOSURE & 0xFF);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_MANUAL_GAIN_BIT_9_8, (MANUAL_GAIN >> 8) & 0xFF);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_MANUAL_GAIN_BIT_7_0, MANUAL_GAIN & 0xFF);
-  wait_i2c_idle();
+    /* Manual exposure/gain */
+    camera_write_reg(CAM_REG_EXPOSURE_GAIN_WB_CONTROL, 0x01);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_MANUAL_EXPOSURE_BIT_15_8, (MANUAL_EXPOSURE >> 8) & 0xFF);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_MANUAL_EXPOSURE_BIT_7_0, MANUAL_EXPOSURE & 0xFF);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_MANUAL_GAIN_BIT_9_8, (MANUAL_GAIN >> 8) & 0xFF);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_MANUAL_GAIN_BIT_7_0, MANUAL_GAIN & 0xFF);
+    wait_i2c_idle();
 
-  return (id == 0 || id == 0xFF) ? -1 : 0;
+    return (id == 0 || id == 0xFF) ? -1 : 0;
 }
 
 /**
@@ -240,37 +234,37 @@ int camera_init(void) {
  * @return int Number of bytes read or negative on error
  */
 
-static int capture_rgb(uint8_t *buf, uint32_t max_len) {
-  /* Wait for capture */
-  bool done = false;
-  for (int i = 0; i < CAMERA_CAPTURE_TIMEOUT_MS; i++) {
-    if (camera_read_reg(ARDUCHIP_TRIG) & CAP_DONE_MASK) {
-      done = true;
-      break;
+static int capture_rgb(uint8_t* buf, uint32_t max_len) {
+    /* Wait for capture */
+    bool done = false;
+    for (int i = 0; i < CAMERA_CAPTURE_TIMEOUT_MS; i++) {
+        if (camera_read_reg(ARDUCHIP_TRIG) & CAP_DONE_MASK) {
+            done = true;
+            break;
+        }
+        k_msleep(1);
     }
-    k_msleep(1);
-  }
 
-  if (!done) {
-    LOG_ERR("ERROR: Capture timeout");
-    return -1;
-  }
+    if (!done) {
+        LOG_ERR("ERROR: Capture timeout");
+        return -1;
+    }
 
-  uint32_t len = fifo_length();
-  LOG_INF("FIFO: %u bytes (expected: %u)", len, CUR_RGB565_BYTES);
+    uint32_t len = fifo_length();
+    LOG_INF("FIFO: %u bytes (expected: %u)", len, CUR_RGB565_BYTES);
 
-  if (len == 0 || len > max_len) {
-    LOG_ERR("ERROR: Invalid FIFO length");
-    /* Clear and start once to recover from a corrupted FIFO state */
-    camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
-    k_msleep(1);
+    if (len == 0 || len > max_len) {
+        LOG_ERR("ERROR: Invalid FIFO length");
+        /* Clear and start once to recover from a corrupted FIFO state */
+        camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
+        k_msleep(1);
+        camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
+        return -1;
+    }
+
+    fifo_read(buf, len);
     camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
-    return -1;
-  }
-
-  fifo_read(buf, len);
-  camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
-  return (int)len;
+    return (int)len;
 }
 
 /* ==================== RGB565 to RGB888 Conversion ==================== */
@@ -299,54 +293,49 @@ static int capture_rgb(uint8_t *buf, uint32_t max_len) {
  * @return int 0 if successful, -1 on error
  */
 
-int convert_rgb565_to_rgb888(const uint8_t *rgb565, uint8_t *rgb888,
-                             uint32_t pixel_count) {
-  if (pixel_count == 0) {
-    return -1;
-  }
+int convert_rgb565_to_rgb888(const uint8_t* rgb565, uint8_t* rgb888, uint32_t pixel_count) {
+    if (pixel_count == 0) {
+        return -1;
+    }
 
-  for (uint32_t i = pixel_count; i >= 4; i -= 4) {
-    /* Pixel i-1 (highest, processed first for in-place safety) */
-    uint16_t p3 =
-        ((uint16_t)rgb565[(i - 1) * 2] << 8) | rgb565[(i - 1) * 2 + 1];
-    uint8_t r5 = (p3 >> 11) & RED_BIT_MASK;
-    uint8_t g6 = (p3 >> 5) & GREEN_BIT_MASK;
-    uint8_t b5 = p3 & BLUE_BIT_MASK;
-    rgb888[(i - 1) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
-    rgb888[(i - 1) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
-    rgb888[(i - 1) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
+    for (uint32_t i = pixel_count; i >= 4; i -= 4) {
+        /* Pixel i-1 (highest, processed first for in-place safety) */
+        uint16_t p3 = ((uint16_t)rgb565[(i - 1) * 2] << 8) | rgb565[(i - 1) * 2 + 1];
+        uint8_t r5 = (p3 >> 11) & RED_BIT_MASK;
+        uint8_t g6 = (p3 >> 5) & GREEN_BIT_MASK;
+        uint8_t b5 = p3 & BLUE_BIT_MASK;
+        rgb888[(i - 1) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
+        rgb888[(i - 1) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
+        rgb888[(i - 1) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
 
-    /* Pixel i-2 */
-    uint16_t p2 =
-        ((uint16_t)rgb565[(i - 2) * 2] << 8) | rgb565[(i - 2) * 2 + 1];
-    r5 = (p2 >> 11) & RED_BIT_MASK;
-    g6 = (p2 >> 5) & GREEN_BIT_MASK;
-    b5 = p2 & BLUE_BIT_MASK;
-    rgb888[(i - 2) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
-    rgb888[(i - 2) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
-    rgb888[(i - 2) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
+        /* Pixel i-2 */
+        uint16_t p2 = ((uint16_t)rgb565[(i - 2) * 2] << 8) | rgb565[(i - 2) * 2 + 1];
+        r5 = (p2 >> 11) & RED_BIT_MASK;
+        g6 = (p2 >> 5) & GREEN_BIT_MASK;
+        b5 = p2 & BLUE_BIT_MASK;
+        rgb888[(i - 2) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
+        rgb888[(i - 2) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
+        rgb888[(i - 2) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
 
-    /* Pixel i-3 */
-    uint16_t p1 =
-        ((uint16_t)rgb565[(i - 3) * 2] << 8) | rgb565[(i - 3) * 2 + 1];
-    r5 = (p1 >> 11) & RED_BIT_MASK;
-    g6 = (p1 >> 5) & GREEN_BIT_MASK;
-    b5 = p1 & BLUE_BIT_MASK;
-    rgb888[(i - 3) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
-    rgb888[(i - 3) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
-    rgb888[(i - 3) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
+        /* Pixel i-3 */
+        uint16_t p1 = ((uint16_t)rgb565[(i - 3) * 2] << 8) | rgb565[(i - 3) * 2 + 1];
+        r5 = (p1 >> 11) & RED_BIT_MASK;
+        g6 = (p1 >> 5) & GREEN_BIT_MASK;
+        b5 = p1 & BLUE_BIT_MASK;
+        rgb888[(i - 3) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
+        rgb888[(i - 3) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
+        rgb888[(i - 3) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
 
-    /* Pixel i-4 (lowest in this group) */
-    uint16_t p0 =
-        ((uint16_t)rgb565[(i - 4) * 2] << 8) | rgb565[(i - 4) * 2 + 1];
-    r5 = (p0 >> 11) & RED_BIT_MASK;
-    g6 = (p0 >> 5) & GREEN_BIT_MASK;
-    b5 = p0 & BLUE_BIT_MASK;
-    rgb888[(i - 4) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
-    rgb888[(i - 4) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
-    rgb888[(i - 4) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
-  }
-  return 0;
+        /* Pixel i-4 (lowest in this group) */
+        uint16_t p0 = ((uint16_t)rgb565[(i - 4) * 2] << 8) | rgb565[(i - 4) * 2 + 1];
+        r5 = (p0 >> 11) & RED_BIT_MASK;
+        g6 = (p0 >> 5) & GREEN_BIT_MASK;
+        b5 = p0 & BLUE_BIT_MASK;
+        rgb888[(i - 4) * 3] = (r5 << THREE_BIT) | (r5 >> TWO_BIT);
+        rgb888[(i - 4) * 3 + 1] = (g6 << TWO_BIT) | (g6 >> FOUR_BIT);
+        rgb888[(i - 4) * 3 + 2] = (b5 << THREE_BIT) | (b5 >> TWO_BIT);
+    }
+    return 0;
 }
 /* ==================== Base64 Encoding ==================== */
 
@@ -357,25 +346,23 @@ int convert_rgb565_to_rgb888(const uint8_t *rgb565, uint8_t *rgb888,
  * @param len Length of buffer
  */
 
-static const char b64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-static void send_base64_rgb888(const uint8_t *buf, uint32_t len) {
-  LOG_DBG("--- RGB888_START_ ---");
-  /* Base64 encode RGB888 data */
-  for (uint32_t i = 0; i < len; i += 3) {
-    uint32_t n = buf[i] << 16;
-    if (i + 1 < len)
-      n |= buf[i + 1] << 8;
-    if (i + 2 < len)
-      n |= buf[i + 2];
+static void send_base64_rgb888(const uint8_t* buf, uint32_t len) {
+    LOG_DBG("--- RGB888_START_ ---");
+    /* Base64 encode RGB888 data */
+    for (uint32_t i = 0; i < len; i += 3) {
+        uint32_t n = buf[i] << 16;
+        if (i + 1 < len)
+            n |= buf[i + 1] << 8;
+        if (i + 2 < len)
+            n |= buf[i + 2];
 
-    LOG_DBG("%c%c%c%c", b64[(n >> 18) & 63], b64[(n >> 12) & 63],
-            (i + 1 < len) ? b64[(n >> 6) & 63] : '=',
-            (i + 2 < len) ? b64[n & 63] : '=');
-  }
+        LOG_DBG("%c%c%c%c", b64[(n >> 18) & 63], b64[(n >> 12) & 63],
+                (i + 1 < len) ? b64[(n >> 6) & 63] : '=', (i + 2 < len) ? b64[n & 63] : '=');
+    }
 
-  LOG_DBG("--- RGB888_END_ ---");
+    LOG_DBG("--- RGB888_END_ ---");
 }
 
 /* ==================== Camera Control API ==================== */
@@ -387,71 +374,70 @@ static void send_base64_rgb888(const uint8_t *buf, uint32_t len) {
  */
 
 int camera_start(void) {
-  if (spi3_dev == NULL) {
-    return -ENODEV;
-  }
-
-  /* Set RGB format */
-  camera_write_reg(CAM_REG_FORMAT, CAM_IMAGE_PIX_FMT_RGB);
-  wait_i2c_idle();
-  camera_write_reg(CAM_REG_CAPTURE_RESOLUTION, CUR_REG_VAL);
-  wait_i2c_idle();
-
-  /* Verify */
-  uint8_t res_check = camera_read_reg(CAM_REG_CAPTURE_RESOLUTION);
-  LOG_INF("Resolution register: 0x%02X (should be 0x%02X)", res_check,
-          CUR_REG_VAL);
-
-  /* Clear and start */
-  camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
-  k_msleep(150);
-  camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
-
-  /* --- Wait for buffer to be FREE ---
-   *
-   * Wait until the shared buffer becomes FREE before using it.
-   *
-   * Behavior:
-   *  - If the buffer is already free → returns immediately.
-   *  - If a model update is currently using the buffer
-   *    → this call blocks until the update completes and releases it.
-   *
-   * Once the FREE event is received:
-   *  1. Clear the FREE flag.
-   *  2. Mark the buffer as BUSY to take ownership.
-   *
-   */
-  k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
-  k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
-  k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
-  /* Warm-up */
-  LOG_INF("Warming up (3 frames)...");
-  for (int i = 0; i < 3; i++) {
-    int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
-    if (len > 0) {
-      LOG_INF(" Warm-up %d: %d bytes", i + 1, len);
-    } else {
-      LOG_ERR(" Warm-up %d: FAILED", i + 1);
+    if (spi3_dev == NULL) {
+        return -ENODEV;
     }
-    k_msleep(200);
-  }
-  LOG_INF("Warm-up complete!");
-  /* --- Release SRAM upload buffer ---
-   *
-   * Camera processing has finished using sram_upload_buffer.
-   *
-   * Steps:
-   *  1. Clear the BUSY flag to indicate this module no longer owns the buffer.
-   *  2. Post the FREE event to notify any waiting component
-   *  that the buffer is now available.
-   */
-  k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-  k_event_post(&sram_buf_event, BUF_EVENT_FREE);
 
-  camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
-  k_msleep(1);
-  camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
-  return 0;
+    /* Set RGB format */
+    camera_write_reg(CAM_REG_FORMAT, CAM_IMAGE_PIX_FMT_RGB);
+    wait_i2c_idle();
+    camera_write_reg(CAM_REG_CAPTURE_RESOLUTION, CUR_REG_VAL);
+    wait_i2c_idle();
+
+    /* Verify */
+    uint8_t res_check = camera_read_reg(CAM_REG_CAPTURE_RESOLUTION);
+    LOG_INF("Resolution register: 0x%02X (should be 0x%02X)", res_check, CUR_REG_VAL);
+
+    /* Clear and start */
+    camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
+    k_msleep(150);
+    camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
+
+    /* --- Wait for buffer to be FREE ---
+     *
+     * Wait until the shared buffer becomes FREE before using it.
+     *
+     * Behavior:
+     *  - If the buffer is already free → returns immediately.
+     *  - If a model update is currently using the buffer
+     *    → this call blocks until the update completes and releases it.
+     *
+     * Once the FREE event is received:
+     *  1. Clear the FREE flag.
+     *  2. Mark the buffer as BUSY to take ownership.
+     *
+     */
+    k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
+    k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
+    k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
+    /* Warm-up */
+    LOG_INF("Warming up (3 frames)...");
+    for (int i = 0; i < 3; i++) {
+        int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
+        if (len > 0) {
+            LOG_INF(" Warm-up %d: %d bytes", i + 1, len);
+        } else {
+            LOG_ERR(" Warm-up %d: FAILED", i + 1);
+        }
+        k_msleep(200);
+    }
+    LOG_INF("Warm-up complete!");
+    /* --- Release SRAM upload buffer ---
+     *
+     * Camera processing has finished using sram_upload_buffer.
+     *
+     * Steps:
+     *  1. Clear the BUSY flag to indicate this module no longer owns the buffer.
+     *  2. Post the FREE event to notify any waiting component
+     *  that the buffer is now available.
+     */
+    k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+    k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+
+    camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
+    k_msleep(1);
+    camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
+    return 0;
 }
 
 /**
@@ -459,10 +445,10 @@ int camera_start(void) {
  */
 
 void camera_stop(void) {
-  /* CLEAR FIFO AND FULL RESET*/
-  camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
-  camera_write_reg(CAM_REG_SENSOR_RESET, CAM_SENSOR_RESET_ALL);
-  LOG_INF("camera stopped");
+    /* CLEAR FIFO AND FULL RESET*/
+    camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
+    camera_write_reg(CAM_REG_SENSOR_RESET, CAM_SENSOR_RESET_ALL);
+    LOG_INF("camera stopped");
 }
 
 /**
@@ -472,72 +458,70 @@ void camera_stop(void) {
  * captures frames, sending them as base64 to console.
  */
 
-void camera_capture_thread(void *a, void *b, void *c) {
-
-  if (camera_init() != 0) {
-    LOG_ERR("camera init failed");
-    return;
-  }
-
-  /* Main loop */
-  while (1) {
-    if (camera_satrt_flg) {
-
-      LOG_INF("--- Sequence start ---");
-
-      /* --- Wait for buffer to be FREE ---
-       *
-       * Wait until the shared buffer becomes FREE before using it.
-       *
-       * Behavior:
-       *  - If the buffer is already free → returns immediately.
-       *  - If a model update is currently using the buffer
-       *    → this call blocks until the update completes and releases it.
-       *
-       * Once the FREE event is received:
-       *  1. Clear the FREE flag.
-       *  2. Mark the buffer as BUSY to take ownership.
-       *
-       */
-      k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
-      k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
-      k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
-
-      int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
-      if (len > 0) {
-        if (convert_rgb565_to_rgb888(sram_upload_buffer, sram_upload_buffer,
-                                     CUR_PIXELS) < 0) {
-          LOG_ERR("RGB565 to RGB888 conversion failed");
-          continue;
-        }
-        /*
-         * For actual Akida integration this function is NOT required.
-         * It was added temporarily to send images to Python for testing.
-         */
-        send_base64_rgb888(sram_upload_buffer, CUR_RGB888_BYTES);
-      } else {
-        LOG_ERR("Image FAILED");
-      }
-
-      /* --- Release SRAM upload buffer ---
-       *
-       * Camera processing has finished using sram_upload_buffer.
-       *
-       * Steps:
-       *  1. Clear the BUSY flag to indicate this module no longer owns the
-       * buffer.
-       *  2. Post the FREE event to notify any waiting component
-       *  that the buffer is now available.
-       */
-      k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-      k_event_post(&sram_buf_event, BUF_EVENT_FREE);
-
-      LOG_INF("--- Sequence complete ---");
-
-    } else {
-      k_msleep(10);
+void camera_capture_thread(void* a, void* b, void* c) {
+    if (camera_init() != 0) {
+        LOG_ERR("camera init failed");
+        return;
     }
-  }
+
+    /* Main loop */
+    while (1) {
+        if (camera_satrt_flg) {
+            LOG_INF("--- Sequence start ---");
+
+            /* --- Wait for buffer to be FREE ---
+             *
+             * Wait until the shared buffer becomes FREE before using it.
+             *
+             * Behavior:
+             *  - If the buffer is already free → returns immediately.
+             *  - If a model update is currently using the buffer
+             *    → this call blocks until the update completes and releases it.
+             *
+             * Once the FREE event is received:
+             *  1. Clear the FREE flag.
+             *  2. Mark the buffer as BUSY to take ownership.
+             *
+             */
+            k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
+            k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
+            k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
+
+            int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
+            if (len > 0) {
+                if (convert_rgb565_to_rgb888(sram_upload_buffer, sram_upload_buffer, CUR_PIXELS) <
+                    0) {
+                    LOG_ERR("RGB565 to RGB888 conversion failed");
+                    continue;
+                }
+                /*
+                 * For actual Akida integration this function is NOT required.
+                 * It was added temporarily to send images to Python for testing.
+                 */
+                send_base64_rgb888(sram_upload_buffer, CUR_RGB888_BYTES);
+            } else {
+                LOG_ERR("Image FAILED");
+            }
+
+            /* --- Release SRAM upload buffer ---
+             *
+             * Camera processing has finished using sram_upload_buffer.
+             *
+             * Steps:
+             *  1. Clear the BUSY flag to indicate this module no longer owns the
+             * buffer.
+             *  2. Post the FREE event to notify any waiting component
+             *  that the buffer is now available.
+             */
+            k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
+            k_event_post(&sram_buf_event, BUF_EVENT_FREE);
+
+            LOG_INF("--- Sequence complete ---");
+
+        } else {
+            k_msleep(10);
+        }
+    }
 }
 
 /* ==================== Shell Commands ==================== */
@@ -546,39 +530,37 @@ void camera_capture_thread(void *a, void *b, void *c) {
  * @brief Shell command to start camera
  */
 
-static int cmd_camera_start(const struct shell *shell, size_t argc,
-                            char **argv) {
-  if (argc > 1) {
-    LOG_ERR("invalid command");
-    return -EINVAL;
-  }
+static int cmd_camera_start(const struct shell* shell, size_t argc, char** argv) {
+    if (argc > 1) {
+        LOG_ERR("invalid command");
+        return -EINVAL;
+    }
 
-  if (cur_res_idx < 0) {
-    shell_error(shell, "Resolution not set. Run camera_set_pixel 1/2 first.");
-    return -EINVAL;
-  }
+    if (cur_res_idx < 0) {
+        shell_error(shell, "Resolution not set. Run camera_set_pixel 1/2 first.");
+        return -EINVAL;
+    }
 
-  if (camera_start() < 0) {
-    return -1;
-  }
-  camera_satrt_flg = true;
-  LOG_INF("camera started");
-  return 0;
+    if (camera_start() < 0) {
+        return -1;
+    }
+    camera_satrt_flg = true;
+    LOG_INF("camera started");
+    return 0;
 }
 
 /**
  * @brief Shell command to stop camera
  */
 
-static int cmd_camera_stop(const struct shell *shell, size_t argc,
-                           char **argv) {
-  if (argc > 1) {
-    LOG_ERR("invalid command");
-    return -EINVAL;
-  }
-  camera_stop();
-  camera_satrt_flg = false;
-  return 0;
+static int cmd_camera_stop(const struct shell* shell, size_t argc, char** argv) {
+    if (argc > 1) {
+        LOG_ERR("invalid command");
+        return -EINVAL;
+    }
+    camera_stop();
+    camera_satrt_flg = false;
+    return 0;
 }
 
 /**
@@ -592,29 +574,30 @@ static int cmd_camera_stop(const struct shell *shell, size_t argc,
  * WARNING: 320x240, 320x320 and higher resolutions are not supported
  * (insufficient RAM)
  */
-static int cmd_camera_set_pixel(const struct shell *shell, size_t argc,
-                                char **argv) {
-  if (argc != 2) {
-    shell_print(shell, "Usage: camera_set_pixel <1|2>");
-    shell_print(shell, "  1 ->  96x96");
-    shell_print(shell, "  2 -> 128x128");
-    shell_print(shell, "WARNING: 320x240, 320x320 and higher resolutions are "
-                       "not supported (insufficient RAM)");
-    return -EINVAL;
-  }
+static int cmd_camera_set_pixel(const struct shell* shell, size_t argc, char** argv) {
+    if (argc != 2) {
+        shell_print(shell, "Usage: camera_set_pixel <1|2>");
+        shell_print(shell, "  1 ->  96x96");
+        shell_print(shell, "  2 -> 128x128");
+        shell_print(shell,
+                    "WARNING: 320x240, 320x320 and higher resolutions are "
+                    "not supported (insufficient RAM)");
+        return -EINVAL;
+    }
 
-  char choice = argv[1][0];
-  if (choice < '1' || choice > '2' || argv[1][1] != '\0') {
-    shell_error(shell, "Invalid: '%s'. Use 1 or 2.", argv[1]);
-    shell_print(shell, "WARNING: 320x240, 320x320 and higher resolutions are "
-                       "not supported (insufficient RAM)");
-    return -EINVAL;
-  }
+    char choice = argv[1][0];
+    if (choice < '1' || choice > '2' || argv[1][1] != '\0') {
+        shell_error(shell, "Invalid: '%s'. Use 1 or 2.", argv[1]);
+        shell_print(shell,
+                    "WARNING: 320x240, 320x320 and higher resolutions are "
+                    "not supported (insufficient RAM)");
+        return -EINVAL;
+    }
 
-  cur_res_idx = (int8_t)(choice - '1'); /* '1'->0, '2'->1 */
-  shell_print(shell, "Pixel set: %s (%dx%d). Now run camera_start.",
-              cam_res_table[cur_res_idx].name, CUR_WIDTH, CUR_HEIGHT);
-  return 0;
+    cur_res_idx = (int8_t)(choice - '1'); /* '1'->0, '2'->1 */
+    shell_print(shell, "Pixel set: %s (%dx%d). Now run camera_start.",
+                cam_res_table[cur_res_idx].name, CUR_WIDTH, CUR_HEIGHT);
+    return 0;
 }
 
 /* Register shell commands */

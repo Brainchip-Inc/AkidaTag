@@ -52,20 +52,20 @@ extern struct k_event sram_buf_event;
  * Total size: 64 bytes (uint32 fields) + 64 bytes (model_name) = 128 bytes.
  */
 typedef struct {
-  uint32_t model_info_hdr_crc32; /**< CRC32(hdr[total_length..model_name] ||
-                                    info_bytes) */
-  uint32_t total_length;     /**< program_info size + program_data size (bytes) */
-  uint32_t input_shape[3];   /**< e.g. {49, 10, 1}, zero-padded             */
-  uint32_t output_shape[3];  /**< e.g. {10, 1}, zero-padded               */
-  uint32_t flash_address;    /**< SPI flash addr for data                 */
-  uint32_t is_edge_learned;  /**< 1 = edge-learning model                 */
-  uint32_t num_edge_classes; /**< upper16=neurons, lower16=classes        */
-  uint32_t info_data_len;    /**< bytes of program_info                   */
-  uint32_t mfcc_fs_bits;     /**< IEEE-754 bits of MFCC normalisation scalar */
-  uint32_t silence_class;    /**< Output index of silence class           */
-  uint32_t unknown_class;    /**< Output index of unknown/garbage class   */
-  uint32_t inference_mode;   /**< 0 = sync, 1 = async (from info.yaml)    */
-  char model_name[MAX_FS_NAME_LEN]; /**< Model name, e.g. "kws"        */
+    uint32_t model_info_hdr_crc32;    /**< CRC32(hdr[total_length..model_name] ||
+                                         info_bytes) */
+    uint32_t total_length;            /**< program_info size + program_data size (bytes) */
+    uint32_t input_shape[3];          /**< e.g. {49, 10, 1}, zero-padded             */
+    uint32_t output_shape[3];         /**< e.g. {10, 1}, zero-padded               */
+    uint32_t flash_address;           /**< SPI flash addr for data                 */
+    uint32_t is_edge_learned;         /**< 1 = edge-learning model                 */
+    uint32_t num_edge_classes;        /**< upper16=neurons, lower16=classes        */
+    uint32_t info_data_len;           /**< bytes of program_info                   */
+    uint32_t mfcc_fs_bits;            /**< IEEE-754 bits of MFCC normalisation scalar */
+    uint32_t silence_class;           /**< Output index of silence class           */
+    uint32_t unknown_class;           /**< Output index of unknown/garbage class   */
+    uint32_t inference_mode;          /**< 0 = sync, 1 = async (from info.yaml)    */
+    char model_name[MAX_FS_NAME_LEN]; /**< Model name, e.g. "kws"        */
 } model_meta_t;
 
 /**
@@ -82,9 +82,9 @@ typedef struct {
  *                 flash, before any endian swap).
  */
 typedef struct {
-  uint32_t data_crc32;    /**< CRC32 of complete model_data.bin   */
-  uint32_t first_4_bytes; /**< First 4 bytes as stored in flash   */
-  uint32_t data_length;   /**< Total size in bytes of model_data  */
+    uint32_t data_crc32;    /**< CRC32 of complete model_data.bin   */
+    uint32_t first_4_bytes; /**< First 4 bytes as stored in flash   */
+    uint32_t data_length;   /**< Total size in bytes of model_data  */
 } model_data_meta_t;
 
 #define SRAM_BUFFER_SIZE CONFIG_SRAM_BUFFER_SIZE
@@ -125,7 +125,7 @@ void shared_buf_init(void);
  *          1  header file not found – use compiled defaults.
  *         -1  read error or CRC mismatch – use compiled defaults.
  */
-int file_transfer_load_meta(int app_idx, model_meta_t *meta_out);
+int file_transfer_load_meta(int app_idx, model_meta_t* meta_out);
 
 /**
  * @brief Read only the model_meta_t header from LittleFS (no sram_upload_buffer
@@ -142,7 +142,7 @@ int file_transfer_load_meta(int app_idx, model_meta_t *meta_out);
  *          1  header file not found.
  *         -1  read error.
  */
-int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out);
+int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t* meta_out);
 
 /**
  * @brief Load model_data metadata from LittleFS (3rd file per slot).
@@ -153,7 +153,7 @@ int file_transfer_read_meta_hdr_only(int app_idx, model_meta_t *meta_out);
  *          1  file not found (no DATA upload for this slot yet).
  *         -1  read error.
  */
-int file_transfer_load_data_meta(int app_idx, model_data_meta_t *dm_out);
+int file_transfer_load_data_meta(int app_idx, model_data_meta_t* dm_out);
 
 /**
  * @brief Validate model data in SPI flash against stored model_data_meta_t.
@@ -172,8 +172,7 @@ int file_transfer_load_data_meta(int app_idx, model_data_meta_t *dm_out);
  * @return  0  all checks pass.
  *         -1  mismatch or invalid parameters.
  */
-int file_transfer_validate_flash_data(uint32_t flash_addr,
-                                      const model_data_meta_t *dm);
+int file_transfer_validate_flash_data(uint32_t flash_addr, const model_data_meta_t* dm);
 
 /**
  * @brief Check that model_name is valid for the given app slot.
@@ -186,6 +185,6 @@ int file_transfer_validate_flash_data(uint32_t flash_addr,
  * @return  0  valid for this slot.
  *         -1  mismatch or unknown name.
  */
-int file_transfer_check_model_name(int app_idx, const char *model_name);
+int file_transfer_check_model_name(int app_idx, const char* model_name);
 
 #endif /* FILE_TRANSFER_H_ */
