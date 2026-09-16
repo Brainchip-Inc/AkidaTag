@@ -12,7 +12,6 @@
  */
 
 #include "camera/spi_camera.h"
-#include "ble_services/file_transfer.h"
 #include "error.h"
 
 #include <stdint.h>
@@ -59,6 +58,11 @@ static uint8_t camera_satrt_flg = false;
 #define THREE_BIT 3
 #define TWO_BIT 2
 #define FOUR_BIT 4
+
+/* One frame at the largest supported resolution. RGB565 is captured into it and
+ * expanded to RGB888 in place, so it is sized for the larger of the two. Not
+ * zeroed at boot: every byte is overwritten by the capture that fills it. */
+static __noinit uint8_t camera_frame_buffer[MAX_RGB888_SIZE];
 
 /* ==================== SPI Device & Configuration ==================== */
 
@@ -393,27 +397,10 @@ int camera_start(void) {
     k_msleep(150);
     camera_write_reg(ARDUCHIP_FIFO, FIFO_START_MASK);
 
-    /* --- Wait for buffer to be FREE ---
-     *
-     * Wait until the shared buffer becomes FREE before using it.
-     *
-     * Behavior:
-     *  - If the buffer is already free → returns immediately.
-     *  - If a model update is currently using the buffer
-     *    → this call blocks until the update completes and releases it.
-     *
-     * Once the FREE event is received:
-     *  1. Clear the FREE flag.
-     *  2. Mark the buffer as BUSY to take ownership.
-     *
-     */
-    k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
-    k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
-    k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
     /* Warm-up */
     LOG_INF("Warming up (3 frames)...");
     for (int i = 0; i < 3; i++) {
-        int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
+        int len = capture_rgb(camera_frame_buffer, MAX_RGB888_SIZE);
         if (len > 0) {
             LOG_INF(" Warm-up %d: %d bytes", i + 1, len);
         } else {
@@ -422,17 +409,6 @@ int camera_start(void) {
         k_msleep(200);
     }
     LOG_INF("Warm-up complete!");
-    /* --- Release SRAM upload buffer ---
-     *
-     * Camera processing has finished using sram_upload_buffer.
-     *
-     * Steps:
-     *  1. Clear the BUSY flag to indicate this module no longer owns the buffer.
-     *  2. Post the FREE event to notify any waiting component
-     *  that the buffer is now available.
-     */
-    k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-    k_event_post(&sram_buf_event, BUF_EVENT_FREE);
 
     camera_write_reg(ARDUCHIP_FIFO, FIFO_CLEAR_ID_MASK);
     k_msleep(1);
@@ -469,27 +445,9 @@ void camera_capture_thread(void* a, void* b, void* c) {
         if (camera_satrt_flg) {
             LOG_INF("--- Sequence start ---");
 
-            /* --- Wait for buffer to be FREE ---
-             *
-             * Wait until the shared buffer becomes FREE before using it.
-             *
-             * Behavior:
-             *  - If the buffer is already free → returns immediately.
-             *  - If a model update is currently using the buffer
-             *    → this call blocks until the update completes and releases it.
-             *
-             * Once the FREE event is received:
-             *  1. Clear the FREE flag.
-             *  2. Mark the buffer as BUSY to take ownership.
-             *
-             */
-            k_event_wait(&sram_buf_event, BUF_EVENT_FREE, false, K_FOREVER);
-            k_event_clear(&sram_buf_event, BUF_EVENT_FREE);
-            k_event_post(&sram_buf_event, BUF_EVENT_BUSY);
-
-            int len = capture_rgb(sram_upload_buffer, MAX_RGB888_SIZE);
+            int len = capture_rgb(camera_frame_buffer, MAX_RGB888_SIZE);
             if (len > 0) {
-                if (convert_rgb565_to_rgb888(sram_upload_buffer, sram_upload_buffer, CUR_PIXELS) <
+                if (convert_rgb565_to_rgb888(camera_frame_buffer, camera_frame_buffer, CUR_PIXELS) <
                     0) {
                     LOG_ERR("RGB565 to RGB888 conversion failed");
                     continue;
@@ -498,23 +456,10 @@ void camera_capture_thread(void* a, void* b, void* c) {
                  * For actual Akida integration this function is NOT required.
                  * It was added temporarily to send images to Python for testing.
                  */
-                send_base64_rgb888(sram_upload_buffer, CUR_RGB888_BYTES);
+                send_base64_rgb888(camera_frame_buffer, CUR_RGB888_BYTES);
             } else {
                 LOG_ERR("Image FAILED");
             }
-
-            /* --- Release SRAM upload buffer ---
-             *
-             * Camera processing has finished using sram_upload_buffer.
-             *
-             * Steps:
-             *  1. Clear the BUSY flag to indicate this module no longer owns the
-             * buffer.
-             *  2. Post the FREE event to notify any waiting component
-             *  that the buffer is now available.
-             */
-            k_event_clear(&sram_buf_event, BUF_EVENT_BUSY);
-            k_event_post(&sram_buf_event, BUF_EVENT_FREE);
 
             LOG_INF("--- Sequence complete ---");
 

@@ -1581,7 +1581,6 @@ int main(void) {
     confirm_image_if_needed();
     init_setting_sub_system();
     kws_config_init();
-    shared_buf_init();
     file_transfer_init();
     ble_init();
 
@@ -1630,11 +1629,11 @@ int main(void) {
      * arrays.
      *
      * Boot validation sequence:
-     *   1. Read header only (no sram_upload_buffer usage) to get flash_address.
+     *   1. Read header only (no model_transfer_buffer usage) to get flash_address.
      *   2. Load model_data meta (3rd file): CRC, first 4 bytes, length, name.
      *   3. Validate model_name against expected slot (whitelist check).
-     *   4. Full SPI flash CRC validation (overwrites sram_upload_buffer).
-     *   5. Reload full meta + program_info into sram_upload_buffer.
+     *   4. Full SPI flash CRC validation (overwrites model_transfer_buffer).
+     *   5. Reload full meta + program_info into model_transfer_buffer.
      *   6. Program Akida.
      */
 
@@ -1670,9 +1669,9 @@ int main(void) {
         return -1;
     }
 
-    /* Step 5: reload full meta + program_info into sram_upload_buffer.
+    /* Step 5: reload full meta + program_info into model_transfer_buffer.
      * This is necessary because file_transfer_validate_flash_data() may have
-     * overwritten sram_upload_buffer during the CRC read loop. */
+     * overwritten model_transfer_buffer during the CRC read loop. */
     int meta_ret = file_transfer_load_meta(0, &kws_meta);
     if (meta_ret != 0) {
         LOG_ERR("Metadata reload failed (err %d)", meta_ret);
@@ -1690,7 +1689,7 @@ int main(void) {
      * config-DMA cycle count (~2.1M), Akida-internal / host-clock-independent. */
     uint64_t start_time = time_ms();
 
-    akida_program_flash(sram_upload_buffer, (int)kws_meta.info_data_len, kws_meta.flash_address,
+    akida_program_flash(model_transfer_buffer, (int)kws_meta.info_data_len, kws_meta.flash_address,
                         &is_el_model);
 
     uint32_t prog_time = (uint32_t)(time_ms() - start_time);
@@ -2648,7 +2647,7 @@ extern "C" int infer(int app_index_l) {
     uint32_t validate_ms = 0, program_ms = 0, prog_cfg_cycles = 0;
 
     /* Step 1: read header only to get flash_address without touching
-     * sram_upload_buffer */
+     * model_transfer_buffer */
     model_meta_t infer_meta;
     int hdr_ret = file_transfer_read_meta_hdr_only(app_index_l, &infer_meta);
     if (hdr_ret != 0) {
@@ -2683,7 +2682,7 @@ extern "C" int infer(int app_index_l) {
         return -1;
     }
 
-    /* Step 5: reload full meta + program_info into sram_upload_buffer.
+    /* Step 5: reload full meta + program_info into model_transfer_buffer.
      * file_transfer_validate_flash_data() may have overwritten it. */
     int meta_ret = file_transfer_load_meta(app_index_l, &infer_meta);
     if (meta_ret != 0) {
@@ -2698,8 +2697,8 @@ extern "C" int infer(int app_index_l) {
      * + wall clock (the wall time is what shrinks as the host SPI clock rises). */
     akida_toggle_clock_counter(true);
     uint64_t t_prog0 = time_ms();
-    akida_program_flash(sram_upload_buffer, (int)infer_meta.info_data_len, infer_meta.flash_address,
-                        &is_el_model);
+    akida_program_flash(model_transfer_buffer, (int)infer_meta.info_data_len,
+                        infer_meta.flash_address, &is_el_model);
     program_ms = (uint32_t)(time_ms() - t_prog0);
     /* Absolute config-DMA counter (it latches the model's config-DMA cycle count
      * ~2.1M; a before/after delta reads as noise because it does not advance on a

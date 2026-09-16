@@ -16,7 +16,6 @@
 #include <zephyr/sys/util.h>
 
 #include <zephyr/logging/log.h>
-#include "ble_services/file_transfer.h"
 LOG_MODULE_REGISTER(audio_processor, LOG_LEVEL_DBG);
 
 #define RMS_THRESHOLD 550
@@ -69,6 +68,9 @@ int is_capture_start = 0;
 #define TOTAL_BLOCKS (TOTAL_BUFFER_BYTES / BLOCK_SIZE_BYTES)
 static uint32_t block_index = 0;
 uint32_t offset = 0;
+/* Raw PCM is captured here and dumped over UART afterwards. Only compiled for
+ * this debug option, which is off in every shipped build. */
+static __noinit uint8_t raw_capture_buffer[TOTAL_BUFFER_BYTES];
 #endif
 extern uint8_t is_kws_debounce_complete(void);
 extern uint32_t kws_debounce_time;
@@ -261,7 +263,7 @@ static void capture_raw_samples(size_t samples) {
     if (is_capture_start) {
         offset = block_index * BLOCK_SIZE_BYTES;
 
-        memcpy(&sram_upload_buffer[offset], (uint8_t*)orig_buf, samples);
+        memcpy(&raw_capture_buffer[offset], (uint8_t*)orig_buf, samples);
 
         block_index++;
 
@@ -402,7 +404,7 @@ int cmd_dump_uart(const struct shell* shell, size_t argc, char** argv) {
         LOG_ERR("invalid command ");
         return -EINVAL;
     }
-    uart_send_pcm((int16_t*)sram_upload_buffer, TOTAL_BUFFER_BYTES / 2);
+    uart_send_pcm((int16_t*)raw_capture_buffer, TOTAL_BUFFER_BYTES / 2);
     LOG_INF("dump completed ");
     return 0;
 }

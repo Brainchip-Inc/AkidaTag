@@ -9,10 +9,13 @@ source "Kconfig.zephyr"
 menu "AkidaTag Application"
 
 config SRAM_BUFFER_SIZE
-    int "Allocate SRAM for BLE or raw audio sample capture"
+    int "Raw audio capture buffer size (bytes)"
     default 102400
     help
-      Allocate SRAM for app use.
+      Size of the buffer CONFIG_AUDIO_CAPTURE_TEST captures raw PCM into before
+      dumping it over UART. Allocated only when that option is enabled. The BLE
+      model transfer no longer shares it: it stages one flash sector, sized by
+      MODEL_TRANSFER_BLOCK_SIZE in ble_services/file_transfer.h.
 	  
 config BATCH_SIZE
     int "Batch size"

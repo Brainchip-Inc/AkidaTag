@@ -8,17 +8,8 @@
 #include <string.h>
 #include <zephyr/types.h>
 
-#define FLASH_READ_BACK_CHECK 0
-
 #define AKD_FLASH_OFFSET 0x1000
 #define AKD_MODEL_OFFSET 0x100000
-
-#if FLASH_READ_BACK_CHECK
-#define HALF_OF_SRAM_BUFFER_SIZE (SRAM_BUFFER_SIZE / 2)
-#define BUFFER_SIZE HALF_OF_SRAM_BUFFER_SIZE
-#else
-#define BUFFER_SIZE SRAM_BUFFER_SIZE
-#endif
 
 #define FLASH_MAX_16_MB_SIZE (16777216)  // total max size of SPI-Flash => 16 MB
 
