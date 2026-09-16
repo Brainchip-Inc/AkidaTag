@@ -242,9 +242,11 @@ Resolution	Conversion Time
 
 The first-frame timer starts when the `camera_start` shell command is issued. This includes the warm-up sequence (3 discarded frames) before the first valid frame is delivered.
 
-### SRAM Upload Buffer
+### Frame Buffer
 
-`sram_upload_buffer` is a shared memory buffer used between the camera capture thread and the model update process. Access to this buffer is synchronized using a Zephyr `k_event` to ensure that only one module uses the buffer at a time. The buffer state is controlled using `BUF_EVENT_FREE` and `BUF_EVENT_BUSY` flags to prevent concurrent access and data corruption.
+`camera_frame_buffer` in `spi_camera.c` holds one frame and belongs to the camera alone. It is sized for 128x128 RGB888 (49,152 bytes), the largest supported resolution, and RGB565 is expanded into it in place.
+
+It used to be `sram_upload_buffer`, 102,236 bytes shared with the BLE model update and the raw audio capture test under a Zephyr `k_event`. The model update now stages one flash sector of its own (`MODEL_TRANSFER_BLOCK_SIZE` in `ble_services/file_transfer.h`) and the capture test has its own buffer, so there is nothing left to share and the event is gone.
 
 ## Frame Output
 
@@ -819,16 +821,36 @@ python src/utils/send_model_via_ble.py \
     --bin  models/kws/kws_program_data.bin \
     --yaml models/kws/info.yaml
 
-# Legacy: explicit CLI args (still supported, override YAML values)
+# Explicit CLI args override the YAML values, which are still required
 python src/utils/send_model_via_ble.py \
     --info models/kws/kws_program_info.bin \
     --bin  models/kws/kws_program_data.bin \
+    --yaml models/kws/info.yaml \
     --flash_address 0x101000 \
     --input_shape 49,10,1 \
     --output_shape 1,1,12
 ```
 
-**New argument:** `--yaml <path>` — path to `info.yaml`. Explicit CLI args (`--flash_address`, `--input_shape`, etc.) take priority over YAML values when provided.
+`--yaml` is required; explicit CLI args (`--flash_address`, `--input_shape`, etc.) take priority over the values in it.
+
+The model is sent one flash sector at a time, and the device acknowledges each
+one with the position it has committed. Three flags exercise the paths a happy
+transfer does not reach:
+
+| Flag | What it does |
+|---|---|
+| `--stop-data-after N` | Abandons the DATA transfer after N bytes. The device reports the drop and is left with no model until a transfer completes. |
+| `--corrupt-data` | Flips one byte after the CRC is computed, so the device's whole-file check rejects the transfer with `ERR_INTEGRITY`. |
+| `--write-with-response` | Sends chunks as Write Requests instead of Write Commands, for a host stack that paces better that way. |
+
+A successful DATA transfer reports twice: `DONE` when the file is stored and
+verified, then `READY` once the model is programmed into the AKD1500 and a test
+inference has passed. They mean different things and only `READY` means the
+update worked.
+
+`docs/ble-model-transfer.md` is the wire contract: every message, every field,
+every answer, and what happens on a bad integrity check or an abandoned
+transfer. Read it before changing either side.
 
 ---
 

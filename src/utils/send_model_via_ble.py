@@ -140,17 +140,13 @@ def compute_combined_crc32(
 # GATT UUIDs  (base: f000aaXX-0451-4000-b000-000000000000)
 # ---------------------------------------------------------------------------
 FILE_TRANSFER_SERVICE_UUID = "f000aa00-0451-4000-b000-000000000000"
-FILE_TRANSFER_CHAR_UUID = "f000aa01-0451-4000-b000-000000000000"  # write data chunks
-ACK_CHAR_UUID = "f000aa02-0451-4000-b000-000000000000"  # notify
-CTRL_CHAR_UUID = "f000aa03-0451-4000-b000-000000000000"  # control
-FILE_SIZE_CHAR_UUID = (
-    "f000aa04-0451-4000-b000-000000000000"  # this file's size (32-bit LE)
-)
+FILE_TRANSFER_CHAR_UUID = "f000aa01-0451-4000-b000-000000000000"  # u32 offset + payload
+STATUS_CHAR_UUID = "f000aa02-0451-4000-b000-000000000000"  # notify, 14-byte status
+CTRL_CHAR_UUID = "f000aa03-0451-4000-b000-000000000000"  # START / ABORT
 APP_CHAR_UUID = "f000aa05-0451-4000-b000-000000000000"  # app index
 FILE_CRC_CHAR_UUID = (
-    "f000aa06-0451-4000-b000-000000000000"  # combined CRC32 (32-bit LE)
+    "f000aa06-0451-4000-b000-000000000000"  # CRC32 of the next transfer (32-bit LE)
 )
-TRANSFER_TYPE_CHAR_UUID = "f000aa07-0451-4000-b000-000000000000"  # 0=INFO, 1=DATA
 MODEL_INPUT_SHAPE_CHAR_UUID = (
     "f000aa08-0451-4000-b000-000000000000"  # input dims  (N × 32-bit LE)
 )
@@ -184,20 +180,53 @@ INFERENCE_MODE_CHAR_UUID = "f000aa12-0451-4000-b000-000000000000"  # inference m
 TRANSFER_TYPE_INFO = 0x00
 TRANSFER_TYPE_DATA = 0x01
 
+CTRL_OP_START = 0x01
+CTRL_OP_ABORT = 0x02
+
+STATUS_OK = 0x00
+STATUS_DONE = 0x01
+STATUS_ERR_OFFSET = 0x02
+STATUS_ERR_INTEGRITY = 0x03
+STATUS_ERR_FLASH = 0x04
+STATUS_ERR_STATE = 0x05
+STATUS_ERR_PARAM = 0x06
+STATUS_ABORTED = 0x07
+STATUS_READY = 0x08
+STATUS_ERR_PROGRAM = 0x09
+
+STATUS_NAMES = {
+    STATUS_OK: "OK",
+    STATUS_DONE: "DONE",
+    STATUS_ERR_OFFSET: "ERR_OFFSET",
+    STATUS_ERR_INTEGRITY: "ERR_INTEGRITY",
+    STATUS_ERR_FLASH: "ERR_FLASH",
+    STATUS_ERR_STATE: "ERR_STATE",
+    STATUS_ERR_PARAM: "ERR_PARAM",
+    STATUS_ABORTED: "ABORTED",
+    STATUS_READY: "READY",
+    STATUS_ERR_PROGRAM: "ERR_PROGRAM",
+}
+
+STATUS_FRAME_LEN = 14
+DATA_WRITE_HEADER_LEN = 4
+
 APP = 0  # default KWS
 
-CHUNK_SIZE = 244
-BUFFER_SIZE = 102236  # 419 * 244 chunks
+# Payload bytes per data write. The offset header takes four of the write, so at
+# the 247-byte MTU a phone negotiates this leaves 240.
+CHUNK_SIZE = 240
 
-# When readback is enabled this should become BUFFER_SIZE // 2
-ACK_CHUNK_LIMIT = BUFFER_SIZE
-WRITE_WITH_RESPONSE = True
+# Timeouts from the protocol specification, section 6.2.
+# Write Without Response is what the protocol recommends and what the app will
+# use; a lost write is caught by the next write's offset rather than corrupting
+# the flash silently. --write-with-response falls back for a host stack that
+# paces better that way.
+WRITE_WITH_RESPONSE = False
 
-ACK_FLASH_ERASE_DONE = 0xEE
-ACK_FLASH_WRITE_DONE = 0xCC
-ACK_CRC_FAIL = 0xBB
-ack_event = asyncio.Event()
-last_ack_code = 0
+START_TIMEOUT_S = 2.0
+BLOCK_TIMEOUT_S = 5.0
+FINAL_BLOCK_TIMEOUT_S = 30.0
+INSTALL_TIMEOUT_S = 60.0
 
 
 def detect_app_index(bin_path):
@@ -212,247 +241,256 @@ def detect_app_index(bin_path):
         )
 
 
-def handle_ack(sender, data):  # pylint: disable=unused-argument
-    """Handle the ack from the server."""
-    global last_ack_code
-    ack_code = data[0]
-    last_ack_code = ack_code
-    if ack_code == ACK_FLASH_ERASE_DONE:
-        print(f"\n[ACK] Peripheral acknowledged flash erase (code: 0x{ack_code:02X})")
-    elif ack_code == ACK_FLASH_WRITE_DONE:
-        print(f"\n[ACK] Peripheral acknowledged flash write (code: 0x{ack_code:02X})")
-    elif ack_code == ACK_CRC_FAIL:
-        print(f"\n[ACK] CRC VALIDATION FAILED on peripheral (code: 0x{ack_code:02X})")
-    ack_event.set()
+class TransferStatus:
+    """One status notification from the device, as specified for aa02."""
+
+    def __init__(self, frame):
+        """Parse the 14-byte record.
+
+        Args:
+            frame: Raw notification bytes.
+
+        Raises:
+            ValueError: If the frame is not the expected length.
+        """
+        if len(frame) != STATUS_FRAME_LEN:
+            raise ValueError(
+                f"status frame is {len(frame)} bytes, expected {STATUS_FRAME_LEN}"
+            )
+        self.result = frame[0]
+        self.transfer_type = frame[1]
+        self.block_size = int.from_bytes(frame[2:6], "little")
+        self.position = int.from_bytes(frame[6:10], "little")
+        self.total = int.from_bytes(frame[10:14], "little")
+
+    @property
+    def name(self):
+        """Human-readable result code."""
+        return STATUS_NAMES.get(self.result, f"0x{self.result:02X}")
+
+    def __str__(self):
+        return (
+            f"{self.name} type={self.transfer_type} "
+            f"position={self.position}/{self.total} block={self.block_size}"
+        )
 
 
-async def _send_single_file(
-    client,
-    filepath,
-    transfer_type_byte,
-    write_to_sram,
-    combined_crc32=None,
-    data_crc32=None,
-    total_length=None,
-    input_shape=None,
-    output_shape=None,
-    flash_address=0x1000,
-    is_edge_learned=False,
-    num_edge_classes=None,
-    fs_name=None,
-    mfcc_fs=0.0,
-    silence_class=0,
-    unknown_class=0,
-    inference_mode=0,
-):
-    """Transfer one binary file over BLE.
+# Created fresh for each transfer by reset_status_queue(), never at import.
+status_queue = None
 
-    Metadata fields (CRC, total_length, shapes, address, EL fields) are sent
-    only with the INFO transfer so the firmware can store them in the file system.
-    The DATA transfer sends only the file size (to trigger flash erase) and the
-    raw payload; the firmware uses the flash address received with INFO to know
-    where to write.
+
+def handle_status(sender, data):  # pylint: disable=unused-argument
+    """Queue one status notification for whoever is waiting on it."""
+    status = TransferStatus(data)
+    print(f"\n[status] {status}")
+    status_queue.put_nowait(status)
+
+
+def reset_status_queue():
+    """Start a fresh status queue, bound to the event loop now running.
+
+    An asyncio.Queue binds to the loop it is first used on, and the hardware
+    test runs each phase under its own asyncio.run(), so a queue that outlived
+    a loop would raise. Making a new one per transfer keeps them independent,
+    and discards anything an earlier transfer left queued: a stale status would
+    otherwise be mistaken for the answer to the next message, putting every
+    check after it one message behind.
     """
-    file = Path(filepath)
-    label = "INFO" if transfer_type_byte == TRANSFER_TYPE_INFO else "DATA"
-    file_size = file.stat().st_size
+    global status_queue
+    status_queue = asyncio.Queue()
 
-    # 1. Set transfer type
-    await client.write_gatt_char(
-        TRANSFER_TYPE_CHAR_UUID,
-        transfer_type_byte.to_bytes(1, byteorder="little"),
-        response=True,
-    )
-    print(f"[{label}] Transfer type set (0x{transfer_type_byte:02X})")
 
-    # 1b. Send fs_name BEFORE file_size so firmware has meta_fs_name set
-    #     when get_file_size triggers build_fs_paths_from_name.
-    if transfer_type_byte == TRANSFER_TYPE_INFO and fs_name:
-        await client.write_gatt_char(
-            FS_NAME_CHAR_UUID,
-            fs_name.encode("utf-8"),
-            response=True,
-        )
-        print(f"[{label}] Sent fs_name (early): '{fs_name}'")
+async def await_status(timeout):
+    """Wait for the next status notification.
 
-    # 2. Send this file's size (32-bit) → triggers flash erase on firmware side
-    ack_event.clear()
-    await client.write_gatt_char(
-        FILE_SIZE_CHAR_UUID,
-        file_size.to_bytes(4, byteorder="little"),
-        response=True,
-    )
-    print(f"[{label}] Sent size ({file_size} bytes), waiting for erase ACK...")
+    Args:
+        timeout: Seconds to wait.
+
+    Returns:
+        The TransferStatus, or None if none arrived in time.
+    """
     try:
-        await asyncio.wait_for(ack_event.wait(), timeout=10.0)
-        ack_event.clear()
+        return await asyncio.wait_for(status_queue.get(), timeout=timeout)
     except asyncio.TimeoutError:
-        print(f"[{label}] Timeout waiting for erase ACK")
-        return False
+        return None
 
-    # 3-N: Model metadata – sent with INFO; data CRC sent with DATA.
-    if transfer_type_byte == TRANSFER_TYPE_DATA and data_crc32 is not None:
-        # Send data bin CRC32 so firmware can validate after receiving all chunks
-        await client.write_gatt_char(
-            FILE_CRC_CHAR_UUID,
-            data_crc32.to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent data CRC32: 0x{data_crc32:08X}")
 
-    if transfer_type_byte == TRANSFER_TYPE_INFO:
-        # 3. Combined CRC32 (32-bit) over info + data files
-        crc_to_send = combined_crc32 if combined_crc32 is not None else 0
-        await client.write_gatt_char(
-            FILE_CRC_CHAR_UUID,
-            crc_to_send.to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent model_info_hdr_crc32: 0x{crc_to_send:08X}")
+async def start_transfer(client, transfer_type, total_length):
+    """Write START and return the device's answer, or None on timeout."""
+    reset_status_queue()
+    frame = bytes([CTRL_OP_START, transfer_type]) + total_length.to_bytes(4, "little")
+    await client.write_gatt_char(CTRL_CHAR_UUID, frame, response=True)
+    return await await_status(START_TIMEOUT_S)
 
-        # 4. Total combined length (32-bit) of info + data files
-        total_len = total_length if total_length is not None else file_size
-        await client.write_gatt_char(
-            TOTAL_LENGTH_CHAR_UUID,
-            total_len.to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent total length (info+data): {total_len} bytes")
 
-        # 5. Input shape – each dimension as 32-bit LE  (e.g. r=96, g=96, b=3)
-        if input_shape is not None:
-            await client.write_gatt_char(
-                MODEL_INPUT_SHAPE_CHAR_UUID,
-                struct.pack(f"<{len(input_shape)}I", *input_shape),
-                response=True,
-            )
-            print(
-                f"[{label}] Sent input shape:  {input_shape}  ({len(input_shape)} × 32-bit)"
-            )
+async def abort_transfer(client):
+    """Tell the device to discard the transfer in progress."""
+    await client.write_gatt_char(CTRL_CHAR_UUID, bytes([CTRL_OP_ABORT]), response=True)
+    return await await_status(START_TIMEOUT_S)
 
-        # 6. Output shape – variable number of 32-bit LE dimensions
-        if output_shape is not None:
-            await client.write_gatt_char(
-                MODEL_OUTPUT_SHAPE_CHAR_UUID,
-                struct.pack(f"<{len(output_shape)}I", *output_shape),
-                response=True,
-            )
-            print(
-                f"[{label}] Sent output shape: {output_shape}  ({len(output_shape)} × 32-bit)"
-            )
 
-        # 7. Flash address where model data will be written (32-bit LE)
-        await client.write_gatt_char(
-            FLASH_ADDRESS_CHAR_UUID,
-            flash_address.to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent flash address: 0x{flash_address:08X}")
+async def send_blocks(client, payload, block_size, label, stop_after=None):
+    """Stream one file, stopping at every block boundary for the device's status.
 
-        # 8. is_edge_learned – always sent (0 or 1) to avoid stale firmware value
-        is_el_val = 1 if is_edge_learned else 0
-        await client.write_gatt_char(
-            IS_EDGE_LEARNED_CHAR_UUID,
-            is_el_val.to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent is_edge_learned: {is_el_val}")
+    Args:
+        client: Connected BleakClient.
+        payload: Whole file as bytes.
+        block_size: Block size the device reported at START.
+        label: "INFO" or "DATA", for the progress output.
+        stop_after: Abandon the transfer once this many bytes have been sent,
+            without waiting for the block's status. Used to test the abandoned
+            path; None sends the whole file.
 
-        classes = num_edge_classes if num_edge_classes is not None else 0
-        await client.write_gatt_char(
-            NUM_EDGE_CLASSES_CHAR_UUID,
-            classes.to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(
-            f"[{label}] Sent neurons in higher order 16 bites and num_edge_classes in lower 16bits: {classes}"
-        )
-
-        # 9. MFCC normalisation scalar (float → IEEE-754 bits, 32-bit LE)
-        mfcc_fs_bits = struct.unpack("<I", struct.pack("<f", float(mfcc_fs)))[0]
-        await client.write_gatt_char(
-            MFCC_FS_CHAR_UUID,
-            mfcc_fs_bits.to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent mfcc_fs: {mfcc_fs} (bits=0x{mfcc_fs_bits:08X})")
-
-        # 10. Silence class index (32-bit LE)
-        await client.write_gatt_char(
-            SILENCE_CLASS_CHAR_UUID,
-            int(silence_class).to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent silence_class: {silence_class}")
-
-        # 11. Unknown class index (32-bit LE)
-        await client.write_gatt_char(
-            UNKNOWN_CLASS_CHAR_UUID,
-            int(unknown_class).to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(f"[{label}] Sent unknown_class: {unknown_class}")
-
-        # 12. Inference mode flag (0=sync, 1=async; 32-bit LE)
-        await client.write_gatt_char(
-            INFERENCE_MODE_CHAR_UUID,
-            int(inference_mode).to_bytes(4, byteorder="little"),
-            response=True,
-        )
-        print(
-            f"[{label}] Sent inference_mode: {inference_mode} "
-            f"({'async' if inference_mode else 'sync'})"
-        )
-
-        # (fs_name already sent before file_size – see step 1b above)
-
-    # Stream file data in chunks
-    chunk_limit = BUFFER_SIZE if write_to_sram else file_size
-    bytes_sent = 0
-    since_last_ack = 0
+    Returns:
+        The last TransferStatus, or None on a timeout or a deliberate stop.
+    """
+    offset = 0
+    total = len(payload)
     start_time = time.time()
+    status = None
 
-    with file.open("rb") as f:
-        while chunk := f.read(CHUNK_SIZE):
+    while offset < total:
+        block_end = min((offset // block_size + 1) * block_size, total)
+        while offset < block_end:
+            length = min(CHUNK_SIZE, block_end - offset)
+            frame = offset.to_bytes(4, "little") + payload[offset : offset + length]
             await client.write_gatt_char(
-                FILE_TRANSFER_CHAR_UUID, chunk, response=WRITE_WITH_RESPONSE
+                FILE_TRANSFER_CHAR_UUID, frame, response=WRITE_WITH_RESPONSE
             )
-            bytes_sent += len(chunk)
-            since_last_ack += len(chunk)
-            print(f"\r[{label}] {bytes_sent}/{file_size} bytes", end="")
-            if since_last_ack >= chunk_limit:
-                print(f"\n[{label}] Waiting for write ACK...")
-                try:
-                    await asyncio.wait_for(ack_event.wait(), timeout=10.0)
-                    ack_event.clear()
-                except asyncio.TimeoutError:
-                    print(f"[{label}] Timeout waiting for write ACK")
-                    return False
-                since_last_ack = 0
-            await asyncio.sleep(0.005)
+            offset += length
+            print(f"\r[{label}] {offset}/{total} bytes", end="")
+            if stop_after is not None and offset >= stop_after:
+                print(f"\n[{label}] Abandoning the transfer at {offset} bytes")
+                return None
 
-    if since_last_ack > 0:
-        print(f"\n[{label}] Waiting for final write ACK...")
-        try:
-            await asyncio.wait_for(ack_event.wait(), timeout=10.0)
-            ack_event.clear()
-        except asyncio.TimeoutError:
-            print(f"[{label}] Timeout waiting for final write ACK")
-            return False
+        timeout = FINAL_BLOCK_TIMEOUT_S if offset == total else BLOCK_TIMEOUT_S
+        status = await await_status(timeout)
+        if status is None:
+            print(f"\n[{label}] Timed out waiting for the status at offset {offset}")
+            return None
+        if status.result not in (STATUS_OK, STATUS_DONE):
+            print(f"\n[{label}] Device rejected the transfer: {status}")
+            return status
+        if status.position != offset:
+            print(
+                f"\n[{label}] Desynchronised: device is at {status.position}, "
+                f"host at {offset}"
+            )
+            return status
 
-    if last_ack_code == ACK_CRC_FAIL:
-        print(f"\n[{label}] CRC validation FAILED — peripheral rejected the transfer.")
+    print(f"\n[{label}] {total} bytes in {time.time() - start_time:.2f}s")
+    return status
+
+
+async def run_transfer(client, transfer_type, payload, stop_after=None):
+    """Run one complete transfer, and for DATA wait for the model to install.
+
+    Args:
+        client: Connected BleakClient.
+        transfer_type: TRANSFER_TYPE_INFO or TRANSFER_TYPE_DATA.
+        payload: Whole file as bytes.
+        stop_after: Passed to send_blocks() to abandon part way.
+
+    Returns:
+        True when the device reported the transfer, and the install for DATA,
+        as successful.
+    """
+    label = "INFO" if transfer_type == TRANSFER_TYPE_INFO else "DATA"
+
+    status = await start_transfer(client, transfer_type, len(payload))
+    if status is None:
+        print(f"[{label}] No answer to START")
         return False
+    if status.result != STATUS_OK:
+        print(f"[{label}] START refused: {status}")
+        return False
+    print(f"[{label}] Started, device block size {status.block_size} bytes")
 
-    print(f"\n[{label}] Done in {time.time() - start_time:.2f}s")
+    status = await send_blocks(client, payload, status.block_size, label, stop_after)
+    if status is None or status.result != STATUS_DONE:
+        return False
+    if transfer_type == TRANSFER_TYPE_INFO:
+        return True
+
+    print(f"[{label}] Stored and verified, waiting for the model to install...")
+    status = await await_status(INSTALL_TIMEOUT_S)
+    if status is None:
+        print(f"[{label}] No answer after DONE; the model may not have installed")
+        return False
+    if status.result != STATUS_READY:
+        print(f"[{label}] Model stored but not running: {status}")
+        return False
+    print(f"[{label}] Model installed and running")
     return True
+
+
+async def send_session_metadata(
+    client,
+    combined_crc32,
+    total_length,
+    input_shape,
+    output_shape,
+    flash_address,
+    is_edge_learned,
+    num_edge_classes,
+    fs_name,
+    mfcc_fs,
+    silence_class,
+    unknown_class,
+    inference_mode,
+):
+    """Write every metadata characteristic the INFO header CRC covers.
+
+    All of these must land before START(INFO), because the firmware folds them
+    into the header it CRCs against combined_crc32.
+    """
+
+    async def write_u32(uuid, value, description):
+        """Write one 32-bit little-endian metadata value."""
+        await client.write_gatt_char(
+            uuid, int(value).to_bytes(4, byteorder="little"), response=True
+        )
+        print(f"[INFO] Sent {description}: {value}")
+
+    await client.write_gatt_char(
+        FS_NAME_CHAR_UUID, fs_name.encode("utf-8"), response=True
+    )
+    print(f"[INFO] Sent fs_name: '{fs_name}'")
+
+    await write_u32(TOTAL_LENGTH_CHAR_UUID, total_length, "total length (info+data)")
+    await client.write_gatt_char(
+        MODEL_INPUT_SHAPE_CHAR_UUID,
+        struct.pack(f"<{len(input_shape)}I", *input_shape),
+        response=True,
+    )
+    print(f"[INFO] Sent input shape: {input_shape}")
+    await client.write_gatt_char(
+        MODEL_OUTPUT_SHAPE_CHAR_UUID,
+        struct.pack(f"<{len(output_shape)}I", *output_shape),
+        response=True,
+    )
+    print(f"[INFO] Sent output shape: {output_shape}")
+
+    await write_u32(FLASH_ADDRESS_CHAR_UUID, flash_address, "flash address")
+    await write_u32(
+        IS_EDGE_LEARNED_CHAR_UUID, 1 if is_edge_learned else 0, "is_edge_learned"
+    )
+    await write_u32(
+        NUM_EDGE_CLASSES_CHAR_UUID, num_edge_classes or 0, "num_edge_classes"
+    )
+
+    mfcc_fs_bits = struct.unpack("<I", struct.pack("<f", float(mfcc_fs)))[0]
+    await write_u32(MFCC_FS_CHAR_UUID, mfcc_fs_bits, "mfcc_fs bits")
+    await write_u32(SILENCE_CLASS_CHAR_UUID, silence_class, "silence_class")
+    await write_u32(UNKNOWN_CLASS_CHAR_UUID, unknown_class, "unknown_class")
+    await write_u32(INFERENCE_MODE_CHAR_UUID, inference_mode, "inference_mode")
+    await write_u32(FILE_CRC_CHAR_UUID, combined_crc32, "model_info_hdr_crc32")
 
 
 async def send_file(
     address,
     filepath,
     info_path,
-    write_to_sram,
     input_shape=None,
     output_shape=None,
     flash_address=0x1000,
@@ -464,102 +502,105 @@ async def send_file(
     silence_class=0,
     unknown_class=0,
     inference_mode=0,
+    stop_data_after=None,
+    corrupt_data=False,
 ):
+    """Send one model to the device: session metadata, then INFO, then DATA.
+
+    Args:
+        address: BLE address, or an already-connected client's address.
+        filepath: Path to *_program_data.bin.
+        info_path: Path to *_program_info.bin.
+        stop_data_after: Abandon the DATA transfer after this many bytes, to
+            exercise the abandoned path.
+        corrupt_data: Flip one byte of the DATA payload after its CRC has been
+            computed, to exercise the integrity check.
+
+    Returns:
+        True when both transfers, and the install, succeeded.
+    """
     source_file = filepath or info_path
     try:
-        APP = detect_app_index(source_file)
-    except ValueError as e:
-        print(e)
+        app_index = detect_app_index(source_file)
+    except ValueError as exc:
+        print(exc)
         sys.exit(1)
 
-    # Total length covers info + data bytes
     paths_for_len = [p for p in [info_path, filepath] if p and Path(p).exists()]
     total_length = sum(Path(p).stat().st_size for p in paths_for_len)
 
-    # Combined CRC32 covers header fields [total_length..info_data_len] + info bytes.
-    # Requires info_path and shape/address metadata to be available.
-    combined_crc = 0
-    if info_path and Path(info_path).exists() and input_shape and output_shape:
-        combined_crc = compute_combined_crc32(
+    combined_crc = compute_combined_crc32(
+        total_length=total_length,
+        input_shape=input_shape,
+        output_shape=output_shape,
+        flash_address=flash_address,
+        is_edge_learned=is_edge_learned,
+        num_edge_classes=num_edge_classes if num_edge_classes is not None else 0,
+        info_path=info_path,
+        model_name=model_name,
+        mfcc_fs=mfcc_fs,
+        silence_class=silence_class,
+        unknown_class=unknown_class,
+        inference_mode=inference_mode,
+    )
+    data_crc = compute_data_crc32(filepath)
+    print(f"model_info_hdr_crc32 (hdr+info): 0x{combined_crc:08X}")
+    print(f"Total length    (info+data): {total_length} bytes")
+    print(f"Data CRC32      (data bin):  0x{data_crc:08X}")
+
+    async with BleakClient(address) as client:
+        print(f"Connected to {address}")
+        await client.start_notify(STATUS_CHAR_UUID, handle_status)
+
+        await client.write_gatt_char(
+            APP_CHAR_UUID, app_index.to_bytes(1, byteorder="little"), response=True
+        )
+        print(f"Sent APP index ({app_index})")
+
+        print(f"\n--- Sending model info: {Path(info_path).name} ---")
+        await send_session_metadata(
+            client,
+            combined_crc32=combined_crc,
             total_length=total_length,
             input_shape=input_shape,
             output_shape=output_shape,
             flash_address=flash_address,
             is_edge_learned=is_edge_learned,
-            num_edge_classes=num_edge_classes if num_edge_classes is not None else 0,
-            info_path=info_path,
-            model_name=model_name,
+            num_edge_classes=num_edge_classes,
+            fs_name=fs_name,
             mfcc_fs=mfcc_fs,
             silence_class=silence_class,
             unknown_class=unknown_class,
             inference_mode=inference_mode,
         )
-    elif info_path and Path(info_path).exists():
-        # Shapes not available – warn; CRC will be 0 (skipped at load time)
-        print("Warning: input/output shape not available; combined_crc32 set to 0")
-    print(f"model_info_hdr_crc32 (hdr+info): 0x{combined_crc:08X}")
-    print(f"Total length    (info+data): {total_length} bytes")
+        if not await run_transfer(
+            client, TRANSFER_TYPE_INFO, Path(info_path).read_bytes()
+        ):
+            print("Info transfer failed, aborting.")
+            return False
 
-    # Data CRC32 covers raw model data binary bytes
-    data_crc = 0
-    if filepath and Path(filepath).exists():
-        data_crc = compute_data_crc32(filepath)
-    print(f"Data CRC32      (data bin):  0x{data_crc:08X}")
+        print(f"\n--- Sending model data: {Path(filepath).name} ---")
+        payload = bytearray(Path(filepath).read_bytes())
+        if corrupt_data:
+            # After the CRC, so the device sees bytes that do not match what the
+            # host declared. Halfway in, so several blocks commit first.
+            victim = len(payload) // 2
+            payload[victim] ^= 0xFF
+            print(f"[DATA] Corrupted byte {victim} on purpose; expecting ERR_INTEGRITY")
 
-    async with BleakClient(address) as client:
-        print(f"Connected to {address}")
-        await client.start_notify(ACK_CHAR_UUID, handle_ack)
-
-        print("Selected app:", "KWS")
         await client.write_gatt_char(
-            APP_CHAR_UUID, APP.to_bytes(1, byteorder="little"), response=True
+            FILE_CRC_CHAR_UUID, data_crc.to_bytes(4, byteorder="little"), response=True
         )
-        print(f"Sent APP index ({APP})")
+        print(f"[DATA] Sent data CRC32: 0x{data_crc:08X}")
 
-        if info_path:
-            if not Path(info_path).exists():
-                print(f"Error: Info file not found at '{info_path}'")
-                return
-            print(f"\n--- Sending model info: {Path(info_path).name} ---")
-            ok = await _send_single_file(
-                client,
-                info_path,
-                TRANSFER_TYPE_INFO,
-                write_to_sram,
-                combined_crc32=combined_crc,
-                total_length=total_length,
-                input_shape=input_shape,
-                output_shape=output_shape,
-                flash_address=flash_address,
-                is_edge_learned=is_edge_learned,
-                num_edge_classes=num_edge_classes,
-                fs_name=fs_name,
-                mfcc_fs=mfcc_fs,
-                silence_class=silence_class,
-                unknown_class=unknown_class,
-                inference_mode=inference_mode,
-            )
-            if not ok:
-                print("Info transfer failed, aborting.")
-                return
-
-        if filepath:
-            if not Path(filepath).exists():
-                print(f"Error: Data file not found at '{filepath}'")
-                return
-            print(f"\n--- Sending model data: {Path(filepath).name} ---")
-            ok = await _send_single_file(
-                client,
-                filepath,
-                TRANSFER_TYPE_DATA,
-                write_to_sram,
-                data_crc32=data_crc,
-            )
-            if not ok:
-                print("Data transfer failed.")
-                return
+        if not await run_transfer(
+            client, TRANSFER_TYPE_DATA, bytes(payload), stop_after=stop_data_after
+        ):
+            print("Data transfer failed.")
+            return False
 
         print("\nAll transfers complete.")
+        return True
 
 
 def _load_info_yaml(yaml_path):
@@ -764,10 +805,14 @@ async def main(args):
         )
         fs_name = f"/model_meta/{base}"
 
-    if input_shape is not None:
-        print(f"Input shape:  {input_shape}")
-    if output_shape is not None:
-        print(f"Output shape: {output_shape}")
+    # The header CRC covers both shapes, so the firmware cannot be told a model
+    # whose shapes the host does not know.
+    if not input_shape or not output_shape:
+        print("Error: input and output shape are required (from --yaml or the CLI)")
+        return
+
+    print(f"Input shape:  {input_shape}")
+    print(f"Output shape: {output_shape}")
     print(f"Flash address: {flash_address_str}")
     print(f"Edge-learned:  {is_edge_learned}")
     print(f"FS name:       {fs_name}")
@@ -825,7 +870,6 @@ async def main(args):
             address,
             bin_path,
             info_path,
-            args.wc,
             input_shape=input_shape,
             output_shape=output_shape,
             flash_address=int(flash_address_str, 0),
@@ -837,6 +881,8 @@ async def main(args):
             silence_class=silence_class,
             unknown_class=unknown_class,
             inference_mode=inference_mode,
+            stop_data_after=args.stop_data_after,
+            corrupt_data=args.corrupt_data,
         )
     except asyncio.CancelledError:
         print("\n[bt] interrupted (signal) — cleaning up adapter before exit.")
@@ -865,7 +911,20 @@ if __name__ == "__main__":
         "Explicit CLI args override values from this file.",
     )
     parser.add_argument(
-        "--wc", default=True, help="Write chunks to SRAM (default: True)"
+        "--write-with-response",
+        action="store_true",
+        help="Send data chunks as Write Requests instead of Write Commands",
+    )
+    parser.add_argument(
+        "--stop-data-after",
+        type=int,
+        default=None,
+        help="Abandon the DATA transfer after N bytes, to test the abandoned path",
+    )
+    parser.add_argument(
+        "--corrupt-data",
+        action="store_true",
+        help="Flip one DATA byte after its CRC, to test the integrity check",
     )
     parser.add_argument(
         "--neurons_per_class",
@@ -915,6 +974,7 @@ if __name__ == "__main__":
         "(default: /model_meta/<prefix>, e.g. /model_meta/kws_el)",
     )
     args = parser.parse_args()
+    WRITE_WITH_RESPONSE = args.write_with_response
 
     DEVICE_NAME = get_device_name()
     if DEVICE_NAME is None:

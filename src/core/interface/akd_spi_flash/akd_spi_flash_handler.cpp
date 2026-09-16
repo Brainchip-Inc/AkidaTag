@@ -269,10 +269,6 @@ extern "C" int akd_clk_use_ref(bool on) {
     akd_pllclk_hz = 25000000u;
     return (akd_clk_rd(AKD_CLK_GENCTRL_REG) & 1u) ? -EIO : 0;
 }
-#if FLASH_READ_BACK_CHECK
-uint8_t read_back_flash[HALF_OF_SRAM_BUFFER_SIZE];
-#endif
-
 union _data {
     uint8_t ucdata[4];
     uint32_t uint_data;
@@ -607,28 +603,6 @@ extern "C" void spi_flash_write_helper_func(const uint8_t* data, size_t offset, 
     e_write = time_ms();
     write_time = e_write - s_write;
     LOG_INF("write time = %u ms", write_time);
-#if FLASH_READ_BACK_CHECK
-    uint64_t s_read = 0;
-    uint64_t e_read = 0;
-    uint32_t read_time = 0;
-    s_read = time_ms();
-    // Read back from flash into second half of data[]
-    ret = spi_flash_read(spi_driver, flash_addr, read_back_flash, size);
-    if (ret != 0) {
-        LOG_ERR("Flash read failed with error %d", ret);
-        return;
-    }
-
-    // Compare the written and read data
-    if (memcmp(data, read_back_flash, size) == 0) {
-        LOG_INF("Flash write-read verification successful.");
-    } else {
-        LOG_ERR("Flash data mismatch!");
-    }
-    e_read = time_ms();
-    read_time = e_read - s_read;
-    LOG_INF("read_time= %u ms", read_time);
-#endif
     if (!ret)
         LOG_INF("Flash Write Successful");
 }

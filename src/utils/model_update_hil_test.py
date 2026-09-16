@@ -7,24 +7,24 @@ simply not reachable.
 WHAT MAKES THIS TEST WORTH ANYTHING
 -----------------------------------
 An unreachable flash wears two different masks, and the erase duration tells
-them apart from a real erase:
+them apart from a real erase. The transfer erases one 4 KB sector per block as
+the block arrives, so there is one measurement per sector:
 
-  ~1014 ms total   the status register reads 0xFF, WIP never clears, the poll
-                   burns its whole 1000 ms budget on the FIRST sector and gives
-                   up. Reported as "Erase failed".
-  ~2 ms total      the status register reads 0x00, WIP looks clear immediately,
-                   every sector is "ready" at once and nothing is erased.
-                   Reported as "Erase Successful", which is a lie.
-  ~286 ms total    14 sectors actually erased (~20 ms/sector, MT25QU128ABA at
-                   8 MHz host clock).
+  ~1000 ms/sector  the status register reads 0xFF, WIP never clears, the poll
+                   burns its whole budget on the sector and gives up. Reported
+                   as "Erase failed".
+  <1 ms/sector     the status register reads 0x00, WIP looks clear immediately,
+                   the sector is "ready" at once and nothing is erased. Reported
+                   as "Erase Successful", which is a lie.
+  ~20 ms/sector    the sector was actually erased (MT25QU128ABA at 8 MHz host
+                   clock).
 
-A test that only asserted "the transfer succeeded" would have passed the 2 ms
+A test that only asserted "the transfer succeeded" would have passed the fast
 variant, which is the dangerous one: it commits a data-meta record describing a
-model that was never written. Duration alone is not enough either, because the
-~1014 ms case aborts on the first unanswered sector, so its total is ~1000 ms
-whatever the model size and can look like an ordinary per-sector rate. So the
-erase check pairs the duration band with the outcome string, and the run also
-asserts the readback-before-commit ordering and the post-reset boot validation.
+model that was never written. Per-sector erasing makes the band a direct check
+rather than an average, and the count of erases has to match the model size too.
+The run also asserts the readback-before-commit ordering, what the device told
+the host over the wire, and the post-reset boot validation.
 
 The AKD1500 must be left in its normal async KWS duty cycle for this to mean
 anything. Do NOT issue `app stop` or any clock command before running it: those
@@ -142,6 +142,13 @@ ERASE_CONTENTION_RE = re.compile(
     r"\s*sleep gated:\s*(\d+)\)"
 )
 BOOT_DATA_CRC_RE = re.compile(r"Data CRC OK \(0x[0-9A-Fa-f]+\) over (\d+) bytes")
+
+# Every status the firmware notifies is echoed to the log by send_status().
+STATUS_RE = re.compile(r"Status 0x([0-9A-Fa-f]{2}) at (\d+)/(\d+)")
+STATUS_DONE = 0x01
+STATUS_READY = 0x08
+# Anything the protocol defines that is not OK, DONE, READY or an accepted ABORT.
+STATUS_FAILURES = {0x02, 0x03, 0x04, 0x05, 0x06, 0x09}
 
 # Validation failures the firmware reports at boot, straight off the flash.
 # Defined once and reused by both FAILURE_MARKERS and check_boot_validation() so
@@ -277,6 +284,29 @@ class WakeChurn:
         return False
 
 
+def wait_for_console_quiet(monitor, idle_seconds=3.0, timeout=30.0):
+    """Wait until the board's console has been silent for a while.
+
+    A transfer produces far more log than a 115200 baud UART carries in real
+    time, and the log backend is deferred, so the last lines can still be
+    arriving seconds after the host has seen its final status. Sampling the
+    console on a fixed delay drops them intermittently and fails checks that
+    have nothing wrong with them, which is exactly the kind of flake that
+    teaches people to re-run a red test instead of reading it.
+    """
+    deadline = time.time() + timeout
+    last_count = monitor.mark()
+    quiet_since = time.time()
+    while time.time() < deadline:
+        time.sleep(0.25)
+        count = monitor.mark()
+        if count != last_count:
+            last_count = count
+            quiet_since = time.time()
+        elif time.time() - quiet_since >= idle_seconds:
+            return
+
+
 def reset_board(reset_cmd):
     print("::group::Reset board")
     print(f"Running: {reset_cmd}")
@@ -333,7 +363,6 @@ async def send_model(monitor, meta, info_path, data_path, fs_name, device_name):
             client,
             data_path,
             info_path,
-            True,
             input_shape=meta["input_shape"],
             output_shape=meta["output_shape"],
             flash_address=int(str(meta["flash_address"]), 0),
@@ -367,20 +396,20 @@ class _Keep:
 
 
 def check_erase_duration(lines, data_size):
-    """The heart of the test: did the erase really happen?
+    """The heart of the test: did the erases really happen?
 
-    Duration alone cannot separate all three states, so this check combines it
-    with the outcome string:
+    The transfer erases one 4 KB sector per block as the block arrives, so a run
+    produces one "erase time=" line per sector rather than a single total. That
+    makes the check sharper than it used to be, because each line can be banded
+    against a known one-sector cost instead of an average:
 
     * "Erase failed" present            -> never answered, whatever the duration.
-      This is what catches the ~1000 ms timeout case. A per-sector band cannot:
-      the poll aborts on the FIRST unanswered sector, so the total is ~1000 ms no
-      matter how many sectors were asked for, and for a large enough model that
-      lands inside any plausible band (1014 ms over 14 sectors is 72 ms/sector,
-      which looks perfectly ordinary).
-    * duration below the band           -> silent no-op. Only the duration can
+    * a line below the band             -> silent no-op. Only the duration can
       catch this one, because the firmware reports it as a success.
-    * "Erase Successful" and in band    -> the sectors were really erased.
+    * a line far above the band         -> the status poll burned its 1000 ms
+      budget on a sector that never answered.
+    * the wrong NUMBER of lines         -> blocks were committed that should not
+      have been, or were skipped.
     """
     print("::group::CHECK - erase duration")
     times = [
@@ -398,40 +427,42 @@ def check_erase_duration(lines, data_size):
             "answer, so no sector was erased."
         )
         ok = False
-    if not any("erase successful" in line.lower() for line in lines):
-        print("FAILED: no 'Erase Successful' line")
+
+    expected_sectors = math.ceil(data_size / SECTOR_SIZE)
+    if len(times) != expected_sectors:
+        print(
+            f"FAILED: {len(times)} sector erase(s) for {data_size} B of model "
+            f"data; expected {expected_sectors}, one per block."
+        )
         ok = False
 
-    sectors = math.ceil(data_size / SECTOR_SIZE)
-    lo = sectors * MIN_MS_PER_SECTOR
-    hi = sectors * MAX_MS_PER_SECTOR
-    erase_ms = times[-1]
-    per_sector = erase_ms / sectors
     print(
-        f"data={data_size} B -> {sectors} sectors; erase took {erase_ms} ms "
-        f"({per_sector:.1f} ms/sector); accepted band {lo}..{hi} ms"
+        f"data={data_size} B -> {expected_sectors} sectors; {len(times)} erase(s) "
+        f"seen; accepted band {MIN_MS_PER_SECTOR}..{MAX_MS_PER_SECTOR} ms each"
     )
 
-    if erase_ms < lo:
+    too_fast = [t for t in times if t < MIN_MS_PER_SECTOR]
+    too_slow = [t for t in times if t > MAX_MS_PER_SECTOR]
+    if too_fast:
         print(
-            f"FAILED: {erase_ms} ms is too fast to have erased {sectors} sectors. "
-            "This is the silent no-op: the status register read back as 'ready' "
-            "because nothing was driving it, and no sector was touched."
+            f"FAILED: {len(too_fast)} erase(s) too fast to have erased a sector "
+            f"(fastest {min(too_fast)} ms). This is the silent no-op: the status "
+            "register read back as 'ready' because nothing was driving it."
         )
         ok = False
-    elif erase_ms > hi:
-        print(f"FAILED: {erase_ms} ms is far too slow for {sectors} sectors.")
+    if too_slow:
+        slowest = max(too_slow)
+        print(f"FAILED: {len(too_slow)} erase(s) too slow (slowest {slowest} ms).")
+        if abs(slowest - STATUS_POLL_TIMEOUT_MS) <= 30:
+            print(
+                f"  note: {slowest} ms is within 30 ms of {STATUS_POLL_TIMEOUT_MS} "
+                "ms, the signature of a status poll that timed out waiting on a "
+                "WIP bit that never cleared."
+            )
         ok = False
 
-    # Diagnostic, not a verdict on its own: the status poll gives up after
-    # STATUS_POLL_TIMEOUT_MS on a sector that never answers.
-    nearest = round(erase_ms / STATUS_POLL_TIMEOUT_MS)
-    if nearest >= 1 and abs(erase_ms - nearest * STATUS_POLL_TIMEOUT_MS) <= 30:
-        print(
-            f"  note: {erase_ms} ms is within 30 ms of {nearest} x "
-            f"{STATUS_POLL_TIMEOUT_MS} ms, the signature of a status poll that "
-            "timed out waiting on a WIP bit that never cleared."
-        )
+    if ok:
+        print(f"slowest {max(times)} ms, fastest {min(times)} ms")
 
     print("PASSED" if ok else "FAILED")
     print("::endgroup::")
@@ -445,14 +476,17 @@ def check_wake_contention(lines):
     and reports the differences on its own completion line, so both numbers here
     are facts the erase observed about itself:
 
-      * releases > 0 - other threads handed wake references back while the erase
-        was running. This is what stops the run silently degrading into the
-        quiet-room test it exists to replace: if the churn thread died, or the
-        shell could not keep up, or the update finished before any release
-        landed, the erase saw no contention and this fails.
-      * gated == 0  - SLEEP was never asserted during the erase. The flash claim
-        holds a reference throughout, so any 1->0 transition means the reference
-        count is broken and the erase spent part of its time polling a dead bus.
+      * releases > 0 SUMMED OVER THE RUN - other threads handed wake references
+        back while an erase was running. This is what stops the run silently
+        degrading into the quiet-room test it exists to replace: if the churn
+        thread died, or the shell could not keep up, the erases saw no contention
+        and this fails. The sum matters rather than any single erase: one sector
+        takes about 20 ms against a 50 ms churn period, so plenty of individual
+        erases legitimately see none, and asserting per-erase would be flaky.
+      * gated == 0 ON EVERY ERASE - SLEEP was never asserted during an erase. The
+        flash claim holds a reference throughout, so any 1->0 transition means
+        the reference count is broken and that erase spent part of its time
+        polling a dead bus.
 
     Deliberately not inferred from console line ordering: deferred LOG_INF output
     and shell_print output share the UART but not a backend, so their relative
@@ -486,15 +520,18 @@ def check_wake_contention(lines):
         print("::endgroup::")
         return False
 
-    releases_during, gated = reports[-1]
+    releases_during = sum(r for r, _ in reports)
+    gated = sum(g for _, g in reports)
+    overlapped = sum(1 for r, _ in reports if r > 0)
     print(
-        f"erase observed {releases_during} wake release(s) and {gated} sleep "
-        "gating event(s) while it ran"
+        f"{len(reports)} erase(s) observed {releases_during} wake release(s) in "
+        f"total ({overlapped} erase(s) saw at least one) and {gated} sleep "
+        "gating event(s)"
     )
 
     if releases_during == 0:
         print(
-            "FAILED: no wake reference was handed back during the erase, so this "
+            "FAILED: no wake reference was handed back during any erase, so this "
             "run did not exercise the race. Shorten the churn period or check "
             "that the shell is keeping up with it."
         )
@@ -502,12 +539,58 @@ def check_wake_contention(lines):
 
     if gated != 0:
         print(
-            f"FAILED: SLEEP was asserted {gated} time(s) during the erase. A "
-            "reference is held for its whole duration, so the count is broken "
-            "and the erase polled a clock-gated chip."
+            f"FAILED: SLEEP was asserted {gated} time(s) during an erase. A "
+            "reference is held for each erase's whole duration, so the count is "
+            "broken and an erase polled a clock-gated chip."
         )
         ok = False
 
+    print("PASSED" if ok else "FAILED")
+    print("::endgroup::")
+    return ok
+
+
+def check_protocol_statuses(lines, data_size):
+    """Check what the device told the host, not just what it wrote to flash.
+
+    The log echo of every status notification is the only view this test has of
+    the wire protocol, and it is worth asserting on: a transfer that writes the
+    right bytes while telling the host something wrong is still broken.
+    """
+    print("::group::CHECK - protocol statuses")
+    statuses = [
+        (int(m.group(1), 16), int(m.group(2)), int(m.group(3)))
+        for line in lines
+        for m in [STATUS_RE.search(line)]
+        if m
+    ]
+    if not statuses:
+        print("FAILED: the device notified no status at all")
+        print("::endgroup::")
+        return False
+
+    ok = True
+    failures = [s for s in statuses if s[0] in STATUS_FAILURES]
+    if failures:
+        for code, position, total in failures:
+            print(f"  FAILED, device reported 0x{code:02X} at {position}/{total}")
+        ok = False
+
+    done = [s for s in statuses if s[0] == STATUS_DONE and s[2] == data_size]
+    if not done:
+        print(f"  MISSING: DONE at {data_size} bytes for the DATA transfer")
+        ok = False
+    elif done[-1][1] != data_size:
+        print(f"  FAILED: DONE reported position {done[-1][1]}, expected {data_size}")
+        ok = False
+
+    if not any(s[0] == STATUS_READY for s in statuses):
+        print("  MISSING: READY. The model was stored but never reported running.")
+        ok = False
+    else:
+        print("  READY seen: the device says the model is installed and running")
+
+    print(f"  {len(statuses)} status notification(s) over the run")
     print("PASSED" if ok else "FAILED")
     print("::endgroup::")
     return ok
@@ -602,11 +685,10 @@ def run_transfer(monitor, meta, args, fs_name, device_name, churn):
         ok = False
         print(f"TRANSFER FAILED ({label}): {type(exc).__name__}: {exc}")
         print(
-            "An 'Unlikely Error' (ATT 0x0E) on the file-size characteristic "
-            "means the firmware refused to prepare its flash. See the erase "
-            "check below."
+            "A rejected control write means the firmware refused to start the "
+            "transfer. See the erase check below."
         )
-    time.sleep(2.0)
+    wait_for_console_quiet(monitor)
     lines = monitor.since(mark)
     print("::endgroup::")
     return ok, lines
@@ -665,6 +747,9 @@ def main():
         results["phase 1 transfer completed"] = quiet_ok
         results["phase 1 erase duration"] = check_erase_duration(quiet_lines, data_size)
         results["phase 1 transfer markers"] = check_markers(quiet_lines)
+        results["phase 1 protocol statuses"] = check_protocol_statuses(
+            quiet_lines, data_size
+        )
 
         if not quiet_ok:
             # A half-written flash makes everything after this meaningless, and
@@ -685,6 +770,9 @@ def main():
             )
             results["phase 2 wake contention"] = check_wake_contention(churn_lines)
             results["phase 2 transfer markers"] = check_markers(churn_lines)
+            results["phase 2 protocol statuses"] = check_protocol_statuses(
+                churn_lines, data_size
+            )
 
             if churn_ok:
                 results["boot validation"] = check_boot_validation(
