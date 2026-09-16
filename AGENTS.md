@@ -61,6 +61,23 @@ firmware currently reads it. That CMake also globs `src/*.cpp` into the `akida_e
 the app must never list engine sources itself. `scripts/requirements.txt` pins the same `akida`
 version for model conversion; move the two together.
 
+## A model the engine cannot parse makes the board unreachable
+
+The boot path programs the stored model from `main()`. If the AKD1500 engine
+rejects its program_info it prints `Unable to parse program info` and never
+returns, which starves the Bluetooth RX and shell threads: the board keeps
+advertising (the controller is on the network core) but GATT discovery times
+out, the shell stops draining its RX ring, and the watchdog reboots it every
+8 s. So the one channel that could replace the bad model is the channel the bad
+model takes away, and reflashing firmware does not help because the model and
+its LittleFS records live on the AKD1500's SPI flash, which `merged.hex` does
+not touch.
+
+To recover, break the loop first: build with the boot-time programming skipped
+(`hdr_ret = 1` in `main()`, which takes the existing "no model" path), transfer
+a good model, then restore. `full_erase` is not a way out; it erases 16 MB from
+0x1000, takes minutes, and wipes `/ext` with it.
+
 ## Formatting
 
 `.clang-format` only started being honoured at commit 362bc45, so most of the tree is still
@@ -70,6 +87,11 @@ stale file means reformatting the whole file in its own `style(...)` commit, the
 Run `./scripts/clang_format.sh check <files>` inside the Docker image; clang-format is not
 installed on the host. The version CI uses is `CLANG_FORMAT_VERSION` in that workflow, and it
 has to track the image, which picks clang-format up as an unpinned NCS pip dependency.
+
+Line endings are mixed across the tree and `.clang-format` sets no policy, so preserve
+whatever a file already has. Editing with a script that reads and writes text silently
+rewrites CRLF to LF, which buries the real change in whole-file churn; clang-format itself
+derives the ending per file and leaves it alone.
 
 The same job gates python with `ruff check` plus `ruff format --check` and shell with
 `shellcheck`, and the tree is stale against both too, so touching a `.py` or a `.sh` file
@@ -107,6 +129,15 @@ of flash and compare before concluding anything about why an image is refused: t
 starts at `mcuboot_primary` + `hdr_size` + `img_size`, and `imgtool dumpinfo` prints the same
 field for a local file. A mismatch means the bootloader on the board embeds a different key,
 not that the board is broken.
+
+## The BLE model transfer protocol
+
+`docs/ble-model-transfer.md` is the wire contract between this firmware and the
+BrainChip Connect app, and is the authority on it. The transfer stages one flash
+sector, carries an absolute offset in every write and a committed position in every
+acknowledgement, and reports `DONE` (stored and verified) separately from `READY`
+(programmed into the AKD1500 and inferring). Change the firmware and the document
+together, and note that the app is a second repository that has to move with them.
 
 ## Do not edit
 
