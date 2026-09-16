@@ -848,6 +848,10 @@ verified, then `READY` once the model is programmed into the AKD1500 and a test
 inference has passed. They mean different things and only `READY` means the
 update worked.
 
+`docs/ble-model-transfer.md` is the wire contract: every message, every field,
+every answer, and what happens on a bad integrity check or an abandoned
+transfer. Read it before changing either side.
+
 ---
 
 ### Using run.sh (build + flash + model workflow)
