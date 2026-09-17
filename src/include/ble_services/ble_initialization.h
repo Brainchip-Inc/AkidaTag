@@ -53,7 +53,8 @@ typedef enum {
     CMD_STREAM_STOP = 11,
     CMD_STREAM_WAVE = 12,
     CMD_CURRENT_START = 13,
-    CMD_CURRENT_STOP = 14
+    CMD_CURRENT_STOP = 14,
+    CMD_CALIBRATE = 15
 } command_type_t;
 
 /* Structure representing a parsed command frame received from the host.
@@ -93,6 +94,9 @@ extern uint8_t current_stream_flag;
 /* Access in main.c, and variable changes based on info.yaml */
 extern model_meta_t kws_meta;
 extern model_data_meta_t kws_data_meta;
+/* Metadata of the loaded fall/no-fall model, Used by app_info_fall() to report the fall model's
+ * input shape.*/
+extern model_meta_t fall_meta;
 extern uint32_t g_num_classes;
 extern uint8_t adv_manufacturer_data[];
 

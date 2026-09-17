@@ -10,6 +10,7 @@ set(CONF_FILE
     ${CMAKE_CURRENT_SOURCE_DIR}/prj.conf
     ${CMAKE_CURRENT_SOURCE_DIR}/imu_app.conf
     ${CMAKE_CURRENT_SOURCE_DIR}/camera_app.conf
+    ${CMAKE_CURRENT_SOURCE_DIR}/fall_app.conf
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/demo_apps/custom_app.conf 
 )
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})

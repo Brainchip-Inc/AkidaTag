@@ -292,5 +292,15 @@ config CAMERA_ENABLE_THREAD
     help
       Enables a separate thread for camera frame processing.
 
+config FALL_WINDOW_LEN
+    int "Fall-detection IMU window length (samples)"
+    default 200
+    depends on IMU_ENABLE_THREAD
+    help
+      Number of consecutive IMU samples used for one fall/no-fall
+      inference window. Each sample contains 8 features:
+      [ax, ay, az, acc_mag, gx, gy, gz, gyro_mag].
+      This value must match the input size of the trained fall model.
+      Changing this value requires regenerating and re-flashing the model
 
 endmenu
