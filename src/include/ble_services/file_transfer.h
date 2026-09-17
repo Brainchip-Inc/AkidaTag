@@ -32,6 +32,15 @@ Akida from the correct flash slot.
 #define MAX_FS_NAME_LEN 64
 
 /**
+ * @brief Number of application model slots this build supports.
+ * Slot 0 is the keyword-spotting (KWS) model. Slot 1 is the fall / no-fall
+ * IMU model.
+ */
+#define MAX_APP_SLOTS 2
+#define APP_SLOT_KWS 0
+#define APP_SLOT_FALL 1
+
+/**
  * @brief Model metadata header stored in LittleFS and received via BLE.
  *
  * Stored in two separate LittleFS files per app slot:

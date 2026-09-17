@@ -11,6 +11,14 @@
 #define AKD_FLASH_OFFSET 0x1000
 #define AKD_MODEL_OFFSET 0x100000
 
+/* Per-model SPI flash regions, each AKD_MODEL_OFFSET (1 MB) apart so any
+ * model's program_data cannot run into the next slot's region:
+ *   slot 0 (KWS)          -> AKD_FLASH_OFFSET + 1*AKD_MODEL_OFFSET = 0x101000
+ *   slot 1 (fall/no-fall) -> AKD_FLASH_OFFSET + 2*AKD_MODEL_OFFSET = 0x201000
+ */
+#define AKD_KWS_MODEL_OFFSET (AKD_FLASH_OFFSET + AKD_MODEL_OFFSET)
+#define AKD_FALL_MODEL_OFFSET (AKD_FLASH_OFFSET + (2 * AKD_MODEL_OFFSET))
+
 #define FLASH_MAX_16_MB_SIZE (16777216)  // total max size of SPI-Flash => 16 MB
 
 extern volatile size_t akd_flash_offset;

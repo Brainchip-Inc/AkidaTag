@@ -3,6 +3,7 @@
 #include "ble_services/battery_service.h"
 #include "ble_services/ble_frame.h"
 
+#include "fall_app.h"
 #include "kws_app.h"
 #include "kws_config.h"
 #include "led_init.h"
@@ -91,6 +92,11 @@ static const char device_firmware[] = "1.2.3";
 static const char app_name[] = "Keyword Spotting";
 char description[244] = "Voice-activated wake word detection using microphone input";
 uint16_t app_size = 128;
+
+/* IMU (fall/no-fall) app display strings. */
+static const char fall_app_name[] = "IMU Fall Detection";
+static const char fall_app_description[] =
+    "On-device fall / no-fall detection from accelerometer and gyroscope data";
 
 char processor[] = "AKIDA_1500";
 char model_version[] = "v1.1.0";
@@ -498,39 +504,52 @@ static void send_ack(uint8_t ack_code, command_type_t cmd) {
     }
 }
 /**
- * @brief Sends application display information over the communication
- * interface.
+ * @brief Sends application information as a three-frame burst.
  *
- * This function prepares and sends formatted frames containing application
- * display metadata such as application name, description, and application size.
+ * Sends the selected application's name, description, and size using
+ * MF-START, MF-MID, and MF-LAST frames respectively.
  *
- * The information is formatted into data payloads (`data_part`), then wrapped
- * into transmission frames (`frame`) following the defined protocol format:
+ * For the fall-detection application, the model size is calculated directly
+ * from the flashed metadata to ensure the reported size is available even
+ * before the model has been deployed for inference.
  *
- *     FRAME_TYPE,FRAME_INDEX,DATA_LENGTH,DATA
+ * @param for_fall Set to true to send fall-detection application information;
+ *                 set to false to send KWS application information.
  *
- * Frames are transmitted sequentially using the send_frame() function.
- *
- * Frame Structure:
- * - Frame 1: MF-START - Application name
- * - Frame 2: MF-MID  - Application description
- * - Frame 3: MF-LAST - Application size
- *
- * @note All application information values are retrieved from the info.yaml
- *       configuration at runtime.
- *
- * @retval None
+ * @note Transmission stops if any frame fails to send.
  */
-static void app_display(void) {
+static void send_apps_burst(bool for_fall) {
     char frame[FRAME_BUFFER_SIZE];
     char data_part[DATA_PART_SIZE];
     int err;
     uint8_t frame_index = 0;
 
-    LOG_INF("SENDING DEVICE INFO (MULTI)      \n");
+    const char* active_name = for_fall ? fall_app_name : app_name;
+    const char* active_desc = for_fall ? fall_app_description : description;
+    /* fall_app_size isn't a maintained placeholder like app_size (128) is
+     * for KWS. Read the size straight from LittleFS/flash metadata rather
+     * than the runtime fall_meta global — that is only
+     * populated once infer(APP_SLOT_FALL) has actually programmed the mesh
+     * at least once this boot, which defeats the point of reporting the
+     * fall app before it has ever been deployed.*/
+    uint32_t active_size = app_size;
+    if (for_fall) {
+        model_meta_t hdr;
+        model_data_meta_t dm;
+        uint32_t size_bytes = 0;
+        if (file_transfer_read_meta_hdr_only(APP_SLOT_FALL, &hdr) == 0) {
+            size_bytes += hdr.info_data_len;
+        }
+        if (file_transfer_load_data_meta(APP_SLOT_FALL, &dm) == 0) {
+            size_bytes += dm.data_length;
+        }
+        active_size = size_bytes / 1024;
+    }
+
+    LOG_INF("SENDING DEVICE INFO (MULTI) [%s]     \n", for_fall ? "fall" : "kws");
 
     /* Frame 1: MF-START - app_name */
-    int data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS, app_name);
+    int data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS, active_name);
     snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_START, frame_index, data_len, data_part);
     LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part, data_len);
     err = send_frame(frame);
@@ -541,7 +560,7 @@ static void app_display(void) {
     frame_index++;
 
     /* Frame 2: MF-MID - description */
-    data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS, description);
+    data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APPS, active_desc);
     snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index, data_len, data_part);
     LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part, data_len);
     err = send_frame(frame);
@@ -552,7 +571,7 @@ static void app_display(void) {
     frame_index++;
 
     /* Frame 3: MF-LAST - app_size */
-    data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APPS, app_size);
+    data_len = snprintf(data_part, sizeof(data_part), "%d:%u,\r", CMD_APPS, active_size);
     snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_LAST, frame_index, data_len, data_part);
     LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part, data_len);
     err = send_frame(frame);
@@ -560,6 +579,35 @@ static void app_display(void) {
         LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
         return;
     }
+}
+/**
+ * @brief Sends information about the flashed applications to the mobile app.
+ *
+ * Checks whether KWS and fall-detection models are available in their
+ * respective application slots. For each available model, sends the
+ * application name, description, and size to the mobile application.
+ *
+ * The fall-detection application is checked only when IMU support is enabled.
+ *
+ * @note The model metadata is read from flash before sending the application
+ *       information.
+ */
+void app_display(void) {
+    model_meta_t hdr_probe;
+
+    if (file_transfer_read_meta_hdr_only(APP_SLOT_KWS, &hdr_probe) == 0) {
+        send_apps_burst(false);
+    } else {
+        LOG_INF("app_display: no KWS model flashed at slot %d - skipping\n", APP_SLOT_KWS);
+    }
+
+#if IS_ENABLED(CONFIG_IMU_ENABLE_THREAD)
+    if (file_transfer_read_meta_hdr_only(APP_SLOT_FALL, &hdr_probe) == 0) {
+        send_apps_burst(true);
+    } else {
+        LOG_INF("app_display: no fall model flashed at slot %d - skipping\n", APP_SLOT_FALL);
+    }
+#endif
 }
 /**
  * @brief Sends application information over the communication interface.
@@ -577,11 +625,94 @@ static void app_display(void) {
  *
  * @retval None
  */
-static void app_info(void) {
+
+static void app_info_fall(void) {
     char frame[FRAME_BUFFER_SIZE];
     char data_part[DATA_PART_SIZE];
     int err;
     uint8_t frame_index = 0;
+
+    LOG_INF("SENDING DEVICE INFO (MULTI, fall)      \n");
+
+    /* Frame 1: MF-START - model name */
+    int data_len = snprintf(data_part, sizeof(data_part), "%d:%s,\r", CMD_APP_INFO, "DS_CNN");
+    snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_START, frame_index, data_len, data_part);
+    LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part, data_len);
+    err = send_frame(frame);
+    if (err) {
+        LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+        return;
+    }
+    frame_index++;
+
+    /* Frame 2: MF-MID - input shape.
+     *
+     * Read straight from flash metadata rather than the runtime fall_meta
+     * global — fall_meta is only populated once infer(APP_SLOT_FALL) has
+     * actually programmed the mesh at least once this boot (see
+     * update_model_params() in main.cpp), so relying on it here would
+     * report "0 x 0 x 0" the first time the phone asks for Fall Detection's
+     * Model Info, before the user has ever deployed/started it — same bug
+     * class as app_display()'s size fix above. Falls back to fall_meta if
+     * the flash read fails (e.g. a transient LittleFS error) so a model
+     * that HAS already been loaded this boot still reports correctly. */
+    model_meta_t fall_hdr;
+    const uint32_t* fall_shape = fall_meta.input_shape;
+    if (file_transfer_read_meta_hdr_only(APP_SLOT_FALL, &fall_hdr) == 0) {
+        fall_shape = fall_hdr.input_shape;
+    }
+    data_len = snprintf(data_part, sizeof(data_part), "%d:%d x %d x %d,\r", CMD_APP_INFO,
+                        fall_shape[0], fall_shape[1], fall_shape[2]);
+    snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index, data_len, data_part);
+    LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part, data_len);
+    err = send_frame(frame);
+    if (err) {
+        LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+        return;
+    }
+    frame_index++;
+
+    /* Frame 3: MF-MID - number of classes (no_fall, fall) */
+    int n_classes = fall_class_count();
+    data_len = snprintf(data_part, sizeof(data_part), "%d:%d,\r", CMD_APP_INFO, n_classes);
+    snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_MID, frame_index, data_len, data_part);
+    LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part, data_len);
+    err = send_frame(frame);
+    if (err) {
+        LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+        return;
+    }
+    frame_index++;
+
+    /* Frame 4: MF-LAST - class list "no_fall;fall" */
+    int off = snprintf(data_part, sizeof(data_part), "%d:", CMD_APP_INFO);
+    for (int i = 0; i < n_classes && off < (int)sizeof(data_part); i++) {
+        off += snprintf(data_part + off, sizeof(data_part) - off, "%s%s", fall_class_name(i),
+                        (i == n_classes - 1) ? ",\r" : ";");
+    }
+    data_len = off;
+    snprintf(frame, sizeof(frame), "%d,%d,%d,%s", FRAME_MF_LAST, frame_index, data_len, data_part);
+    LOG_INF("  Frame %d: data=\"%s\" (len=%d)\n", frame_index + 1, data_part, data_len);
+    err = send_frame(frame);
+    if (err) {
+        LOG_ERR("Failed to send frame %d (err %d)", frame_index + 1, err);
+        return;
+    }
+}
+
+/* want_fall selects which model's info to report - the app the phone asked
+ * about (frame.payload from the CMD_APP_INFO request, e.g. "imu" vs
+ * "keyword"). */
+static void app_info(bool want_fall) {
+    char frame[FRAME_BUFFER_SIZE];
+    char data_part[DATA_PART_SIZE];
+    int err;
+    uint8_t frame_index = 0;
+
+    if (want_fall) {
+        app_info_fall();
+        return;
+    }
 
     LOG_INF("SENDING DEVICE INFO (MULTI)      \n");
 
@@ -865,20 +996,47 @@ static void nus_received_cb(struct bt_conn* conn, const uint8_t* const data, uin
             LOG_INF("DEVICE_INFO command received\n");
             send_device_info_response();
             break;
-        case CMD_APP_INFO:
-            LOG_INF("APP INFO command received\n");
-            app_info();
+        case CMD_APP_INFO: {
+            /* frame.payload carries which app the phone is asking about
+             * (e.g. "imu" vs "keyword" - see requestAppInfo() in
+             * useBleCommandStore.ts), matching the CMD_DEPLOY_START
+             * convention below. Report info for THAT app, not whichever
+             * model is currently loaded on the mesh. */
+            bool info_want_fall = frame.payload && strncmp(frame.payload, "imu", 3) == 0;
+            LOG_INF("APP INFO command received (app=%s)\n", info_want_fall ? "imu" : "keyword");
+            app_info(info_want_fall);
             break;
+        }
         case CMD_CONFIG:
             LOG_INF("CONFIG command received\n");
             handle_config_command(frame.payload);
             break;
-        case CMD_DEPLOY_START:
-            LOG_INF("DEPLOY START command received\n");
-            kws_app_start();
+        case CMD_DEPLOY_START: {
+            /* Payload is "<appId>,1" (see deployApp() in useBleCommandStore.ts,
+             * e.g. "imu,1" or "keyword,1"). appId picks which app to run */
+            bool want_fall = frame.payload && strncmp(frame.payload, "imu", 3) == 0;
+            LOG_INF("DEPLOY START command received (app=%s)\n", want_fall ? "imu" : "keyword");
+            if (want_fall) {
+                int rc = fall_app_start();
+                if (rc != 0) {
+                    LOG_ERR("fall_app_start failed (%d)", rc);
+                }
+            } else {
+                if (fall_app_is_running()) {
+                    fall_app_stop();
+                }
+                kws_app_start();
+            }
             event_flag = FLAG_ENABLE;
             send_ack(ACK_DONE, CMD_DEPLOY_START);
+            if (want_fall) {
+                /* Proactively tell the phone whether
+                 * calibration is still needed right after every Fall
+                 * Detection deploy, using the same send_ack().*/
+                send_ack(fall_calibration_is_done() ? 1 : 0, CMD_CALIBRATE);
+            }
             break;
+        }
         case CMD_STREAM_START:
             LOG_INF("STREAM START command received\n");
             current_stream_flag = FLAG_DISABLE;
@@ -888,6 +1046,11 @@ static void nus_received_cb(struct bt_conn* conn, const uint8_t* const data, uin
             LOG_INF("DEPLOY STOP command received\n");
             event_flag = FLAG_DISABLE;
             kws_app_stop();
+            if (fall_app_is_running()) {
+                fall_app_stop();
+            } else {
+                kws_app_stop();
+            }
             send_ack(ACK_DONE, CMD_DEPLOY_STOP);
             break;
         case CMD_STREAM_STOP:
@@ -906,6 +1069,15 @@ static void nus_received_cb(struct bt_conn* conn, const uint8_t* const data, uin
             current_stream_flag = FLAG_DISABLE;
             send_ack(ACK_DONE, CMD_CURRENT_STOP);
             break;
+        case CMD_CALIBRATE: {
+            LOG_INF("CALIBRATE command received - starting IMU calibration\n");
+            int rc = fall_calibrate_and_start();
+            if (rc != 0) {
+                LOG_ERR("fall_calibrate_and_start failed (%d)", rc);
+            }
+            send_ack(fall_calibration_is_done() ? 1 : 0, CMD_CALIBRATE);
+            break;
+        }
         case CMD_RESET:
             LOG_INF("RESET command received\n");
             send_ack(ACK_DONE, CMD_RESET);

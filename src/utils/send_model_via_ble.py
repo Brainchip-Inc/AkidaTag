@@ -234,10 +234,12 @@ def detect_app_index(bin_path):
 
     if "kws" in filename:
         return 0
+    elif "fall" in filename or "imu" in filename:
+        return 1
     else:
         raise ValueError(
             f"Unknown model type in file '{filename}'. "
-            f"Expected filename to contain 'kws'."
+            f"Expected filename to contain 'kws' or 'fall'/'imu'."
         )
 
 
