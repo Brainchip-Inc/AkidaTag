@@ -2,11 +2,10 @@
 #define __PDM_MIC_H__
 #include <stdint.h>
 #include <zephyr/kernel.h>
-int dmic_process(uint16_t *passed_buffer, uint32_t passed_size,
-                 float *p_rms_val);
+int dmic_process(uint16_t* passed_buffer, uint32_t passed_size, float* p_rms_val);
 int dmic_start(void);
 int dmic_init(void);
-void dmic_capture_thread(void *a, void *b, void *c);
+void dmic_capture_thread(void* a, void* b, void* c);
 void stop_dmic(void);
 /* Re-zero the DC-blocking IIR state. Intended to be called after stop_dmic()
  * and before dmic_start() when restarting the pipeline mid-run so the first
@@ -56,12 +55,12 @@ uint32_t audio_get_block_samples(void);
 #define CAPTURE_PRIORITY 3 /* highest */
 
 struct audio_block {
-  void *data;  /* PCM buffer pointer */
-  size_t size; /* valid bytes in buffer */
+    void* data;  /* PCM buffer pointer */
+    size_t size; /* valid bytes in buffer */
 };
 
 /* Message queue declaration */
 extern struct k_msgq audio_msgq;
 extern struct k_mem_slab mem_slab;
 
-#endif //__PDM_MIC_H__
+#endif  //__PDM_MIC_H__
