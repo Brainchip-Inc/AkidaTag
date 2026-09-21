@@ -320,6 +320,13 @@ void audio_process_thread(void* a, void* b, void* c) {
                 }
                 was_in_debounce = false;
                 if (SUCCESS == dmic_process(orig_buf, samples, &rms_val)) {
+                    /* Level of every block, gated or not. The idle line below only
+                     * fires under the threshold, so this is the one way to see what
+                     * speech actually reaches, which is what the mic gain is set
+                     * against. */
+                    if (verbose_on >= 3) {
+                        LOG_INF("block: rms=%.0f", (double)rms_val);
+                    }
                     /* ok to lose fraction part resolution, comparing with int value only
                      */
                     if (((int)rms_val >= rms_threshold)) {

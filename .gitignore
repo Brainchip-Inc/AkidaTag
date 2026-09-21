@@ -45,3 +45,7 @@ src/deps/akida/engine/test/
 .helpers/
 *__pycache__*
 scripts/sync.sh
+
+# Local hardware reference: schematics, BOM and CAD for the board revision in
+# hand. Kept out of the repo because it is not ours to redistribute.
+.workspace/

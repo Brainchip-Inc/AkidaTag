@@ -7,7 +7,7 @@
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 #include "watchdog_h/watchdog.h"
 #endif
-#include "led/led_init.h"
+#include <hal/nrf_pdm.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
@@ -16,9 +16,10 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys_clock.h>
+#include "led/led_init.h"
 
-#include "ble_services/ble_initialization.h"
 #include <zephyr/logging/log.h>
+#include "ble_services/ble_initialization.h"
 LOG_MODULE_REGISTER(pdm_mic, LOG_LEVEL_INF);
 atomic_t is_dmic_start;
 
@@ -27,49 +28,59 @@ atomic_t is_dmic_start;
  * AUDIO_MAX_BLOCK_MS, so a runtime change can never overrun it. */
 static uint32_t g_block_ms = AUDIO_BLOCK_MS_DEFAULT;
 
-uint32_t audio_get_block_ms(void) { return g_block_ms; }
-uint32_t audio_get_block_samples(void) { return AUDIO_MS_TO_SAMPLES(g_block_ms); }
+uint32_t audio_get_block_ms(void) {
+    return g_block_ms;
+}
+uint32_t audio_get_block_samples(void) {
+    return AUDIO_MS_TO_SAMPLES(g_block_ms);
+}
+
+/* Active PDM gain. Runtime-selectable via audio_set_mic_gain(). */
+static uint8_t g_mic_gain = AUDIO_MIC_GAIN_DEFAULT;
+
+uint8_t audio_get_mic_gain(void) {
+    return g_mic_gain;
+}
 
 K_MEM_SLAB_DEFINE(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 32);
 
 /* Queue holds audio_block descriptors */
 K_MSGQ_DEFINE(audio_msgq, sizeof(struct audio_block), BLOCK_COUNT, 32);
 
-const struct device *dmic_dev = DEVICE_DT_GET(DT_NODELABEL(dmic_dev));
+const struct device* dmic_dev = DEVICE_DT_GET(DT_NODELABEL(dmic_dev));
 
 typedef struct {
-  int32_t prev_x;
-  int32_t prev_y;
+    int32_t prev_x;
+    int32_t prev_y;
 } dc_block_t;
 
 dc_block_t dc_state;
 
-void dc_block_init(dc_block_t *s) {
-  s->prev_x = 0;
-  s->prev_y = 0;
+void dc_block_init(dc_block_t* s) {
+    s->prev_x = 0;
+    s->prev_y = 0;
 }
 /*
 Compute a 32-window min/max envelope over a block of DC-blocked int16 samples.
 Each output pair (out[2*i], out[2*i+1]) is (min, max) of the samples in window
 i. N must be a multiple of n_windows.
 */
-static void compute_envelope(const int16_t *x, int N, int16_t *out_pairs,
-                             int n_windows) {
-  int win_len = N / n_windows;
-  for (int w = 0; w < n_windows; w++) {
-    int16_t lo = INT16_MAX;
-    int16_t hi = INT16_MIN;
-    const int16_t *p = &x[w * win_len];
-    for (int i = 0; i < win_len; i++) {
-      int16_t s = p[i];
-      if (s < lo)
-        lo = s;
-      if (s > hi)
-        hi = s;
+static void compute_envelope(const int16_t* x, int N, int16_t* out_pairs, int n_windows) {
+    int win_len = N / n_windows;
+    for (int w = 0; w < n_windows; w++) {
+        int16_t lo = INT16_MAX;
+        int16_t hi = INT16_MIN;
+        const int16_t* p = &x[w * win_len];
+        for (int i = 0; i < win_len; i++) {
+            int16_t s = p[i];
+            if (s < lo)
+                lo = s;
+            if (s > hi)
+                hi = s;
+        }
+        out_pairs[2 * w] = lo;
+        out_pairs[2 * w + 1] = hi;
     }
-    out_pairs[2 * w] = lo;
-    out_pairs[2 * w + 1] = hi;
-  }
 }
 
 /*
@@ -84,242 +95,269 @@ When BLE streaming is enabled, also emits a binary PCM waveform frame to the
 phone: 32 min/max pairs by default, or 32 decimated samples when the BLE link
 has downshifted to fallback mode.
 */
-static int dc_block_process(dc_block_t *s, int16_t *x, int N, float *rms) {
-  const int32_t alpha = 32700; // ~0.998 in Q15
-  int64_t sum_sq = 0;          // for RMS
+static int dc_block_process(dc_block_t* s, int16_t* x, int N, float* rms) {
+    const int32_t alpha = 32700;  // ~0.998 in Q15
+    int64_t sum_sq = 0;           // for RMS
 
-  if (N <= 0) {
-    LOG_ERR("no of samples passed is incorrect %d", N);
-    return -EFAILURE;
-  }
-  for (int i = 0; i < N; i++) {
-    int32_t y = x[i] - s->prev_x + ((alpha * s->prev_y) >> 15);
-
-    s->prev_x = x[i];
-    s->prev_y = y;
-
-    // Saturate safely
-    if (y > 32767)
-      y = 32767;
-    if (y < -32768)
-      y = -32768;
-
-    x[i] = (int16_t)y;
-
-    // RMS accumulation
-    sum_sq += (int32_t)x[i] * x[i];
-  }
-
-  // Compute RMS (used by VAD threshold in audio_processor.c)
-  float mean = (float)sum_sq / N;
-  *rms = sqrtf(mean);
-
-  if (pdm_stream_flag && is_ble_connected()) {
-    /* Expected N=960 @ 16 kHz / 60 ms. Emit 32 windows either as min/max
-     * envelope (64 int16 = 128 B payload) or decimated samples (32 int16 =
-     * 64 B payload) depending on the BLE link's current fallback state. */
-    const int n_windows = 32;
-    if (N >= n_windows) {
-      if (wave_fallback_active()) {
-        int16_t dec[32];
-        int stride = N / n_windows;
-        for (int i = 0; i < n_windows; i++) {
-          dec[i] = x[i * stride];
-        }
-        send_pcm_wave(dec, n_windows);
-      } else {
-        int16_t env[64];
-        compute_envelope(x, N, env, n_windows);
-        send_pcm_wave(env, n_windows * 2);
-      }
+    if (N <= 0) {
+        LOG_ERR("no of samples passed is incorrect %d", N);
+        return -EFAILURE;
     }
-  }
-  return SUCCESS;
+    for (int i = 0; i < N; i++) {
+        int32_t y = x[i] - s->prev_x + ((alpha * s->prev_y) >> 15);
+
+        s->prev_x = x[i];
+        s->prev_y = y;
+
+        // Saturate safely
+        if (y > 32767)
+            y = 32767;
+        if (y < -32768)
+            y = -32768;
+
+        x[i] = (int16_t)y;
+
+        // RMS accumulation
+        sum_sq += (int32_t)x[i] * x[i];
+    }
+
+    // Compute RMS (used by VAD threshold in audio_processor.c)
+    float mean = (float)sum_sq / N;
+    *rms = sqrtf(mean);
+
+    if (pdm_stream_flag && is_ble_connected()) {
+        /* Expected N=960 @ 16 kHz / 60 ms. Emit 32 windows either as min/max
+         * envelope (64 int16 = 128 B payload) or decimated samples (32 int16 =
+         * 64 B payload) depending on the BLE link's current fallback state. */
+        const int n_windows = 32;
+        if (N >= n_windows) {
+            if (wave_fallback_active()) {
+                int16_t dec[32];
+                int stride = N / n_windows;
+                for (int i = 0; i < n_windows; i++) {
+                    dec[i] = x[i * stride];
+                }
+                send_pcm_wave(dec, n_windows);
+            } else {
+                int16_t env[64];
+                compute_envelope(x, N, env, n_windows);
+                send_pcm_wave(env, n_windows * 2);
+            }
+        }
+    }
+    return SUCCESS;
 }
 
 int dmic_start(void) {
-  if (dmic_dev == NULL) {
-    return -ENODEV;
-  }
-  return dmic_trigger(dmic_dev, DMIC_TRIGGER_START);
+    if (dmic_dev == NULL) {
+        return -ENODEV;
+    }
+    return dmic_trigger(dmic_dev, DMIC_TRIGGER_START);
 }
 
 /* Program the DMIC/PDM with the current block size. Does NOT start capture, so
  * it is safe to call while stopped to change the block size. */
 static int dmic_apply_config(void) {
-  /* -------- Stream configuration -------- */
-  static struct pcm_stream_cfg stream;
-  memset(&stream, 0, sizeof(stream));
+    /* -------- Stream configuration -------- */
+    static struct pcm_stream_cfg stream;
+    memset(&stream, 0, sizeof(stream));
 
-  stream.pcm_width = SAMPLE_BIT_WIDTH;
-  stream.mem_slab = &mem_slab;
-  stream.pcm_rate = SAMPLE_RATE;
-  stream.block_size = audio_get_block_samples() * BYTES_PER_SAMPLE;
+    stream.pcm_width = SAMPLE_BIT_WIDTH;
+    stream.mem_slab = &mem_slab;
+    stream.pcm_rate = SAMPLE_RATE;
+    stream.block_size = audio_get_block_samples() * BYTES_PER_SAMPLE;
 
-  /* -------- DMIC configuration -------- */
-  static struct dmic_cfg cfg;
-  memset(&cfg, 0, sizeof(cfg));
+    /* -------- DMIC configuration -------- */
+    static struct dmic_cfg cfg;
+    memset(&cfg, 0, sizeof(cfg));
 
-  /* IO config */
-  cfg.io.min_pdm_clk_freq = 1000000;
-  cfg.io.max_pdm_clk_freq = 1200000;
-  cfg.io.min_pdm_clk_dc = 48;
-  cfg.io.max_pdm_clk_dc = 52;
+    /* IO config */
+    cfg.io.min_pdm_clk_freq = 1000000;
+    cfg.io.max_pdm_clk_freq = 1200000;
+    cfg.io.min_pdm_clk_dc = 48;
+    cfg.io.max_pdm_clk_dc = 52;
 
-  /* Stream config */
-  cfg.streams = &stream;
+    /* Stream config */
+    cfg.streams = &stream;
 
-  /* Channel config */
-  cfg.channel.req_num_chan = 1;
-  cfg.channel.req_num_streams = 1;
-  cfg.channel.req_chan_map_lo = dmic_build_channel_map(0, 0, PDM_CHAN_LEFT);
-  cfg.channel.req_chan_map_hi = 0;
+    /* Channel config */
+    cfg.channel.req_num_chan = 1;
+    cfg.channel.req_num_streams = 1;
+    cfg.channel.req_chan_map_lo = dmic_build_channel_map(0, 0, PDM_CHAN_LEFT);
+    cfg.channel.req_chan_map_hi = 0;
 
-  int ret = dmic_configure(dmic_dev, &cfg);
-  if (ret < 0) {
-    LOG_ERR("dmic_configure failed: %d", ret);
-    return -EFAILURE;
-  }
-  return SUCCESS;
+    int ret = dmic_configure(dmic_dev, &cfg);
+    if (ret < 0) {
+        LOG_ERR("dmic_configure failed: %d", ret);
+        return -EFAILURE;
+    }
+
+    /* Zephyr's DMIC API carries no gain field and nordic,nrf-pdm has no gain
+     * property, so the only way to set it is to write GAINL/GAINR directly.
+     * This has to happen after every dmic_configure(), because that call ends
+     * in nrfx_pdm_init(), which rewrites both registers from its own default. */
+    nrf_pdm_gain_set((NRF_PDM_Type*)DT_REG_ADDR(DT_NODELABEL(dmic_dev)), g_mic_gain, g_mic_gain);
+    return SUCCESS;
 }
 
 int dmic_init(void) {
-  if (!device_is_ready(dmic_dev)) {
-    LOG_ERR("DMIC not ready");
-    return -ENODEV;
-  }
+    if (!device_is_ready(dmic_dev)) {
+        LOG_ERR("DMIC not ready");
+        return -ENODEV;
+    }
 
-  if (dmic_apply_config() != SUCCESS) {
-    return -EFAILURE;
-  }
-  dc_block_init(&dc_state);
-  if (dmic_start() < 0) {
-    LOG_ERR("DMIC start failed");
-    return -EFAILURE;
-  }
+    if (dmic_apply_config() != SUCCESS) {
+        return -EFAILURE;
+    }
+    dc_block_init(&dc_state);
+    if (dmic_start() < 0) {
+        LOG_ERR("DMIC start failed");
+        return -EFAILURE;
+    }
 
-  return SUCCESS;
+    return SUCCESS;
 }
 
 int audio_set_block_ms(uint32_t ms) {
-  if (ms < AUDIO_BLOCK_STEP_MS || ms > AUDIO_MAX_BLOCK_MS ||
-      (ms % AUDIO_BLOCK_STEP_MS) != 0) {
-    LOG_ERR("block_ms %u invalid: use a multiple of %u in [%u, %u]", ms,
-            (uint32_t)AUDIO_BLOCK_STEP_MS, (uint32_t)AUDIO_BLOCK_STEP_MS,
-            (uint32_t)AUDIO_MAX_BLOCK_MS);
-    return -EINVAL;
-  }
+    if (ms < AUDIO_BLOCK_STEP_MS || ms > AUDIO_MAX_BLOCK_MS || (ms % AUDIO_BLOCK_STEP_MS) != 0) {
+        LOG_ERR("block_ms %u invalid: use a multiple of %u in [%u, %u]", ms,
+                (uint32_t)AUDIO_BLOCK_STEP_MS, (uint32_t)AUDIO_BLOCK_STEP_MS,
+                (uint32_t)AUDIO_MAX_BLOCK_MS);
+        return -EINVAL;
+    }
 
-  /* Stop capture (idempotent) before reconfiguring the DMA. The caller is
-   * responsible for restarting capture afterwards (e.g. `app start`). */
-  stop_dmic();
-  g_block_ms = ms;
+    /* Stop capture (idempotent) before reconfiguring the DMA. The caller is
+     * responsible for restarting capture afterwards (e.g. `app start`). */
+    stop_dmic();
+    g_block_ms = ms;
 
-  int ret = dmic_apply_config();
-  if (ret != SUCCESS) {
-    LOG_ERR("failed to reconfigure DMIC for %u ms", ms);
-    return ret;
-  }
-  dmic_reset_dc_state();
-  LOG_INF("audio block size = %u ms (%u samples, %u buffers)", ms,
-          audio_get_block_samples(), (uint32_t)BLOCK_COUNT);
-  return SUCCESS;
+    int ret = dmic_apply_config();
+    if (ret != SUCCESS) {
+        LOG_ERR("failed to reconfigure DMIC for %u ms", ms);
+        return ret;
+    }
+    dmic_reset_dc_state();
+    LOG_INF("audio block size = %u ms (%u samples, %u buffers)", ms, audio_get_block_samples(),
+            (uint32_t)BLOCK_COUNT);
+    return SUCCESS;
 }
 
-int dmic_process(uint16_t *pcm, uint32_t passed_size, float *p_rms_val) {
-  float rms_val = 0.0f;
-  int ret_val = -EFAILURE;
-  if (SUCCESS == dc_block_process(&dc_state, pcm, passed_size, &rms_val)) {
-    *p_rms_val = rms_val;
-    ret_val = SUCCESS;
-  }
+int audio_set_mic_gain(uint8_t gain) {
+    if (gain > AUDIO_MIC_GAIN_MAX) {
+        LOG_ERR("mic gain 0x%02x invalid: use [0x%02x, 0x%02x]", gain, AUDIO_MIC_GAIN_MIN,
+                AUDIO_MIC_GAIN_MAX);
+        return -EINVAL;
+    }
 
-  return ret_val;
+    /* Stop capture (idempotent) before reconfiguring. The caller is responsible
+     * for restarting capture afterwards (e.g. `app start`). */
+    stop_dmic();
+    g_mic_gain = gain;
+
+    int ret = dmic_apply_config();
+    if (ret != SUCCESS) {
+        LOG_ERR("failed to reconfigure DMIC for gain 0x%02x", gain);
+        return ret;
+    }
+    dmic_reset_dc_state();
+    LOG_INF("mic gain = 0x%02x (%+.1f dB)", gain, (double)(gain - AUDIO_MIC_GAIN_DEFAULT) * 0.5);
+    return SUCCESS;
+}
+
+int dmic_process(uint16_t* pcm, uint32_t passed_size, float* p_rms_val) {
+    float rms_val = 0.0f;
+    int ret_val = -EFAILURE;
+    if (SUCCESS == dc_block_process(&dc_state, pcm, passed_size, &rms_val)) {
+        *p_rms_val = rms_val;
+        ret_val = SUCCESS;
+    }
+
+    return ret_val;
 }
 
 extern int16_t orig_buf[];
-void dmic_capture_thread(void *a, void *b, void *c) {
+void dmic_capture_thread(void* a, void* b, void* c) {
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
-  wdt_enable_thread(DMIC_CAPTURE);
+    wdt_enable_thread(DMIC_CAPTURE);
 #endif
-  struct audio_block blk;
-  LOG_INF("dmic_capture_thread: ");
-  uint32_t dmic_capture_thread_cntr = 0;
+    struct audio_block blk;
+    LOG_INF("dmic_capture_thread: ");
+    uint32_t dmic_capture_thread_cntr = 0;
 
-  while (1) {
-    if (dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT) == 0) {
+    while (1) {
+        if (dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT) == 0) {
+            /* Push buffer pointer to processing thread */
+            if (k_msgq_put(&audio_msgq, &blk, K_NO_WAIT) != 0) {
+                /* Queue full → drop buffer safely */
+                LOG_WRN("audio_msgq is full");
+            }
 
-      /* Push buffer pointer to processing thread */
-      if (k_msgq_put(&audio_msgq, &blk, K_NO_WAIT) != 0) {
-        /* Queue full → drop buffer safely */
-        LOG_WRN("audio_msgq is full");
-      }
-
-      memcpy((void *)orig_buf, blk.data, blk.size);
-      k_mem_slab_free(&mem_slab, blk.data);
-      /*
-       * Signal the LED indication thread roughly every ~120 ms regardless of
-       * the active block size (the DMIC thread runs once per block). At 60 ms
-       * blocks this is every 2nd cycle, matching the previous behaviour.
-       */
-      uint32_t led_every = MAX(1U, 120U / audio_get_block_ms());
-      if (dmic_capture_thread_cntr % led_every == 0) {
-        k_sem_give(&led_sem);
-      }
-      dmic_capture_thread_cntr++;
-      // LOG_INF("dmic %d", dmic_capture_thread_cntr);
-    }
+            memcpy((void*)orig_buf, blk.data, blk.size);
+            k_mem_slab_free(&mem_slab, blk.data);
+            /*
+             * Signal the LED indication thread roughly every ~120 ms regardless of
+             * the active block size (the DMIC thread runs once per block). At 60 ms
+             * blocks this is every 2nd cycle, matching the previous behaviour.
+             */
+            uint32_t led_every = MAX(1U, 120U / audio_get_block_ms());
+            if (dmic_capture_thread_cntr % led_every == 0) {
+                k_sem_give(&led_sem);
+            }
+            dmic_capture_thread_cntr++;
+            // LOG_INF("dmic %d", dmic_capture_thread_cntr);
+        }
 /* Feed WDT regardless of dmic_read() result to avoid trigger when DMIC is
  * stopped */
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
-    /* Mark thread as healthy */
-    atomic_set(&thread_health[DMIC_CAPTURE], 1);
+        /* Mark thread as healthy */
+        atomic_set(&thread_health[DMIC_CAPTURE], 1);
 #endif
-  }
+    }
 }
 
 void stop_dmic(void) {
-  struct audio_block blk;
-  dmic_trigger(dmic_dev, DMIC_TRIGGER_STOP);
+    struct audio_block blk;
+    dmic_trigger(dmic_dev, DMIC_TRIGGER_STOP);
 
-  /* Drain pending buffers */
-  while (dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT) == 0) {
-    k_mem_slab_free(&mem_slab, blk.data);
-  }
-  LOG_INF("dmic_stop done ");
+    /* Drain pending buffers */
+    while (dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT) == 0) {
+        k_mem_slab_free(&mem_slab, blk.data);
+    }
+    LOG_INF("dmic_stop done ");
 }
 
-void dmic_reset_dc_state(void) { dc_block_init(&dc_state); }
-
-static int cmd_dmic_stop(const struct shell *shell, size_t argc, char **argv) {
-  if (argc > 1) {
-    LOG_ERR("invalid command ");
-    return -EINVAL;
-  }
-  atomic_set(&is_dmic_start, 0);
-  stop_dmic();
-  return 0;
+void dmic_reset_dc_state(void) {
+    dc_block_init(&dc_state);
 }
 
-static int cmd_dmic_start(const struct shell *shell, size_t argc, char **argv) {
+static int cmd_dmic_stop(const struct shell* shell, size_t argc, char** argv) {
+    if (argc > 1) {
+        LOG_ERR("invalid command ");
+        return -EINVAL;
+    }
+    atomic_set(&is_dmic_start, 0);
+    stop_dmic();
+    return 0;
+}
 
-  if (argc > 1) {
-    LOG_ERR("invalid command ");
-    return -EINVAL;
-  }
+static int cmd_dmic_start(const struct shell* shell, size_t argc, char** argv) {
+    if (argc > 1) {
+        LOG_ERR("invalid command ");
+        return -EINVAL;
+    }
 
-  if (dmic_init() < 0) {
-    LOG_ERR("DMIC init failed");
-    return -1;
-  }
-  /* -------- MIC PDM Start -------- */
-  if (dmic_start() < 0) {
-    LOG_ERR("DMIC start failed");
-    return -1;
-  }
-  atomic_set(&is_dmic_start, 1);
-  LOG_INF("dmic_start done ");
-  return 0;
+    if (dmic_init() < 0) {
+        LOG_ERR("DMIC init failed");
+        return -1;
+    }
+    /* -------- MIC PDM Start -------- */
+    if (dmic_start() < 0) {
+        LOG_ERR("DMIC start failed");
+        return -1;
+    }
+    atomic_set(&is_dmic_start, 1);
+    LOG_INF("dmic_start done ");
+    return 0;
 }
 
 /**
@@ -349,71 +387,69 @@ static int cmd_dmic_start(const struct shell *shell, size_t argc, char **argv) {
  * @return 0 on successful execution of the command, negative error code on
  * failure.
  */
-static int cmd_test_dmic(const struct shell *shell, size_t argc, char **argv) {
-  if (argc > 1) {
-    LOG_ERR("Invalid command");
-    return -EINVAL;
-  }
-
-  if (dmic_init() < 0) {
-    LOG_ERR("DMIC init failed");
-    return -1;
-  }
-
-  if (dmic_start() < 0) {
-    LOG_ERR("DMIC start failed");
-    return -1;
-  }
-
-  LOG_INF("DMIC started");
-
-  struct audio_block blk;
-  int valid_cycles = 0;
-
-  int64_t prev_time = k_uptime_get();
-  int64_t test_start = k_uptime_get();
-
-  while (1) {
-
-    /* Global timeout check (5 seconds) */
-    if (k_uptime_get() - test_start > 5000) {
-      shell_print(shell, "DMIC TEST TIMEOUT");
-      break;
+static int cmd_test_dmic(const struct shell* shell, size_t argc, char** argv) {
+    if (argc > 1) {
+        LOG_ERR("Invalid command");
+        return -EINVAL;
     }
-    int ret = dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT);
 
-    if (ret == 0) {
-
-      int64_t now = k_uptime_get();
-      int64_t diff = now - prev_time;
-      prev_time = now;
-
-      LOG_DBG("DMIC data received: %lld ms", diff);
-      // Check the interval between consecutive DMIC blocks is within +/-10 ms of
-      // the configured block size (e.g. 50-70 ms for a 60 ms block).
-      int64_t expected = (int64_t)audio_get_block_ms();
-      if (diff >= expected - 10 && diff <= expected + 10) {
-        valid_cycles++;
-        LOG_DBG("Cycle %d OK", valid_cycles);
-      } else {
-        valid_cycles = 0;
-      }
-
-      /* IMPORTANT: free buffer immediately */
-      k_mem_slab_free(&mem_slab, blk.data);
-
-      if (valid_cycles >= 5) {
-        shell_print(shell, "DMIC TEST PASS");
-        break;
-      }
-    } else if (ret == -EAGAIN) {
-      shell_print(shell, "DMIC timeout");
-      break;
+    if (dmic_init() < 0) {
+        LOG_ERR("DMIC init failed");
+        return -1;
     }
-  }
-  stop_dmic();
 
-  return 0;
+    if (dmic_start() < 0) {
+        LOG_ERR("DMIC start failed");
+        return -1;
+    }
+
+    LOG_INF("DMIC started");
+
+    struct audio_block blk;
+    int valid_cycles = 0;
+
+    int64_t prev_time = k_uptime_get();
+    int64_t test_start = k_uptime_get();
+
+    while (1) {
+        /* Global timeout check (5 seconds) */
+        if (k_uptime_get() - test_start > 5000) {
+            shell_print(shell, "DMIC TEST TIMEOUT");
+            break;
+        }
+        int ret = dmic_read(dmic_dev, 0, &blk.data, &blk.size, READ_TIMEOUT);
+
+        if (ret == 0) {
+            int64_t now = k_uptime_get();
+            int64_t diff = now - prev_time;
+            prev_time = now;
+
+            LOG_DBG("DMIC data received: %lld ms", diff);
+            // Check the interval between consecutive DMIC blocks is within +/-10 ms of
+            // the configured block size (e.g. 50-70 ms for a 60 ms block).
+            int64_t expected = (int64_t)audio_get_block_ms();
+            if (diff >= expected - 10 && diff <= expected + 10) {
+                valid_cycles++;
+                LOG_DBG("Cycle %d OK", valid_cycles);
+            } else {
+                valid_cycles = 0;
+            }
+
+            /* IMPORTANT: free buffer immediately */
+            k_mem_slab_free(&mem_slab, blk.data);
+
+            if (valid_cycles >= 5) {
+                shell_print(shell, "DMIC TEST PASS");
+                break;
+            }
+        } else if (ret == -EAGAIN) {
+            shell_print(shell, "DMIC timeout");
+            break;
+        }
+    }
+    stop_dmic();
+
+    return 0;
 }
 
 SHELL_CMD_REGISTER(dmic_start, NULL, "dmic_start", cmd_dmic_start);

@@ -78,6 +78,21 @@ To recover, break the loop first: build with the boot-time programming skipped
 a good model, then restore. `full_erase` is not a way out; it erases 16 MB from
 0x1000, takes minutes, and wipes `/ext` with it.
 
+## The PDM microphone gain is set by hand, and gets clobbered if you set it once
+
+Zephyr's DMIC API has no gain field and `nordic,nrf-pdm` no gain property, so the only way
+to set it is writing GAINL/GAINR through `nrf_pdm_gain_set()`. That write has to repeat
+after every `dmic_configure()`, because that call ends in `nrfx_pdm_init()`, which restores
+the registers from its own default. `dmic_apply_config()` in `src/core/interface/audio/pdm_mic.c`
+is the one place that owns this; the constant and the reasoning for its value live on
+`AUDIO_MIC_GAIN_DEFAULT` in `src/include/audio/pdm_mic.h`.
+
+Two measured facts worth not rediscovering. The noise floor, around 237 counts of block RMS,
+is fixed board noise rather than sound: it does not rise with gain, so gain changes do not
+drag the `kws_config.c` speech gate with them. And the board's microphone is quieter than
+most, an Infineon IM69D130 at -36 dBFS, so any level comparison against another board has to
+start from the two parts' sensitivities.
+
 ## Formatting
 
 `.clang-format` only started being honoured at commit 362bc45, so most of the tree is still

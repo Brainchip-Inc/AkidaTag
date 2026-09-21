@@ -2,11 +2,10 @@
 #define __PDM_MIC_H__
 #include <stdint.h>
 #include <zephyr/kernel.h>
-int dmic_process(uint16_t *passed_buffer, uint32_t passed_size,
-                 float *p_rms_val);
+int dmic_process(uint16_t* passed_buffer, uint32_t passed_size, float* p_rms_val);
 int dmic_start(void);
 int dmic_init(void);
-void dmic_capture_thread(void *a, void *b, void *c);
+void dmic_capture_thread(void* a, void* b, void* c);
 void stop_dmic(void);
 /* Re-zero the DC-blocking IIR state. Intended to be called after stop_dmic()
  * and before dmic_start() when restarting the pipeline mid-run so the first
@@ -21,11 +20,37 @@ int audio_set_block_ms(uint32_t ms);
 uint32_t audio_get_block_ms(void);
 uint32_t audio_get_block_samples(void);
 
+/* Set the PDM microphone gain at runtime, in GAINL/GAINR register steps.
+ * Stops capture, reconfigures the DMIC and leaves capture stopped (the
+ * caller restarts), the same contract as audio_set_block_ms(). */
+int audio_set_mic_gain(uint8_t gain);
+/* Gain the DMIC is currently configured with. */
+uint8_t audio_get_mic_gain(void);
+
 /* ================= CONFIG ================= */
 #define SAMPLE_RATE CONFIG_SAMPLING_RATE
 #define SAMPLE_BIT_WIDTH 16
 #define BYTES_PER_SAMPLE sizeof(int16_t)
 #define READ_TIMEOUT 120
+
+/* PDM microphone gain, in nRF5340 GAINL/GAINR register steps of 0.5 dB, where
+ * 0x00 is -20 dB, 0x28 is 0 dB and 0x50 is +20 dB.
+ *
+ * 0x48 is +16 dB, which lines this board's full-scale point up with the Nicla
+ * Vision keyword demo that runs the same model: both then clip at 114 dB SPL.
+ * The 16 dB is 10 dB of microphone, this board's IM69D130 being -36 dBFS
+ * against the Nicla's MP34DT06J at -26 dBFS, plus the 6 dB of gain that demo
+ * applies and this one did not. Measured back to back against one played
+ * keyword set: 0 of 10 detected at 0x28 and 8 of 10 at 0x48, nothing clipping,
+ * and the acoustic level scaling by 15.6 dB against the 16.0 dB predicted.
+ *
+ * The noise floor does not follow, because at roughly 237 counts it is fixed
+ * board noise rather than sound, so it stays well clear of the speech gate in
+ * kws_config.c and that gate needs no matching change.
+ */
+#define AUDIO_MIC_GAIN_MIN 0x00
+#define AUDIO_MIC_GAIN_MAX 0x50
+#define AUDIO_MIC_GAIN_DEFAULT 0x48
 
 /* Audio DMA block granularity.
  *
@@ -56,12 +81,12 @@ uint32_t audio_get_block_samples(void);
 #define CAPTURE_PRIORITY 3 /* highest */
 
 struct audio_block {
-  void *data;  /* PCM buffer pointer */
-  size_t size; /* valid bytes in buffer */
+    void* data;  /* PCM buffer pointer */
+    size_t size; /* valid bytes in buffer */
 };
 
 /* Message queue declaration */
 extern struct k_msgq audio_msgq;
 extern struct k_mem_slab mem_slab;
 
-#endif //__PDM_MIC_H__
+#endif  //__PDM_MIC_H__
