@@ -7,6 +7,7 @@
 #if IS_ENABLED(CONFIG_WDT_ENABLE)
 #include "watchdog_h/watchdog.h"
 #endif
+#include <hal/nrf_pdm.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
@@ -32,6 +33,13 @@ uint32_t audio_get_block_ms(void) {
 }
 uint32_t audio_get_block_samples(void) {
     return AUDIO_MS_TO_SAMPLES(g_block_ms);
+}
+
+/* Active PDM gain. Runtime-selectable via audio_set_mic_gain(). */
+static uint8_t g_mic_gain = AUDIO_MIC_GAIN_DEFAULT;
+
+uint8_t audio_get_mic_gain(void) {
+    return g_mic_gain;
 }
 
 K_MEM_SLAB_DEFINE(mem_slab, MAX_BLOCK_SIZE, BLOCK_COUNT, 32);
@@ -183,6 +191,12 @@ static int dmic_apply_config(void) {
         LOG_ERR("dmic_configure failed: %d", ret);
         return -EFAILURE;
     }
+
+    /* Zephyr's DMIC API carries no gain field and nordic,nrf-pdm has no gain
+     * property, so the only way to set it is to write GAINL/GAINR directly.
+     * This has to happen after every dmic_configure(), because that call ends
+     * in nrfx_pdm_init(), which rewrites both registers from its own default. */
+    nrf_pdm_gain_set((NRF_PDM_Type*)DT_REG_ADDR(DT_NODELABEL(dmic_dev)), g_mic_gain, g_mic_gain);
     return SUCCESS;
 }
 
@@ -225,6 +239,28 @@ int audio_set_block_ms(uint32_t ms) {
     dmic_reset_dc_state();
     LOG_INF("audio block size = %u ms (%u samples, %u buffers)", ms, audio_get_block_samples(),
             (uint32_t)BLOCK_COUNT);
+    return SUCCESS;
+}
+
+int audio_set_mic_gain(uint8_t gain) {
+    if (gain > AUDIO_MIC_GAIN_MAX) {
+        LOG_ERR("mic gain 0x%02x invalid: use [0x%02x, 0x%02x]", gain, AUDIO_MIC_GAIN_MIN,
+                AUDIO_MIC_GAIN_MAX);
+        return -EINVAL;
+    }
+
+    /* Stop capture (idempotent) before reconfiguring. The caller is responsible
+     * for restarting capture afterwards (e.g. `app start`). */
+    stop_dmic();
+    g_mic_gain = gain;
+
+    int ret = dmic_apply_config();
+    if (ret != SUCCESS) {
+        LOG_ERR("failed to reconfigure DMIC for gain 0x%02x", gain);
+        return ret;
+    }
+    dmic_reset_dc_state();
+    LOG_INF("mic gain = 0x%02x (%+.1f dB)", gain, (double)(gain - AUDIO_MIC_GAIN_DEFAULT) * 0.5);
     return SUCCESS;
 }
 

@@ -3321,6 +3321,21 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
         } else if (argc > 2 && !strcmp(argv[1], "metrics")) {
             metrics_on = atoi(argv[2]);
             LOG_INF("metrics_on = %d", metrics_on);
+        } else if (argc > 2 && !strcmp(argv[1], "micgain")) {
+            /* Change the PDM microphone gain. Stop the pipeline, reconfigure the
+             * DMIC, then restart if it was running. */
+            uint8_t gain = (uint8_t)strtoul(argv[2], NULL, 0);
+            bool was_running = kws_app_running;
+            if (was_running) {
+                kws_app_stop();
+            }
+            int rc = audio_set_mic_gain(gain);
+            if (rc != 0) {
+                LOG_ERR("micgain failed (err %d); still 0x%02x", rc, audio_get_mic_gain());
+            }
+            if (was_running) {
+                kws_app_start();
+            }
         } else if (argc > 2 && !strcmp(argv[1], "blkms")) {
             /* Change the PDM capture block size (ms). Stop the pipeline, reconfigure
              * the DMA, then restart if it was running. Must be a multiple of 20 ms. */
@@ -3340,7 +3355,7 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
             }
         } else if (!strcmp(argv[1], "show")) {
             LOG_INF("=== App Parameters (app <cmd> <val>) ===");
-            LOG_INF("  verbose          = %d          [app verbose <0|1|2>]", verbose_on);
+            LOG_INF("  verbose          = %d          [app verbose <0|1|2|3>]", verbose_on);
             LOG_INF("  rms_threshold    = %d          [app rms <val>]", rms_threshold);
             LOG_INF("  debounce_time    = %u ms       [app debounce <ms>]", kws_debounce_time);
             LOG_INF("  smoothing_alpha  = %.2f        [app alpha <0.0-1.0>]", smoothing_alpha);
@@ -3350,10 +3365,13 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
             LOG_INF("  metrics          = %d          [app metrics <0|1>]", metrics_on);
             LOG_INF("  block_size       = %u ms       [app blkms <20|40|60|80>]",
                     audio_get_block_ms());
+            LOG_INF("  mic_gain         = 0x%02x (%+.1f dB) [app micgain <0x00-0x50>]",
+                    audio_get_mic_gain(),
+                    (double)(audio_get_mic_gain() - AUDIO_MIC_GAIN_DEFAULT) * 0.5);
             LOG_INF("=========================================");
         } else {
             LOG_INF("App Commands:");
-            LOG_INF("  app verbose <0|1|2>  (0=off, 1=pipeline, 2=+idle rms)");
+            LOG_INF("  app verbose <0|1|2|3> (0=off, 1=pipeline, 2=+idle rms, 3=+every block)");
             LOG_INF("  app rms <val>");
             LOG_INF("  app debounce <ms>");
             LOG_INF("  app alpha <0.0-1.0>");
@@ -3363,6 +3381,7 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
             LOG_INF("  app reset                (restore all KWS params to defaults)");
             LOG_INF("  app metrics <0|1>");
             LOG_INF("  app blkms <ms>           (PDM block size, multiple of 20)");
+            LOG_INF("  app micgain <val>        (PDM gain, 0x28 = 0 dB, 0.5 dB steps)");
             LOG_INF("  app show");
             LOG_INF("  app start                (resume KWS pipeline)");
             LOG_INF("  app stop                 (halt KWS pipeline)");

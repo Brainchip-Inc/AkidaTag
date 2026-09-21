@@ -20,11 +20,31 @@ int audio_set_block_ms(uint32_t ms);
 uint32_t audio_get_block_ms(void);
 uint32_t audio_get_block_samples(void);
 
+/* Set the PDM microphone gain at runtime, in GAINL/GAINR register steps.
+ * Stops capture, reconfigures the DMIC and leaves capture stopped (the
+ * caller restarts), the same contract as audio_set_block_ms(). */
+int audio_set_mic_gain(uint8_t gain);
+/* Gain the DMIC is currently configured with. */
+uint8_t audio_get_mic_gain(void);
+
 /* ================= CONFIG ================= */
 #define SAMPLE_RATE CONFIG_SAMPLING_RATE
 #define SAMPLE_BIT_WIDTH 16
 #define BYTES_PER_SAMPLE sizeof(int16_t)
 #define READ_TIMEOUT 120
+
+/* PDM microphone gain, in nRF5340 GAINL/GAINR register steps of 0.5 dB, where
+ * 0x00 is -20 dB, 0x28 is 0 dB and 0x50 is +20 dB.
+ *
+ * 0x28 is also the value the PDM peripheral resets to, so this constant does
+ * not change what the board captures. It exists because nothing else sets the
+ * gain: Zephyr's DMIC API has no gain field and nordic,nrf-pdm no gain
+ * property, so before this the level was whatever the hardware happened to
+ * come up with rather than a value anyone chose.
+ */
+#define AUDIO_MIC_GAIN_MIN 0x00
+#define AUDIO_MIC_GAIN_MAX 0x50
+#define AUDIO_MIC_GAIN_DEFAULT 0x28
 
 /* Audio DMA block granularity.
  *
