@@ -36,15 +36,21 @@ uint8_t audio_get_mic_gain(void);
 /* PDM microphone gain, in nRF5340 GAINL/GAINR register steps of 0.5 dB, where
  * 0x00 is -20 dB, 0x28 is 0 dB and 0x50 is +20 dB.
  *
- * 0x28 is also the value the PDM peripheral resets to, so this constant does
- * not change what the board captures. It exists because nothing else sets the
- * gain: Zephyr's DMIC API has no gain field and nordic,nrf-pdm no gain
- * property, so before this the level was whatever the hardware happened to
- * come up with rather than a value anyone chose.
+ * 0x48 is +16 dB, which lines this board's full-scale point up with the Nicla
+ * Vision keyword demo that runs the same model: both then clip at 114 dB SPL.
+ * The 16 dB is 10 dB of microphone, this board's IM69D130 being -36 dBFS
+ * against the Nicla's MP34DT06J at -26 dBFS, plus the 6 dB of gain that demo
+ * applies and this one did not. Measured back to back against one played
+ * keyword set: 0 of 10 detected at 0x28 and 8 of 10 at 0x48, nothing clipping,
+ * and the acoustic level scaling by 15.6 dB against the 16.0 dB predicted.
+ *
+ * The noise floor does not follow, because at roughly 237 counts it is fixed
+ * board noise rather than sound, so it stays well clear of the speech gate in
+ * kws_config.c and that gate needs no matching change.
  */
 #define AUDIO_MIC_GAIN_MIN 0x00
 #define AUDIO_MIC_GAIN_MAX 0x50
-#define AUDIO_MIC_GAIN_DEFAULT 0x28
+#define AUDIO_MIC_GAIN_DEFAULT 0x48
 
 /* Audio DMA block granularity.
  *
