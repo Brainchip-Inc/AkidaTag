@@ -720,6 +720,7 @@ static kws_edge_state_processor kws_edge_state[STATE_COUNT] = {
     [STATE_INFERENCE] = {inference_on_mfcc_output, inference_on_user_input},
     [STATE_LEARN_SELECT] = {NULL, learn_select_on_user_input},
     [STATE_LEARNING] = {NULL, learning_on_user_input},
+    [STATE_STOPPED] = {NULL, NULL},
 };
 
 static const uint32_t dims[] = {SPECTROGRAM_COUNT, SPECTROGRAM_RES, 1};
@@ -1075,13 +1076,35 @@ static void switch_learning_delayed(struct k_work* work) {
      * learn_speech_end_work. */
 }
 
+static struct k_work enter_learn_select_work;
+
+/* The inference -> learn_select transition, on the system workqueue.
+ *
+ * This is the one transition requested while the inference pipeline is live,
+ * and it is requested from the BT RX thread. Putting the AKD1500 into learn
+ * mode there blocked the GATT write until the chip answered, so it runs here,
+ * next to the learning handlers that already drive the chip from this queue.
+ *
+ * The inference path holds the chip awake only while an utterance is in
+ * flight, so between utterances nothing does: without a reference of its own
+ * this write lands on a clock-gated chip and never completes. */
+static void enter_learn_select_handler(struct k_work* work) {
+    ARG_UNUSED(work);
+
+    if (cur_kws_edge_state != STATE_INFERENCE) {
+        return;
+    }
+    AkdWakeScope akd_wake;
+    akida_learn_mode(true);
+    kws_set_edge_state(STATE_LEARN_SELECT);
+    LOG_INF("inference -> learn_select");
+}
+
 static void switch_mode(int mode) {
     switch (cur_kws_edge_state) {
         case STATE_INFERENCE:
             if (STATE_LEARN_SELECT == mode) {
-                akida_learn_mode(true);
-
-                kws_set_edge_state(mode);
+                k_work_submit(&enter_learn_select_work);
             }
             break;
         case STATE_LEARN_SELECT:
@@ -1194,6 +1217,7 @@ static void read_learn_weights_from_flash(void) {
 
 static int initiate_kws_inference(uint8_t is_el_model_l) {
     if (is_el_model_l) {
+        k_work_init(&enter_learn_select_work, enter_learn_select_handler);
         k_work_init_delayable(&switch_delayed_work, switch_learning_delayed);
         mesh_learn_weights_size = akida_learn_mem_size();
 
@@ -1956,7 +1980,6 @@ static void inference_on_user_input(int input_type) {
     switch (input_type) {
         case USER_INPUT_LP(0):
             switch_mode(STATE_LEARN_SELECT);
-            LOG_INF("inference -> learn_select");
             break;
         default:
             LOG_INF(" wrong input");
@@ -2039,6 +2062,11 @@ static void reset_learned_weights(uint8_t* lbl_wts) {
 
 static void learn_select_on_user_input(int input_type) {
     LOG_INF("learn_select_on_user_input");
+    /* Nothing holds the AKD1500 awake in learn_select: inference is gated off
+     * and no learning session has taken its reference yet. Leaving learn mode
+     * and resetting the learned weights both write to the chip, so hold a
+     * reference across the handler, as learning_on_user_input() does. */
+    AkdWakeScope akd_wake;
     switch (input_type) {
         case USER_INPUT_LP(0):
             /*  change the state to inference */
@@ -3258,17 +3286,7 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
             kws_app_start();
         } else if (!strcmp(argv[1], "el")) {
             if (argc > 2) {
-                LOG_INF(" cur_kws_edge_state %d", cur_kws_edge_state);
-                if (is_el_model == 0) {
-                    LOG_ERR(" illegal request, this is not an edge learning model");
-                    return 0;
-                }
-
-                if (cur_kws_edge_state == STATE_STOPPED) {
-                    LOG_INF(" cur_kws_edge_state is STATE_STOPPED user input not possible");
-                    return 0;
-                }
-                kws_edge_state[cur_kws_edge_state].on_user_input(atoi(argv[2]));
+                edge_learning_cmd_process(atoi(argv[2]));
             }
         } else if (argc > 2 && !strcmp(argv[1], "rms")) {
             kws_cfg_err_t e = kws_config_set_from_string(KWS_PARAM_RMS, argv[2]);
@@ -3393,8 +3411,15 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
 }
 void edge_learning_cmd_process(uint8_t value) {
     LOG_INF("cur_kws_edge_state %d", cur_kws_edge_state);
-
-    kws_edge_state[cur_kws_edge_state].on_user_input(value);
+    if (is_el_model == 0) {
+        LOG_ERR(" illegal request, this is not an edge learning model");
+        return;
+    }
+    if (kws_edge_state[cur_kws_edge_state].on_user_input) {
+        kws_edge_state[cur_kws_edge_state].on_user_input(value);
+    } else {
+        LOG_INF(" cur_kws_edge_state is STATE_STOPPED user input not possible");
+    }
 }
 
 #if IS_ENABLED(CONFIG_WDT_ENABLE)

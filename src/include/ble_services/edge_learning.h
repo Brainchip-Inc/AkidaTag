@@ -13,7 +13,14 @@
 #define ACK_LEARNING_DONE 0xA7
 
 /**
- * @brief Process an edge learning command received from BLE.
+ * @brief Hand a user input to the edge learning state machine.
+ *
+ * Shared by the BLE command characteristic and the `app el` shell command.
+ * Rejected, with a log line, when the loaded model cannot learn or when the
+ * application is stopped and no state handler is installed.
+ *
+ * @param value Input code: 0 toggles learn select, 1 starts learning,
+ *              2 resets the learned class, 3 selects the next class.
  */
 void edge_learning_cmd_process(uint8_t value);
 
