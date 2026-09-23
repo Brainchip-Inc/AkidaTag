@@ -159,6 +159,13 @@ starts at `mcuboot_primary` + `hdr_size` + `img_size`, and `imgtool dumpinfo` pr
 field for a local file. A mismatch means the bootloader on the board embeds a different key,
 not that the board is broken.
 
+`src/prj.conf` turns on the full MCUmgr image group over Bluetooth
+(`CONFIG_MCUMGR_TRANSPORT_BT=y`, `CONFIG_MCUMGR_GRP_IMG=y`), so the running image's own semver is
+readable with no probe and no phone: `smpmgr --ble <address> image state-read` (the `smpmgr` pip
+package; scan for the board's random BLE address first, since it rotates on every advertisement).
+This is the probe-free way to confirm a flash actually landed the version you built, alongside the
+KEYHASH check above for confirming which key it was signed with.
+
 ## The BLE model transfer protocol
 
 `docs/ble-model-transfer.md` is the wire contract between this firmware and the
