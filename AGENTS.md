@@ -139,6 +139,20 @@ ports and only the higher-numbered one carries the debug UART; the other is sile
 also serves MCUboot serial recovery, which is a probe-free way to flash and is documented in
 `docs/firmware-update-over-usb.md`. The nRF5340's own USB pins go to a header, not to USB-C.
 
+With only the probe attached there is no console (RTT logging is off in `src/prj.conf`), so
+observe the board over BLE: a reset shows as a dropped link, `CMD_APP_INFO` proves the firmware
+still answers, and `CMD_STREAM_START` streams the microphone envelope, which tells you whether
+the board hears anything at all before you blame a detection or learning path.
+`src/utils/edge_learning_hil_test.py` drives the edge-learning state machine that way from a
+Mac with no serial port. The learning-started acknowledgement is notified only after
+`CMD_DEPLOY_START` on the current connection, so its absence alone is not a failure.
+The probe can also read the firmware's own state: `JLinkExe` `connect` does not halt the core,
+so `mem32` at a variable's address from `zephyr.elf` reads it live (file-scope C++ statics are
+mangled, `cur_kws_edge_state` is `_ZL18cur_kws_edge_state`), and `akd_wake_refs` in `gpio.c`
+shows a stranded AKD1500 wake reference. Do not try to prove keyword recognition by playing
+audio at the board from the laptop: the microphone is quiet and the result depends on the room,
+so a human saying the word is the proof.
+
 Do not assume the image on a board was signed with the key in `.env/`. Read the KEYHASH TLV out
 of flash and compare before concluding anything about why an image is refused: the TLV area
 starts at `mcuboot_primary` + `hdr_size` + `img_size`, and `imgtool dumpinfo` prints the same
