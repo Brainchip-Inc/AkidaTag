@@ -1,0 +1,57 @@
+name: Bug report
+description: The firmware does not build, flash or behave as documented
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please search the existing issues first. You do not need to
+        diagnose the cause; a clear description of what broke is enough for us to work from.
+  - type: dropdown
+    id: board
+    attributes:
+      label: Board
+      options:
+        - AkidaTag board
+        - nRF5340 DK with the AKD1500 PCIe board
+        - Other (say which below)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: The release you flashed, or the version `smpmgr --ble <address> image state-read` prints on a running board.
+      placeholder: "1.2.0+0"
+    validations:
+      required: true
+  - type: dropdown
+    id: build
+    attributes:
+      label: How the firmware was built
+      options:
+        - Inside the akidatag-ncs Docker image
+        - On the host (say which nRF Connect SDK version below)
+        - Flashed a release, did not build
+    validations:
+      required: true
+  - type: textarea
+    id: ran
+    attributes:
+      label: What you ran
+      description: The commands, shell input or app actions, in order.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log excerpt
+      description: The smallest excerpt from the UART shell or the BrainChip Connect app that shows the failure.
+      render: shell

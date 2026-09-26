@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a demo, a capability or a change before writing a pull request
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pull requests that add value to AkidaTag are welcome, and describing the idea here first
+        lets the maintainers say early whether it fits. See CONTRIBUTING.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What you would like
+      description: The demo, capability or change, and what a user would see.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is useful
+      description: The use case, and who it helps.
+    validations:
+      required: true
+  - type: dropdown
+    id: board
+    attributes:
+      label: Board it applies to
+      options:
+        - AkidaTag board
+        - nRF5340 DK with the AKD1500 PCIe board
+        - Both
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to open a pull request for this myself
