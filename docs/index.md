@@ -20,10 +20,7 @@ TBD: launch wording for the introduction above. It is written from the repositor
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [Datasheet](hardware/datasheet.md)                               | Electrical, mechanical and environmental characteristics of the AkidaTag board. |
 | [Technical specifications](hardware/technical-specifications.md) | The parts on the board, the interfaces between them, and what each one offers.  |
-| [Schematic](hardware/schematic.md)                               | The board schematic.                                                            |
-
-TBD: the three hardware pages are written separately under `docs/hardware/`; confirm their file
-names and one-line descriptions once they exist.
+| [System block diagram](hardware/block-diagram.md)                | How the parts of the board connect to each other.                               |
 
 ## Firmware reference
 
@@ -37,7 +34,9 @@ names and one-line descriptions once they exist.
 ## Downloads
 
 - Firmware releases: https://github.com/Brainchip-Inc/AkidaTag/releases
-- BrainChip Connect for Android: TBD: Google Play link. An iOS version is planned.
+- BrainChip Connect for Android: listed on Google Play at
+  https://play.google.com/store/apps/details?id=com.brainchip.connect, open for pre-registration.
+  An iOS version is planned.
 - Model package: TBD: model asset name, attached to the firmware release.
 
 ## BrainChip Connect
@@ -47,10 +46,10 @@ https://brainchip-inc.github.io/BrainChip-Connect/.
 
 ## More from BrainChip
 
-- Preorder: TBD: preorder page
-- Developer Hub: TBD: Developer Hub page
-- Community: TBD: community links
+- AkidaTag on the Developer Hub: https://developer.brainchip.com/akida-tag/
+- Developer Hub sign-up: https://developer.brainchip.com/signup/
+- Community: BrainChip on Discord, https://discord.com/invite/9bmd9g52vn
 
 ---
 
-TBD: footer
+© 2026 BrainChip Holdings Ltd. All rights reserved.

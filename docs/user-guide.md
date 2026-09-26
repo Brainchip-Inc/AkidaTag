@@ -20,7 +20,9 @@ You need:
 - Its USB-C cable, for charging.
 - An Android phone running Android 13 or later, with Bluetooth. An iOS version of the app is
   planned.
-- The BrainChip Connect app, from TBD: Google Play link.
+- The BrainChip Connect app. Its Google Play listing,
+  https://play.google.com/store/apps/details?id=com.brainchip.connect, is open for
+  pre-registration. TBD: the app's release date.
 
 TBD: what is in the box. TBD: photo of the AkidaTag with the USB-C connector, the LEDs and the
 button labelled.
@@ -45,20 +47,22 @@ unit and what it does.
 
 The tag has a green LED and a red LED.
 
-| What you see                               | What it means                                                                                                   |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Green blinks slowly, red off               | The tag is running and waiting for a phone to connect.                                                          |
-| Green on, red off                          | The app is connected.                                                                                           |
-| Red flashes for about half a second        | The tag detected a keyword.                                                                                     |
-| Red stays on while you are teaching a word | The tag is listening for you to say the word.                                                                   |
-| Green on, red blinks quickly               | A model is being received from the app.                                                                         |
-| Green on, red on                           | The model is being written to the tag's flash memory.                                                           |
-| Both LEDs blink three times together       | The model was stored.                                                                                           |
-| Green off, red on steady                   | A model transfer failed, or the tag is in its update mode over USB. See [Troubleshooting](#10-troubleshooting). |
+| What you see                         | What it means                                                                                                  |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Green blinks slowly, red off         | The tag is running and waiting for a phone to connect.                                                         |
+| Green on, red off                    | The app is connected.                                                                                          |
+| Red flashes for about half a second  | The tag detected a keyword.                                                                                    |
+| Red on, green as before              | The tag is in an edge-learning session, listening for a word to learn.                                         |
+| Green on, red blinks quickly         | A model is being received from the app.                                                                        |
+| Green on, red on                     | The model is being written to the tag's flash memory.                                                          |
+| Both LEDs blink three times together | The model was stored.                                                                                          |
+| Green off, red on steady             | A model transfer failed, or the tag is in its update mode over USB. See [Troubleshooting](#9-troubleshooting). |
 
 ## 3. Install BrainChip Connect
 
-1. Install BrainChip Connect from TBD: Google Play link.
+1. Pre-register for BrainChip Connect on Google Play at
+   https://play.google.com/store/apps/details?id=com.brainchip.connect. Google Play tells you when
+   the app is released. TBD: the release date.
 2. Open it. The first screens introduce the app and ask you to accept its terms and its
    privacy policy.
 3. Grant the permissions it asks for. Bluetooth is required to find and connect to the tag.
@@ -72,7 +76,7 @@ TBD: screenshots of the Get Started, Terms, Privacy Policy and Permissions scree
 1. Make sure the tag is on: the green LED blinks slowly.
 2. In the app, open the device list. The app scans for boards that carry a BrainChip Akida
    processor and shows the tag as `AkidaTag`. If the list stays empty, see
-   [Troubleshooting](#10-troubleshooting).
+   [Troubleshooting](#9-troubleshooting).
 3. Tap the tag. A preview screen shows its name and signal strength.
 4. Tap **Connect to Device**. The app shows two steps, _Establishing connection_ and _Syncing
    configuration_, and then opens the **Select the Application** screen. The green LED stays on
@@ -95,7 +99,7 @@ and recognises ten spoken words: `down`, `go`, `left`, `no`, `off`, `on`, `right
 and `yes`. Everything else is reported as silence or unknown and is not shown.
 
 The demo needs a model on the tag. TBD: whether the tag arrives with the model already loaded, and
-which one. If it does not, load one first: see [Load a model](#8-load-a-model).
+which one. If it does not, load one first: see [Load a model](#7-load-a-model).
 
 1. On the **Select the Application** screen, find the **Keyword Spotting** card. **More
    Information** shows the model name, its input shape, the number of classes and the list of
@@ -105,66 +109,11 @@ which one. If it does not, load one first: see [Load a model](#8-load-a-model).
 3. Say one of the keywords. The microphone on the tag is a quiet part, so speak clearly and
    close to it. Each detection appears in the banner on the card with its confidence, and the red
    LED flashes for about half a second.
-4. Tap **Application Dashboard** to see more:
-   - **Detection** shows the latest keyword.
-   - **Microphone**: tap **Start Streaming** to see the sound level the tag hears, which is the
-     quickest way to check that the microphone picks you up at all. Tap **Stop Streaming** when
-     you are done.
-   - **Start Inference** and **Stop Inference** do the same as **Run Application** and **Stop
-     Application** on the card.
-   - **App Controls** lets you tune how the tag decides that it heard a keyword. The values are
-     read from the tag; **Apply** writes them back and **Reset** restores the defaults.
-5. Tap **Stop Application** when you are finished. The tag stops listening.
+4. Tap **Stop Application** when you are finished. The tag stops listening.
 
-| Setting in the app | Default | What it does                                                                                                    |
-| ------------------ | ------- | --------------------------------------------------------------------------------------------------------------- |
-| RMS threshold      | 550     | How loud a sound must be before the tag treats it as speech. Lower it in a quiet room, raise it in a noisy one. |
-| Debounce time      | 300 ms  | The pause after a detection before the next one can fire.                                                       |
-| Smoothing alpha    | 0.70    | How quickly the score follows the model. Higher reacts faster but is noisier.                                   |
-| Score threshold    | 0.60    | The score a keyword must reach. Raise it for fewer false detections.                                            |
-| Chiming threshold  | 3       | How many consecutive frames must agree before a detection fires. Raise it for fewer false detections.           |
-| Speech timeout     | 1300 ms | How long the tag keeps treating the input as speech after the sound drops.                                      |
+TBD: screenshots of the Keyword Spotting card and a detection.
 
-The defaults are the ones the firmware uses. Values you apply are kept on the tag across
-restarts, and are reset to the defaults by a firmware update.
-
-TBD: screenshots of the Keyword Spotting card, a detection, and the dashboard.
-
-## 6. Teach the tag a new word
-
-The keyword spotting model can learn up to three new words on the tag itself. This is called edge
-learning. It needs the edge-learning version of the model: with the plain model the tag ignores
-the learning controls. TBD: which model the tag arrives with.
-
-Known issue: on firmware v1.2.0+0 turning the Edge Learning switch on restarts the tag instead.
-This is fixed on `main` and will be in the next release. Update the firmware first: see
-[Update the firmware](#7-update-the-firmware-over-bluetooth).
-
-1. Run the Keyword Spotting application and open the **Application Dashboard**.
-2. Turn the **Edge Learning** switch on. The app waits for the tag to confirm before it shows the
-   switch as on.
-3. **Next Class** chooses which of the three spare slots the new word goes into. The slots are
-   reported as `cls_12`, `cls_13` and `cls_14`. Each tap moves to the next slot and wraps around.
-4. Tap **Start Learning**. After about a second the app shows _Ready to Speak_ and the red LED
-   comes on.
-5. Say the new word. The tag captures it, then waits for the next one. Say the word five times in
-   all. Each time, the red LED is on while the tag is listening. If it hears nothing for five
-   seconds it listens again for the same repetition. A word shorter than about a fifth of a second
-   is discarded and asked for again.
-6. After the fifth repetition the app shows _Edge Learning is completed_. The tag saves the new
-   word and goes back to detecting keywords on its own. The new word is reported by its slot
-   name, for example `cls_12`.
-
-The app cannot read the learning state back from the tag, so the **Edge Learning** switch may
-still show as on after the tag has finished. TBD: what the app should show after learning
-completes; until then, leave the switch alone after _Edge Learning is completed_.
-
-**Delete Class** erases every word the tag has learned. Restart the tag afterwards, from
-**Settings > Factory Reset** or by power-cycling it.
-
-TBD: screenshots of the Edge Learning controls and the Ready to Speak prompt.
-
-## 7. Update the firmware over Bluetooth
+## 6. Update the firmware over Bluetooth
 
 New firmware is published on the releases page of the AkidaTag repository:
 https://github.com/Brainchip-Inc/AkidaTag/releases. Each release attaches a file for updating over
@@ -206,7 +155,7 @@ described in the developer guide under
 
 TBD: screenshots of the Firmware Update screen and the progress dialog.
 
-## 8. Load a model
+## 7. Load a model
 
 The model is a `.zip` package attached to the firmware release: TBD: model asset name. It holds
 three files, `info.yaml`, `kws_program_info.bin` and `kws_program_data.bin`. Do not unzip it.
@@ -240,7 +189,7 @@ through the app.
 
 TBD: screenshots of the Model Update screen and the progress dialog.
 
-## 9. Other things the app shows
+## 8. Other things the app shows
 
 - The **i** button in the header opens **Device Information**: the tag's name and hardware
   details.
@@ -250,24 +199,22 @@ TBD: screenshots of the Model Update screen and the progress dialog.
   advertising on its own.
 - **Settings > Power Mode** has no effect on the tag in this release.
 
-## 10. Troubleshooting
+## 9. Troubleshooting
 
-| Problem                                                | What to check                                                                                                                                                                                                 |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The app does not find the tag.                         | Bluetooth is on and the app has its Bluetooth permission. The tag's green LED is blinking; if it is solid green, another phone is connected. If no LED is lit, charge the tag.                                |
-| Connection timed out.                                  | Move closer to the tag and try again. Restart the tag if it keeps happening.                                                                                                                                  |
-| No keywords are detected.                              | The application is _Active_ on the card. Tap **Start Streaming** on the dashboard to see whether the tag hears you at all; speak closer and louder. Lower the RMS threshold in App Controls for a quiet room. |
-| Too many false detections.                             | Raise the score threshold or the chiming threshold in App Controls, or raise the RMS threshold in a noisy room.                                                                                               |
-| The tag restarts when I turn Edge Learning on.         | This is the known fault in firmware v1.2.0+0. Update to the next release.                                                                                                                                     |
-| The learning controls do nothing.                      | The tag needs the edge-learning model. Load it, then try again.                                                                                                                                               |
-| Update did not install.                                | The firmware is signed with a key this tag does not accept. Use a release from https://github.com/Brainchip-Inc/AkidaTag/releases.                                                                            |
-| Model delivered, but not running.                      | Restart the tag. If it still does not run, the package is not for this tag.                                                                                                                                   |
-| Model update failed.                                   | Stay near the tag, keep the app open and send the model again.                                                                                                                                                |
-| Green off, red on steady, and the app cannot connect.  | The tag is in its update mode, waiting for firmware over USB. Plug it into a computer and follow [Firmware update over USB-C](firmware-update-over-usb.md), or power-cycle it.                                |
-| The app cannot load a model on a tag running v1.2.0+0. | Update the firmware first. See [Update the firmware](#7-update-the-firmware-over-bluetooth).                                                                                                                  |
+| Problem                                                | What to check                                                                                                                                                                  |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The app does not find the tag.                         | Bluetooth is on and the app has its Bluetooth permission. The tag's green LED is blinking; if it is solid green, another phone is connected. If no LED is lit, charge the tag. |
+| Connection timed out.                                  | Move closer to the tag and try again. Restart the tag if it keeps happening.                                                                                                   |
+| No keywords are detected.                              | The application is _Active_ on the card. Speak clearly and close to the tag; its microphone is a quiet part.                                                                   |
+| Update did not install.                                | The firmware is signed with a key this tag does not accept. Use a release from https://github.com/Brainchip-Inc/AkidaTag/releases.                                             |
+| Model delivered, but not running.                      | Restart the tag. If it still does not run, the package is not for this tag.                                                                                                    |
+| Model update failed.                                   | Stay near the tag, keep the app open and send the model again.                                                                                                                 |
+| Green off, red on steady, and the app cannot connect.  | The tag is in its update mode, waiting for firmware over USB. Plug it into a computer and follow [Firmware update over USB-C](firmware-update-over-usb.md), or power-cycle it. |
+| The app cannot load a model on a tag running v1.2.0+0. | Update the firmware first. See [Update the firmware](#6-update-the-firmware-over-bluetooth).                                                                                   |
 
-If none of this helps, TBD: support and community links.
+If none of this helps, ask on BrainChip's Discord at https://discord.com/invite/9bmd9g52vn, or
+start from the AkidaTag page on the Developer Hub at https://developer.brainchip.com/akida-tag/.
 
 ---
 
-TBD: footer
+© 2026 BrainChip Holdings Ltd. All rights reserved.

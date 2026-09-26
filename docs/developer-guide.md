@@ -165,7 +165,7 @@ statistics groups:
 - **BrainChip Connect**: Settings > Firmware Update > Browse Local Firmware, then pick
   `zephyr.signed.bin` or `dfu_application.zip`. The app reads the version and the signing key
   fingerprint out of the image before sending, and confirms with the board after the restart which
-  version it is running. The [user guide](user-guide.md#7-update-the-firmware-over-bluetooth)
+  version it is running. The [user guide](user-guide.md#6-update-the-firmware-over-bluetooth)
   walks through it.
 - **nRF Connect for Mobile**: connect to `AkidaTag`, tap the DFU icon, pick the image, and do a
   Test and Confirm upload. The board restarts into the new image.
@@ -466,6 +466,8 @@ forces the phone to pair. TBD: whether the retail build turns it on.
   pin in `scripts/requirements.txt` move together.
 - `AGENTS.md` at the repository root collects the sharp edges found in real work, and is worth a
   read before the first change.
+- Questions go to BrainChip's Discord, https://discord.com/invite/9bmd9g52vn. The AkidaTag page on
+  the Developer Hub is https://developer.brainchip.com/akida-tag/.
 
 ## Open questions
 
@@ -481,4 +483,4 @@ TBD: the points below could not be settled from the code and are waiting for an 
 
 ---
 
-TBD: footer
+© 2026 BrainChip Holdings Ltd. All rights reserved.
