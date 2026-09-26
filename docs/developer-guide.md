@@ -44,8 +44,7 @@ If you only want to run the demos from your phone, read the [user guide](user-gu
 Both boards build for the same Zephyr board target, `nrf5340dk/nrf5340/cpuapp`. What separates
 an AkidaTag build from a DK build is the set of CMake arguments `scripts/run.sh` passes when you
 give it `--dk`: the devicetree overlay, the MCUboot overlay, `CONFIG_AKIDATAG_BOARD`, and
-`boards/dk.conf`. [Board overlays and pin map](BOARD_OVERLAY_CHANGES.md) lists every pin on both
-boards.
+`boards/dk.conf`. The two overlays under `src/boards/` list every pin on both boards.
 
 ## 2. Set up the environment
 
@@ -267,17 +266,16 @@ either way.
   APPROTECT and no anti-rollback counter. `src/README.md` states this plainly: the signature
   protects the update paths, not against someone with physical access and a probe.
 
-TBD: whether retail units are programmed from the release `merged.hex`, and whether a model is
-loaded before they ship. The repository does not record how units are provisioned.
+Units ship with the latest firmware release flashed and the demo model already in the AKD1500's
+flash, so a unit from BrainChip trusts the production key. TBD: whether the debug port is left
+open on retail units.
 
 **Developing on a unit from BrainChip.** Flash your `merged.hex` and `merged_CPUNET.hex` over SWD
 once. The unit now trusts the development key, accepts your builds over Bluetooth and USB-C, and
 refuses BrainChip's releases. The model on the AKD1500's flash is untouched.
 
-**Returning a unit to BrainChip's firmware.** Flash the release `akidatag-<version>-merged.hex`
-over SWD. The unit trusts the production key again and takes release updates as before. TBD: the
-release attaches no network-core image, so the network core keeps whatever your build put on it;
-whether that is acceptable, or whether releases should also publish `merged_CPUNET.hex`.
+If you need BrainChip's firmware back on a unit, open an issue at
+https://github.com/Brainchip-Inc/AkidaTag/issues or ask on BrainChip's Discord.
 
 **Using a key of your own.** If your boards should run only your firmware, generate a key inside
 the working tree (a containerised build sees nothing else), keep it under `.env/` where it is
@@ -466,15 +464,15 @@ forces the phone to pair. TBD: whether the retail build turns it on.
   pin in `scripts/requirements.txt` move together.
 - `AGENTS.md` at the repository root collects the sharp edges found in real work, and is worth a
   read before the first change.
-- Questions go to BrainChip's Discord, https://discord.com/invite/9bmd9g52vn. The AkidaTag page on
-  the Developer Hub is https://developer.brainchip.com/akida-tag/.
+- Questions and problems go to a GitHub issue first, https://github.com/Brainchip-Inc/AkidaTag/issues,
+  and to BrainChip's Discord, https://discord.com/invite/9bmd9g52vn, for discussion. The AkidaTag
+  page on the Developer Hub is https://developer.brainchip.com/akida-tag/.
 
 ## Open questions
 
 TBD: the points below could not be settled from the code and are waiting for an answer.
 
-- How retail units are provisioned: which `merged.hex`, whether a model is preloaded, and whether
-  the debug port is left open.
+- Whether the debug port is left open on retail units.
 - Whether the release should publish the network-core image alongside `merged.hex`.
 - Whether the retail build enables `CONFIG_BT_LBS_SECURITY_ENABLED`.
 - How a developer outside BrainChip obtains a model to convert, given the internal `model_url`.

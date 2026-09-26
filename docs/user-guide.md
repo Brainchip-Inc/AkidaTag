@@ -24,8 +24,10 @@ You need:
   https://play.google.com/store/apps/details?id=com.brainchip.connect, is open for
   pre-registration. TBD: the app's release date.
 
-TBD: what is in the box. TBD: photo of the AkidaTag with the USB-C connector, the LEDs and the
-button labelled.
+In the box is the AkidaTag in its enclosure, with the latest firmware release and the keyword
+spotting model already loaded. The battery is not included. TBD: which battery the tag takes and
+how to fit it. TBD: photo of the AkidaTag with the USB-C connector, the LEDs and the button
+labelled.
 
 ### Charging
 
@@ -34,14 +36,14 @@ the battery level and, next to it, `Charging` while the tag is on charge, `Warni
 fault the tag can recover from, such as over-temperature or a timeout, and `Fault` for one it
 cannot, such as an over-voltage.
 
-TBD: charging time, battery life, and whether the battery is connected when the tag arrives. See
-the [datasheet](hardware/datasheet.md).
+TBD: charging time and battery life. See the [datasheet](hardware/datasheet.md).
 
 ### Turning the tag on and off
 
-TBD: how the tag is powered on and off. The board has a user button and a DFU button; in this
-firmware release the user button does nothing. TBD: whether the DFU button is fitted on the retail
-unit and what it does.
+The rev2 board has a power switch. TBD: which board revision ships, and how a tag without the
+switch is turned on and off. The board also has a user button and a DFU button. In this firmware
+release the user button does nothing; a reset function for it is planned. TBD: whether the DFU
+button is fitted on the retail unit and what it does.
 
 ## 2. What the LEDs mean
 
@@ -98,8 +100,9 @@ The tag ships with one demo, **Keyword Spotting**. It listens through the microp
 and recognises ten spoken words: `down`, `go`, `left`, `no`, `off`, `on`, `right`, `stop`, `up`
 and `yes`. Everything else is reported as silence or unknown and is not shown.
 
-The demo needs a model on the tag. TBD: whether the tag arrives with the model already loaded, and
-which one. If it does not, load one first: see [Load a model](#7-load-a-model).
+The tag arrives with the keyword spotting model already loaded, so the demo is ready to run. If
+the tag has lost its model, load one first: see [Load a model](#7-load-a-model). TBD: the model's
+name as the app shows it.
 
 1. On the **Select the Application** screen, find the **Keyword Spotting** card. **More
    Information** shows the model name, its input shape, the number of classes and the list of
@@ -123,7 +126,8 @@ file, if you want to verify a download.
 
 TBD: the current release, v1.2.0+0, predates the model transfer protocol that the app on `main`
 uses, so a tag on v1.2.0+0 cannot load a model from this app. Update the firmware before loading a
-model. TBD: the first release that carries the new protocol.
+model. A release cut from `main` before launch carries the protocol the app uses; TBD: its
+version number, which this guide will name.
 
 1. Download the firmware file to your phone.
 2. Connect to the tag and open **Settings** from the bar at the bottom.
@@ -194,10 +198,11 @@ TBD: screenshots of the Model Update screen and the progress dialog.
 - The **i** button in the header opens **Device Information**: the tag's name and hardware
   details.
 - **Notifications** lists the events the app has received from the tag.
-- **Settings > Factory Reset** restarts the tag. With this firmware it does not erase the model
-  or your settings; a restart is all it does. The app disconnects and the tag comes back
-  advertising on its own.
-- **Settings > Power Mode** has no effect on the tag in this release.
+- **Settings > Factory Reset** restarts the tag. A full factory reset, one that erases the model
+  and your settings, is not in this firmware yet and will come in a later release. Today the app
+  disconnects and the tag comes back advertising on its own, with everything still in place.
+- **Settings > Power Mode** is where a low-power mode will be switched on to save battery. In
+  this release it changes nothing on the tag; the feature will come in a later release.
 
 ## 9. Troubleshooting
 
@@ -212,8 +217,9 @@ TBD: screenshots of the Model Update screen and the progress dialog.
 | Green off, red on steady, and the app cannot connect.  | The tag is in its update mode, waiting for firmware over USB. Plug it into a computer and follow [Firmware update over USB-C](firmware-update-over-usb.md), or power-cycle it. |
 | The app cannot load a model on a tag running v1.2.0+0. | Update the firmware first. See [Update the firmware](#6-update-the-firmware-over-bluetooth).                                                                                   |
 
-If none of this helps, ask on BrainChip's Discord at https://discord.com/invite/9bmd9g52vn, or
-start from the AkidaTag page on the Developer Hub at https://developer.brainchip.com/akida-tag/.
+If none of this helps, the [FAQ](faq.md) answers the common questions, and [Support](support.md)
+says where to ask: an issue at https://github.com/Brainchip-Inc/AkidaTag/issues first, or
+BrainChip's Discord at https://discord.com/invite/9bmd9g52vn.
 
 ---
 

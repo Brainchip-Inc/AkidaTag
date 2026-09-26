@@ -11,6 +11,7 @@ TBD: launch wording for the introduction above. It is written from the repositor
 
 | Page                                  | Read it if                                                                                     |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [Quick start](quick-start.md)         | You just opened the box and want the demo running in a few minutes.                            |
 | [User guide](user-guide.md)           | You have an AkidaTag and want to run the demos from your phone with the BrainChip Connect app. |
 | [Developer guide](developer-guide.md) | You want to build the firmware, add a demo, or write your own application on this code.        |
 
@@ -29,7 +30,15 @@ TBD: launch wording for the introduction above. It is written from the repositor
 | [Environment setup](setup.md)                             | The Docker toolchain image, a local install as the alternative, and the nRF5340 DK bench with an AKD1500 PCIe card. |
 | [Firmware update over USB-C](firmware-update-over-usb.md) | Updating a board with nothing but its USB-C cable, through the bootloader's serial recovery mode.                   |
 | [BLE model transfer protocol](ble-model-transfer.md)      | The wire contract between the firmware and BrainChip Connect for loading a model.                                   |
-| [Board overlays and pin map](BOARD_OVERLAY_CHANGES.md)    | Pin assignments on the AkidaTag board and on the nRF5340 DK, and the differences between the two.                   |
+
+## Help
+
+| Page                                | What it holds                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------- |
+| [FAQ](faq.md)                       | Short answers to the questions people ask first.                       |
+| [Support](support.md)               | Where to ask for help and what to include.                             |
+| [Release notes](release-notes.md)   | What each firmware release changed, and what each release file is for. |
+| [Open-source licences](licences.md) | The licence of the firmware and of the code it imports.                |
 
 ## Downloads
 
