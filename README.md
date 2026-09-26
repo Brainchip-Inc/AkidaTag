@@ -75,6 +75,7 @@ without Docker.
 
 ```bash
 git clone https://github.com/Brainchip-Inc/AkidaTag.git && cd AkidaTag
+# put SEGGER's J-Link V8.88 .deb in docker/tools/ first (docker/tools/README.md), accepting SEGGER's terms
 ./scripts/build_docker_image.sh --ncs v3.1.1 --python 3.12   # once; downloads the SDK
 
 ./scripts/run.sh -d -b --app demo_apps        # build for the AkidaTag board (add --dk for the nRF5340 DK)
@@ -86,10 +87,15 @@ A passing hardware test ends with `ALL TESTCASES PASSED`. Every build signs its 
 the development key committed at `.env/development_key.pem`, so a fresh clone builds and
 flashes with no setup; that key is public on purpose, see [License](#license).
 
-To run keyword spotting, convert a model and send it to the board over BLE:
+To run keyword spotting, send a model to the board over BLE. The converted keyword-spotting
+model bundle, `info.yaml` plus the two program files, is published as an asset of each
+[release](https://github.com/Brainchip-Inc/AkidaTag/releases); unzip it into `models/kws/`.
+To convert a model of your own instead, describe it in a local config
+(`.env/<app>/<model>.yaml`, schema under
+[Model build config](src/README.md#model-build-config---config)) and run the fetch step.
 
 ```bash
-# fetch, convert, and bundle the model named by a local config (.env/<app>/<model>.yaml)
+# only when converting your own model: fetch, convert and bundle it from the config
 ./scripts/run.sh -d --fetch_model .env/demo_apps/kws.yaml --generate_info .env/demo_apps/kws.yaml
 
 # send it over BLE from the host, then `infer kws` in the shell or run the inference test
@@ -97,10 +103,6 @@ To run keyword spotting, convert a model and send it to the board over BLE:
     --bin models/kws/kws_program_data.bin --yaml models/kws/info.yaml
 ./scripts/run.sh -d -t --infer-test
 ```
-
-The config schema is under
-[Model build config](src/README.md#model-build-config---config) in the firmware reference.
-`TBD: public download location for the keyword-spotting model.`
 
 `./scripts/run.sh -h` lists every option, including an interactive shell in the container
 and minicom on the board's UART.
