@@ -1,20 +1,45 @@
-# AkidaTag schematic
+# AkidaTag block diagram
 
-This page is the circuit-level companion to the [datasheet](datasheet.md). It shows how
-the parts on the AkidaTag board connect to each other: the system block diagram, the
-power tree, every bus between the host and its peripherals, and the configuration the
-AKD1500 is strapped into.
+This page shows how the parts on the AkidaTag board connect to each other: the system
+block diagram, the power tree, every bus between the host and its peripherals, and the
+configuration the AKD1500 is strapped into. The engineering detail behind each block is in
+the [datasheet](datasheet.md); the buyer-facing summary is the
+[technical specifications](technical-specifications.md).
 
 | Document status | |
 |---|---|
 | Hardware described | AkidaTag hardware revision 2 |
-| Status | Draft for review. The full schematic sheets are not yet on this page; see the note at the end. |
+| Status | Draft for review. Every entry marked `TBD:` is awaiting confirmation; nothing here is estimated. |
 
 ---
 
 ## 1. System block diagram
 
-![AkidaTag block diagram](images/akidatag-block-diagram.svg)
+![AkidaTag system block diagram](images/akidatag-block-diagram.svg)
+
+The board has seven functional groups. **Compute and memory** is the Nordic nRF5340
+host and the BrainChip AKD1500 AI co-processor, each with its own 16 MB SPI NOR flash.
+**Power system** takes 5 V from USB-C or a single-cell Li-ion battery through the BQ25185
+charger and power path, the BQ27427 fuel gauge and the on/off switch, and makes the 1.8 V,
+0.8 V and 3.3 V rails. **USB and debug** is the CP2105 USB-to-UART bridge on the USB-C
+data lines and the 10-pin SWD header. **RF front-end** is the antenna matching network and
+the 2.4 GHz chip antenna. **Sensors** are the ISM330DHCX six-axis IMU on I2C and two PDM
+MEMS microphones. **Expansion** is the camera header with a level-shifted SPI bus and a
+switched 3.3 V supply. **Indicators and controls** are the RGB LED, the white LED and the
+user button.
+
+### Changes from the earlier diagram
+
+Revision 2 is the first board shipped, but an earlier system block diagram of the
+first revision has circulated, so the differences are worth stating. That board had a
+20-pin expansion connector carrying GPIO, I2S, I2C, SPI, USB and UART, three buttons, 4-pin
+SWD debug pads, two status LEDs, a fitted U.FL connector and a 42 mm x 30 mm outline.
+Revision 2 replaces the expansion connector with the 10-pin camera header, has one button
+and an on/off switch, a 10-pin SWD header, an RGB LED and a white LED, an unfitted U.FL
+footprint, two current-sense amplifiers, and a 27.7 mm x 39.5 mm outline. The processors,
+flashes, radio, IMU, microphones, charger and fuel gauge are the same. Sources: the
+revision 2 netlist, bill of materials and board outline; the earlier system block diagram
+and labelled layout drawing.
 
 ---
 
@@ -189,7 +214,8 @@ transistors (DTC043ZUB), so each LED is on when its host pin is high.
 | VDD_1V8 | R55, 0.1 ohm | INA190A3 U18, gain 100 V/V | P0.04 (AIN0), test point TP7 |
 | VDD_0V8_AKD | R28, 0.02 ohm | INA190A3 U17, gain 100 V/V | P0.05 (AIN1), test point TP6 |
 
-Both amplifiers run from VDD_1V8 with their enable pins tied high.
+Both amplifiers run from VDD_1V8 with their enable pins tied high. The A3 gain option is
+100 V/V per the Texas Instruments INA190 datasheet (SBOS863D).
 
 ---
 
@@ -200,8 +226,8 @@ Both amplifiers run from VDD_1V8 with their enable pins tied high.
 | PCIE_HOST_SEL | Low (0 ohm to ground; pull-up not fitted) | SPI host interface selected |
 | SEL_CLK | Low (0 ohm to ground; pull-up not fitted) | Crystal reference on OSC_XI and OSC_XO |
 | SPI_S_MODE0, SPI_S_MODE1 | Low, low (0 ohm to ground; pull-ups not fitted) | Single-lane SPI slave |
-| OP_MODE0 | Low (0 ohm to ground; pull-up not fitted) | `TBD: OP_MODE meaning` |
-| OP_MODE1 | High (10 kilohm to VDD_1V8_AKD; pull-down not fitted) | `TBD: OP_MODE meaning` |
+| OP_MODE0 | Low (0 ohm to ground; pull-up not fitted) | Crystal oscillator is the internal clock source |
+| OP_MODE1 | High (10 kilohm to VDD_1V8_AKD; pull-down not fitted) | Safe Mode: the chip stays on the 25 MHz reference after reset and the host switches it onto the PLL once the PLL locks; the firmware does this before raising the host SPI clock, since the host clock must stay at or below a quarter of the AKD1500's SPI slave core clock |
 | TAP_SEL, TESTMODE | Low (0 ohm to ground) | Test access off |
 | PCIE_PERST_N | Not connected (resistor not fitted) | PCIe unused |
 | PCIe receive lanes and reference clock inputs | Tied to ground | PCIe unused |
@@ -214,23 +240,16 @@ Both amplifiers run from VDD_1V8 with their enable pins tied high.
 
 ---
 
-## 5. The schematic sheets
-
-The revision 2 schematic is a twelve-sheet document: cover, power block diagram, two
-nRF5340 sheets, three AKD1500 sheets, microphones and LEDs, sensors and camera, USB,
-battery and fuel gauge, and power. `TBD: schematic sheets.` Whether the sheets are
-published on this page, as images or as a PDF, is being decided; until then this page
-carries the derived views above.
-
----
-
 ## Sources
 
-The revision 2 schematic (SI-NRF-AKD_BRD-002 V11, 2026-08-25), netlist report and bill of
-materials, joined with the firmware board overlay
-`src/boards/nrf5340_cpuapp_akidatag.overlay`, `src/core/interface/gpio/gpio.c` and
-`src/README.md` on `main` at firmware 1.2.0+0.
+The revision 2 schematic (SI-NRF-AKD_BRD-002 V11, 2026-08-25), netlist report, bill of
+materials and board outline; the earlier system block diagram and labelled layout
+drawing (January 2026); the Texas Instruments INA190 datasheet (SBOS863D); the AKD1500
+datasheet v1.2 ball descriptions and BrainChip application note AN-003 for the strap
+meanings; and the firmware board overlay `src/boards/nrf5340_cpuapp_akidatag.overlay`,
+`src/core/interface/gpio/gpio.c`, `src/core/interface/akd_spi_flash/akd_spi_flash_handler.cpp`
+and `src/README.md` on `main` at firmware 1.2.0+0.
 
 ---
 
-TBD: footer
+© 2026 BrainChip Holdings Ltd. All rights reserved.

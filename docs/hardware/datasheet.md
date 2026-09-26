@@ -9,7 +9,7 @@ application connects to it over Bluetooth to load models and run the demonstrati
 
 This page is the engineering reference for the board. The buyer-facing summary is the
 [technical specifications](technical-specifications.md) page, and the circuit-level view
-is the [schematic](schematic.md) page.
+is the [block diagram](block-diagram.md) page.
 
 | Document status | |
 |---|---|
@@ -41,7 +41,7 @@ is the [schematic](schematic.md) page.
   3.3 V supply, used by the firmware with an ArduCam Mega SPI camera.
 - **Wireless:** Bluetooth Low Energy through an on-board 2.4 GHz chip antenna, with an
   unpopulated U.FL footprint for a test connector.
-- **Power:** single-cell Li-ion battery with a BQ25185 linear charger and power path, a
+- **Power:** single-cell Li-ion battery (not supplied) with a BQ25185 linear charger and power path, a
   BQ27427 fuel gauge, a 1.8 V buck-boost converter, a 0.8 V buck converter for the
   AKD1500 core, a 3.3 V LDO for the camera header, five load switches under firmware
   control, and two INA190 current-sense amplifiers feeding the nRF5340 ADC so the
@@ -109,14 +109,24 @@ back. The chip can learn new classes on the device.
 | Core clock in firmware | 400 MHz default from the internal 800 MHz PLL; 5 to 400 MHz selectable | `src/Kconfig`, `src/README.md`; product brief gives the 5 to 400 MHz range |
 | Host SPI clock in firmware | 8 MHz default, runtime selectable 1 to 32 MHz | `src/Kconfig`, `src/README.md` |
 | Supplies | 0.8 V core (VDD_0V8_AKD), 1.8 V I/O (VDD_1V8_AKD); PLL supplies through ferrite beads from the same rails; PCIe PHY supplies tied to ground | Rev2 netlist |
-| Strapping | PCIe host select low (SPI host); SEL_CLK low; SPI slave mode pins low; OP_MODE0 low, OP_MODE1 high; TAP_SEL and TESTMODE low | Rev2 netlist |
+| Strapping | PCIe host select low (SPI host); SEL_CLK low (crystal oscillator); SPI slave mode pins low; OP_MODE0 low (crystal as the clock source); OP_MODE1 high (Safe Mode, see below); TAP_SEL and TESTMODE low | Rev2 netlist; AKD1500 datasheet v1.2 ball descriptions |
 | Host control lines | SLEEP from P1.07; PWR_GOOD from P1.05 (pulled up on the board); GPIO0..GPIO3 to P1.11, P1.12, P0.02, P0.03 | Rev2 netlist |
 | Reset | No host-driven reset line is wired; PCIE_PERST_N is left unconnected | Rev2 netlist |
 
 Between inferences the firmware asserts SLEEP, which gates the AKD1500 clocks while the
 loaded model is retained, and releases it on demand with a reference count. The
 `app stop` command additionally turns the AKD1500 PLL off for the lowest idle power.
-GPIO3 (P0.03) is the completion interrupt the firmware waits on after each inference.
+GPIO3 (P0.03) is the completion interrupt the firmware waits on after each inference, which
+is the pad BrainChip's application note AN-001 recommends for it. The sleep behaviour is
+described in AN-002.
+
+OP_MODE1 is strapped high, which puts the AKD1500 in Safe Mode: after reset it stays on the
+25 MHz reference clock instead of switching itself onto its PLL, and the host has to make
+that switch once the PLL reports lock. The firmware does this at a low host SPI clock and
+only then raises the clock, because the AKD1500 requires the host clock to stay at or below
+a quarter of its SPI slave core clock, which caps the host at a few megahertz while the
+reference clock is in use. Source: `src/core/interface/akd_spi_flash/akd_spi_flash_handler.cpp`;
+AKD1500 application note AN-003.
 
 ### 3.3 Memory
 
@@ -134,25 +144,27 @@ channel. Source: `src/pm_static.yml`.
 
 The firmware's partition map uses the first 8 MB of IC1. Source: `src/pm_static.yml`.
 
-`TBD: flash part number.` The schematic symbol and placement data name Micron
-MT25QU128ABA1EW7, and the firmware identifies both devices by the Micron JEDEC ID; the
-Rev2 bill of materials lists Winbond W25Q128JWPIQ for both positions. Which part is fitted
-on production boards is being confirmed.
+Both positions are fitted with the Winbond W25Q128JWPIQ (1.8 V, 128 Mbit) listed in the
+Rev2 bill of materials. The firmware on `main` still identifies the devices by the JEDEC ID
+of the Micron part named in the schematic symbols; it will be aligned with the Winbond part
+before the product ships.
 
 ### 3.4 Audio: microphones
 
-Two Infineon digital PDM MEMS microphones (U19, U20) share one PDM clock (P1.09) and one
-data line (P1.10), each through a 100 ohm series resistor. Their SELECT pins are tied
+Two Infineon IM73D122V01XTMA1 digital PDM MEMS microphones (U19, U20) share one PDM clock
+(P1.09) and one data line (P1.10), each through a 100 ohm series resistor. Their SELECT pins are tied
 opposite ways, so each occupies one channel of the stereo PDM frame. They are powered from
 the switched VDD_1V8_PDM rail (load switch U8, enable P0.21) through ferrite beads.
 
-The firmware captures one channel at 16 kHz, 16-bit, with a PDM clock between 1.0 and
-1.2 MHz, and sets the PDM gain register directly because the Zephyr DMIC API has no gain
-field. Source: `src/core/interface/audio/pdm_mic.c`, `src/include/audio/pdm_mic.h`.
+The firmware captures one channel, the left slot of the PDM frame, at 16 kHz, 16-bit, with
+a PDM clock between 1.0 and 1.2 MHz, and sets the PDM gain register directly because the
+Zephyr DMIC API has no gain field. The keyword spotting demonstration runs on that single
+channel; the second microphone is available to firmware that requests both. Source:
+`src/core/interface/audio/pdm_mic.c`, `src/include/audio/pdm_mic.h`.
 
-`TBD: microphone part number.` The Rev2 bill of materials lists IM73D122V01XTMA1; the
-repository's notes describe the fitted microphone as an IM69D130 and the firmware gain was
-set against that part.
+The part number is from the Rev2 bill of materials. The footprint name in the design files
+and the notes in this repository still carry the name of a different Infineon part, the
+IM69D130.
 
 ### 3.5 Motion: inertial measurement unit
 
@@ -187,7 +199,10 @@ Source: Rev2 netlist and bill of materials.
 
 Bluetooth Low Energy behaviour is set by the firmware; see section 8.
 
-`TBD: radio range.` `TBD: transmit power setting.`
+Nordic specifies the nRF5340 radio for a configurable transmit power of -40 to +3 dBm and
+a receiver sensitivity of -98 dBm at 1 Mbps. The firmware does not set a transmit power, so
+the Bluetooth controller's default applies. Source: nRF5340 product specification, key
+features; `src/prj.conf`. `TBD: transmit power and range measured on this board.`
 
 ### 3.8 USB-C and console
 
@@ -211,6 +226,10 @@ J2 is a 10-pin, 1.27 mm pitch header carrying SWDIO, SWDCLK and reset, with ESD 
 on all three lines. Its pinout is in section 5.4. The board's reference voltage on this
 header is VDD_1V8.
 
+Pin 6 carries nRESET and pin 10 is not connected. That differs from the Arm 10-pin Cortex
+Debug layout, which puts SWO on pin 6 and nRESET on pin 10, so a probe's reset line does not
+reach the board through a pin-to-pin cable. `TBD: J2 pinout verified on a board.`
+
 ### 3.10 Indicators and controls
 
 | Item | Part | Drive | Host pin |
@@ -231,7 +250,7 @@ its LED states onto these pins.
 
 | Stage | Part | Input | Output | Notes |
 |---|---|---|---|---|
-| Charger and power path | Texas Instruments BQ25185 (U13) | VBUS 5 V | SYS to the board, BAT to the battery | STAT1 and STAT2 to P0.23 and P0.24; charge current and input limit set by R85 (560 ohm) and R84 (13 kilohm); a 10 kilohm NTC on the TS pin |
+| Charger and power path | Texas Instruments BQ25185 (U13) | VBUS 5 V | SYS to the board, BAT to the battery | STAT1 and STAT2 to P0.23 and P0.24; R85 (560 ohm) on ISET sets a nominal 536 mA fast-charge current; R84 (13 kilohm) on ILIM/VSET selects 4.2 V battery regulation and a 1100 mA input current limit; a 10 kilohm NTC on the TS pin |
 | Fuel gauge | Texas Instruments BQ27427 (U12) | In the battery path | I2C1 address 0x55, SOC interrupt (GPOUT) to P0.30 | Impedance Track gauge; the firmware writes design capacity and taper parameters at start-up |
 | On/off | SW2 slide switch | SYS | VCC_SYS | Disconnects the whole board except the charger |
 | 1.8 V rail | Texas Instruments TPS631000 buck-boost (U1) | VCC_SYS | VDD_1V8 | Feeds the nRF5340, the CP2105 I/O, flash IC1, the pull-ups and the four 1.8 V load switches; passes through the 0.1 ohm shunt R55 read by INA190 U18 |
@@ -243,13 +262,24 @@ its LED states onto these pins.
 Source: Rev2 schematic, netlist and bill of materials; firmware `src/README.md` and
 `src/core/interface/current_ic/current_ic.c`.
 
+The charge current follows from the charger's formula (300 A·ohm divided by the ISET
+resistor) with a stated accuracy of plus or minus 10 %. The charger precharges at 20 % of
+that current while the battery is below 3.0 V, terminates at 10 % of it, and has a 6 hour
+safety timer. Source: BQ25185 datasheet SLUSF65B, electrical characteristics and Table 6-1;
+Rev2 bill of materials for R84 and R85.
+
 The firmware's power-up order is: 0.8 V AKD1500 core, then the AKD1500 1.8 V rail, then
 the IMU, then the microphones, then the camera enable. Source:
 `akidatag_peripherals_power_enable()` in `src/core/interface/gpio/gpio.c`.
 
-The firmware programs the fuel gauge for an 1100 mAh, 4.2 V cell with a 3000 mV
-terminate voltage and a 4150 mV taper voltage, and the source notes that these values are
-for a test battery. `TBD: production battery capacity and chemistry.`
+No battery is supplied with the board. The firmware programs the fuel gauge for an
+1100 mAh, 4.2 V cell with a 3000 mV terminate voltage and a 4150 mV taper voltage, and the
+source notes that these values are for a test battery, so the state of charge it reports is
+only as good as the match between those parameters and the cell fitted. The firmware also
+inverts the sign of the gauge's current reading to correct for a sense resistor that the
+code describes as physically reversed; the netlist alone cannot show whether revision 2
+still has that orientation. `TBD: fuel gauge sense orientation on revision 2.` Source:
+`src/include/fuel_gauge/fuel_gauge.h`, `src/core/interface/fuel_gauge/fuel_gauge.c`.
 
 ---
 
@@ -321,8 +351,8 @@ flash bus on P0.17, P0.13 and P0.14, where revision 2 wires the camera to P0.06,
 P0.26), the camera supply enable on P1.06 (never driven), the push button (defined on
 P0.26, wired on P1.01), the LEDs (the firmware's red LED is the white LED on P0.28; the RGB
 red and blue on P1.14 and P1.13 are not driven), and the `akdreset` node on P1.13, which is
-the blue LED. `TBD: firmware alignment with revision 2.` The pin table above is the
-hardware; the firmware column will be updated when the firmware is.
+the blue LED. The firmware will be aligned with revision 2 before the product ships; until
+then the pin table is the hardware and the firmware column describes `main`.
 
 ---
 
@@ -340,8 +370,9 @@ JST XH series, 2-pin, 2.5 mm pitch (B2B-XH-A). Pin 1 is VCC_BAT (battery positiv
 the BQ27427 sense path to the charger), pin 2 is GND. Source: Rev2 netlist and bill of
 materials.
 
-`TBD: battery connector mating part.` The bill of materials lists a JST-SM pigtail as the
-mating cable, which is a different JST series from the XH receptacle on the board.
+No battery is supplied with the board. Fit a single-cell rechargeable Li-ion or Li-Po cell
+with a JST XH 2-pin plug, positive on pin 1. The charger regulates the cell to 4.2 V and the
+board is designed for 3.0 to 4.2 V on VCC_SYS (section 6.2).
 
 ### 5.3 J1, camera header
 
@@ -392,12 +423,7 @@ built from. The rows below record what the design sets; every measured value is 
 
 ### 6.1 Absolute maximum ratings
 
-| Parameter | Value |
-|---|---|
-| USB VBUS input | `TBD: absolute maximum VBUS` |
-| Battery voltage | `TBD: absolute maximum battery voltage` |
-| Voltage on any header pin | `TBD: absolute maximum header voltage` |
-| Storage temperature | `TBD: storage temperature range` |
+`TBD: absolute maximum ratings.` None have been established for the assembly.
 
 ### 6.2 Recommended operating conditions
 
@@ -409,7 +435,7 @@ built from. The rows below record what the design sets; every measured value is 
 | VDD_0V8_AKD core rail | | 0.8 | | V | Rev2 schematic |
 | EXT_VDD_3V3 camera rail | | 3.3 | | V | Rev2 schematic |
 | Camera header supply | | 3.3 (1.8 option not fitted) | | V | Rev2 netlist |
-| Operating temperature | `TBD: operating temperature range` | | | | |
+| Operating temperature | `TBD: operating temperature range` | | | °C | Not rated for the assembly. The nRF5340 is rated -40 to 105 °C (Nordic) and the charger -40 to 125 °C junction (TI); the other parts and the cell fitted narrow this |
 
 ### 6.3 Current consumption
 
@@ -419,12 +445,15 @@ built from. The rows below record what the design sets; every measured value is 
 | Bluetooth connected, idle | `TBD: idle current` |
 | Keyword spotting running | `TBD: keyword spotting current` |
 | Peak during inference | `TBD: peak inference current` |
-| Charging current from USB | `TBD: charge current` |
+| Charging current from USB | 536 mA nominal fast charge, a design setting (section 3.11); `TBD: measured charge current` |
 
-The firmware can measure the 1.8 V and 0.8 V rails itself through the INA190 amplifiers
-(`power read`, `power measure`); the shunt values are 0.1 ohm on the 1.8 V rail and
-0.02 ohm on the 0.8 V rail and the fitted amplifier gain is 100 V/V. Source: Rev2 bill of
-materials, `src/README.md`.
+No board-level consumption has been measured yet. The firmware measures the 1.8 V and
+0.8 V rails itself through the INA190 amplifiers (`power read`, `power measure`), which is
+the way to fill in the rows for the rails behind them: the shunts are 0.1 ohm on the 1.8 V
+rail and 0.02 ohm on the 0.8 V rail, and revision 2 fits the 100 V/V amplifier, so run
+`power variant a3` first because the firmware's build-time default is the 25 V/V A1 part.
+The total draw, which also covers the charger, the LEDs and the 3.3 V rail, needs a meter in
+series with the battery or the USB input. Source: Rev2 bill of materials, `src/README.md`.
 
 ---
 
@@ -441,7 +470,8 @@ describe.
 | Inference | AKD1500 woken through SLEEP for each inference, host SPI at the configured clock, microphone capture running | `src/README.md`, `gpio.c` |
 | Serial recovery | MCUboot only, listening on the console UART | `src/sysbuild/mcuboot.conf` |
 
-Battery life in each state: `TBD: battery life`.
+Battery life in each state depends on the cell fitted; no battery is supplied with the
+board and no reference measurement exists yet. `TBD: battery life with a reference cell.`
 
 ---
 
@@ -475,7 +505,7 @@ Battery life in each state: `TBD: battery life`.
 | Mounting holes | None found in the outline data; `TBD: mounting provisions` | Rev2 board outline (DXF) |
 | USB-C position | Bottom side, centred near one short edge, receptacle projecting beyond the edge | Rev2 placement data |
 | Microphones | Bottom side, one in each corner beside the USB-C edge | Rev2 placement data |
-| Board thickness | `TBD: board thickness` | |
+| Board thickness | 1.00 mm, plus or minus 10 % | Rev2 fabrication notes |
 | Weight | `TBD: weight` | |
 | Enclosure | `TBD: enclosure dimensions and material` | |
 
@@ -485,7 +515,7 @@ Battery life in each state: `TBD: battery life`.
 
 | Item | Value |
 |---|---|
-| Operating temperature | `TBD: operating temperature range` |
+| Operating temperature | `TBD: operating temperature range`; not rated for the assembly, see section 6.2 |
 | Storage temperature | `TBD: storage temperature range` |
 | Humidity | `TBD: humidity range` |
 | Regulatory | `TBD: regulatory approvals` |
@@ -494,14 +524,14 @@ Battery life in each state: `TBD: battery life`.
 
 ---
 
-## 11. Ordering information
+## 11. Product information
 
 | Item | Value |
 |---|---|
 | Product name | AkidaTag |
-| Part number | `TBD: orderable part number` |
-| What is in the box | `TBD: box contents` |
-| Where to order | `TBD: ordering channel` |
+| What is in the box | `TBD: box contents`; no battery is included |
+| Companion app | BrainChip Connect for Android 13 or later; the [Google Play listing](https://play.google.com/store/apps/details?id=com.brainchip.connect) is open for pre-registration and the app is not yet installable from it |
+| Developer resources | [AkidaTag on the BrainChip Developer Hub](https://developer.brainchip.com/akida-tag/), [Developer Hub sign-up](https://developer.brainchip.com/signup/), [BrainChip community on Discord](https://discord.com/invite/9bmd9g52vn) |
 
 ---
 
@@ -512,9 +542,9 @@ Battery life in each state: `TBD: battery life`.
 | Revision | Design | Changes |
 |---|---|---|
 | 2 | NRF-AKD1500-002 (V-002), schematic V11, changes dated 2026-07-07, released 2026-08-25 | Test pads added on the ADC inputs; INA190 changed to the gain-100 variant with matching shunts; camera signals brought to a header; LDO added for the camera supply; new level-shifter part for the camera signals; SWD connector added; one RGB LED added; on/off switch added; one user button added |
-| 1 | V-001, initial release dated 2025-12-24 | `TBD: revision 1 description` |
 
-Source: the revision summary on the Rev2 schematic cover sheet.
+Revision 1 (V-001, dated 2025-12-24) was not released outside BrainChip; revision 2 is the
+first board shipped. Source: the revision summary on the Rev2 schematic cover sheet.
 
 ### Document
 
@@ -537,8 +567,16 @@ Source: the revision summary on the Rev2 schematic cover sheet.
   `src/include/fuel_gauge/fuel_gauge.h`, `docs/ble-model-transfer.md`,
   `docs/firmware-update-over-usb.md`, `AGENTS.md`.
 - [AKD1500 Product Brief V2.4](https://brainchip.com/wp-content/uploads/2025/10/AKD1500-Product-Brief-V2.4-Oct.25.pdf).
-- [Nordic Semiconductor nRF5340 product page](https://www.nordicsemi.com/Products/nRF5340).
+- [Nordic Semiconductor nRF5340 product page](https://www.nordicsemi.com/Products/nRF5340)
+  and [product specification key features](https://docs.nordicsemi.com/bundle/ps_nrf5340/page/keyfeatures_html5.html).
+- Texas Instruments BQ25185 datasheet, SLUSF65B: charge-current formula, ILIM/VSET table,
+  charging thresholds and timers.
+- BrainChip AKD1500 application notes AN-001 (interrupt-driven inference), AN-002 (sleep pin
+  and low-power operation) and AN-003 (clock and frequency management), revision 1.0,
+  2026-07-13; the AKD1500 datasheet v1.2 ball descriptions for the strap meanings.
+- [BrainChip Connect on Google Play](https://play.google.com/store/apps/details?id=com.brainchip.connect)
+  for the Android version.
 
 ---
 
-TBD: footer
+© 2026 BrainChip Holdings Ltd. All rights reserved.
