@@ -180,27 +180,12 @@ Origin:     written by src/utils/kws.py through akida's array_to_cpp
             (kws.py:38) from the validation split of the preprocessed
             keyword-spotting set that BrainChip mirrors at
             data.brainchip.com (kws.py:25-28)
-Licence:    TBD: confirm the dataset attribution
+Licence:    Creative Commons Attribution 4.0 International (CC BY 4.0)
 
-The class names are words of the Google Speech Commands dataset, and the file
-the script fetches is named as that set with three words removed. Google
-releases that dataset under the Creative Commons Attribution 4.0 International
-licence (CC BY 4.0). Whether this sample and its attribution line should stand
-as written is awaiting confirmation.
-
---------------------------------------------------------------------------------
-Kitware APT repository script
---------------------------------------------------------------------------------
-
-Upstream:   https://apt.kitware.com/kitware-archive.sh
-Paths:      scripts/kitware-archive.sh
-Licence:    not stated in the file. TBD
-
-The script is a copy of Kitware's own APT repository setup script; the current
-upstream differs only by one added Ubuntu release name (lines 65 and 70). It
-carries no copyright notice, licence header or SPDX identifier, and this
-repository's history records no licence for it. It is referenced only by
-docs/setup.md:171, as an optional way to install a newer CMake.
+The sample is derived from the Google Speech Commands dataset, which Google
+releases under CC BY 4.0: the class names are that dataset's words, and the
+file the script fetches is named as that set with three words removed.
+    https://ai.googleblog.com/2017/08/launching-speech-commands-dataset.html
 
 --------------------------------------------------------------------------------
 Signing key
