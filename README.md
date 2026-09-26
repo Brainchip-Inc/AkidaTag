@@ -18,9 +18,9 @@
 <p align="center">
   <a href="https://brainchip-inc.github.io/AkidaTag/"><img src="https://img.shields.io/badge/Documentation-read%20the%20guides-0061ED.svg" alt="AkidaTag documentation"/></a>
   <a href="https://github.com/Brainchip-Inc/BrainChip-Connect"><img src="https://img.shields.io/badge/BrainChip%20Connect-companion%20app-002E72.svg" alt="BrainChip Connect app repository"/></a>
-  <a href="#community-and-support"><img src="https://img.shields.io/badge/BrainChip%20Developer%20Hub-TBD%20link-0061ED.svg" alt="BrainChip Developer Hub (link TBD)"/></a>
-  <a href="#community-and-support"><img src="https://img.shields.io/badge/Discord-TBD%20link-5865F2.svg?logo=discord&logoColor=white" alt="BrainChip Discord (link TBD)"/></a>
-  <a href="#get-the-hardware"><img src="https://img.shields.io/badge/Shop-TBD%20link-FF6A00.svg" alt="Get an AkidaTag (link TBD)"/></a>
+  <a href="https://developer.brainchip.com/akida-tag/"><img src="https://img.shields.io/badge/BrainChip%20Developer%20Hub-AkidaTag-0061ED.svg" alt="AkidaTag on the BrainChip Developer Hub"/></a>
+  <a href="https://discord.com/invite/9bmd9g52vn"><img src="https://img.shields.io/badge/Discord-join%20the%20community-5865F2.svg?logo=discord&logoColor=white" alt="Join the BrainChip Discord"/></a>
+  <a href="https://play.google.com/store/apps/details?id=com.brainchip.connect"><img src="https://img.shields.io/badge/Google%20Play-pre--register-34A853.svg?logo=googleplay&logoColor=white" alt="Pre-register for BrainChip Connect on Google Play"/></a>
 </p>
 
 # AkidaTag firmware
@@ -153,8 +153,8 @@ material lives in this repository:
 
 - **AkidaTag board.** The product this firmware ships on: an nRF5340 driving an AKD1500
   over SPI, with a PDM microphone, an IMU, an SPI camera interface, external SPI NOR flash,
-  battery monitoring, and a USB-C connector wired to an on-board USB-to-UART bridge.
-  `TBD: preorder link.`
+  battery monitoring, and a USB-C connector wired to an on-board USB-to-UART bridge. See
+  [AkidaTag on the BrainChip Developer Hub](https://developer.brainchip.com/akida-tag/).
 - **nRF5340 DK + AKD1500 PCIe board.** The development setup, with the AKD1500 in SPI mode
   behind an interposer board. Build with `--dk`; [docs/setup.md](docs/setup.md) has the
   wiring.
@@ -278,10 +278,14 @@ Hit a problem building, flashing or running the firmware?
 you have, what you ran and what happened. [CONTRIBUTING.md](CONTRIBUTING.md) lists what
 helps us reproduce it.
 
-- `TBD: BrainChip Developer Hub link` for tools, the model zoo and the Akida platform
-- `TBD: BrainChip Discord link` for discussion and community help
+- [AkidaTag on the BrainChip Developer Hub](https://developer.brainchip.com/akida-tag/)
+- [Sign up for the BrainChip Developer Hub](https://developer.brainchip.com/signup/) for tools,
+  the model zoo and the Akida platform
+- [Join the BrainChip Discord](https://discord.com/invite/9bmd9g52vn) for discussion and
+  community help
 - [BrainChip Connect](https://github.com/Brainchip-Inc/BrainChip-Connect), the companion
-  phone app, `TBD: Google Play link`
+  phone app, is open for
+  [pre-registration on Google Play](https://play.google.com/store/apps/details?id=com.brainchip.connect)
 - [Read the AkidaTag documentation](https://brainchip-inc.github.io/AkidaTag/)
 
 ## License

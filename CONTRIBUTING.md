@@ -45,9 +45,11 @@ is enough for us to work from.
 
 ## Questions and ideas
 
-`TBD: BrainChip Developer Hub link` has the tools, model zoo and documentation for the wider
-Akida platform, and `TBD: BrainChip Discord link` is the place for questions, ideas, and
-showing us what you have built. The AkidaTag guides are published at
+The [BrainChip Developer Hub](https://developer.brainchip.com/signup/) has the tools, model
+zoo and documentation for the wider Akida platform, with
+[a page for AkidaTag](https://developer.brainchip.com/akida-tag/), and the
+[BrainChip Discord](https://discord.com/invite/9bmd9g52vn) is the place for questions,
+ideas, and showing us what you have built. The AkidaTag guides are published at
 <https://brainchip-inc.github.io/AkidaTag/>.
 
 ## Building on this work
