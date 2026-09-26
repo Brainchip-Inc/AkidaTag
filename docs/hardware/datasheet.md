@@ -146,8 +146,7 @@ The firmware's partition map uses the first 8 MB of IC1. Source: `src/pm_static.
 
 Both positions are fitted with the Winbond W25Q128JWPIQ (1.8 V, 128 Mbit) listed in the
 Rev2 bill of materials. The firmware on `main` still identifies the devices by the JEDEC ID
-of the Micron part named in the schematic symbols; it will be aligned with the Winbond part
-before the product ships.
+of the Micron part named in the schematic symbols, so it does not match the fitted part.
 
 ### 3.4 Audio: microphones
 
@@ -228,7 +227,10 @@ header is VDD_1V8.
 
 Pin 6 carries nRESET and pin 10 is not connected. That differs from the Arm 10-pin Cortex
 Debug layout, which puts SWO on pin 6 and nRESET on pin 10, so a probe's reset line does not
-reach the board through a pin-to-pin cable. `TBD: J2 pinout verified on a board.`
+reach the board through a pin-to-pin cable. `TBD: J2 pinout verified on a board.` The SWD
+connection guide of April 2026 describes the earlier board's labelled debug pads (GND, SWD,
+CLK, NRST and a 1.8 V reference) wired to a J-Link with five flying leads, not this header,
+so it does not settle the question.
 
 ### 3.10 Indicators and controls
 
@@ -351,8 +353,8 @@ flash bus on P0.17, P0.13 and P0.14, where revision 2 wires the camera to P0.06,
 P0.26), the camera supply enable on P1.06 (never driven), the push button (defined on
 P0.26, wired on P1.01), the LEDs (the firmware's red LED is the white LED on P0.28; the RGB
 red and blue on P1.14 and P1.13 are not driven), and the `akdreset` node on P1.13, which is
-the blue LED. The firmware will be aligned with revision 2 before the product ships; until
-then the pin table is the hardware and the firmware column describes `main`.
+the blue LED. The pin table is the hardware; the firmware column describes `main` as it is
+today.
 
 ---
 
@@ -454,6 +456,17 @@ rail and 0.02 ohm on the 0.8 V rail, and revision 2 fits the 100 V/V amplifier, 
 `power variant a3` first because the firmware's build-time default is the 25 V/V A1 part.
 The total draw, which also covers the charger, the LEDs and the 3.3 V rail, needs a meter in
 series with the battery or the USB input. Source: Rev2 bill of materials, `src/README.md`.
+The only board test records available, the post-fabrication PCB test report of March 2026
+and the PCB testing checklist of February 2026, cover bare-board impedance and short/open
+checks and the power-on procedure, and contain no current measurements.
+
+What the on-board measurement can resolve follows from the INA190 datasheet. The A3 device
+has a gain error of plus or minus 0.3 % and a zero-current output offset of up to 3 mV at a
+1.8 V supply, which corresponds to 0.3 mA on the 1.8 V rail and 1.5 mA on the 0.8 V rail.
+With the firmware's ADC setting of gain 1/3 against the internal 0.6 V reference, full scale
+is 1.8 V at the amplifier output, or 180 mA on the 1.8 V rail and 900 mA on the 0.8 V rail,
+less the amplifier's 20 mV swing limit below its supply. Source: INA190 datasheet SBOS863D;
+`src/core/interface/current_ic/current_ic.c`.
 
 ---
 
@@ -571,6 +584,11 @@ first board shipped. Source: the revision summary on the Rev2 schematic cover sh
   and [product specification key features](https://docs.nordicsemi.com/bundle/ps_nrf5340/page/keyfeatures_html5.html).
 - Texas Instruments BQ25185 datasheet, SLUSF65B: charge-current formula, ILIM/VSET table,
   charging thresholds and timers.
+- Texas Instruments INA190 datasheet, SBOS863D: gain options, gain error, zero-current
+  output offset and output swing.
+- Board test records, internal: post-fabrication PCB test report (version 1.0, 2026-03-13),
+  PCB testing checklist and procedures (version 1.0, 2026-02-18) and Spark board SWD
+  connection guide (version 1.1, 2026-04-10); read for facts only, nothing copied.
 - BrainChip AKD1500 application notes AN-001 (interrupt-driven inference), AN-002 (sleep pin
   and low-power operation) and AN-003 (clock and frequency management), revision 1.0,
   2026-07-13; the AKD1500 datasheet v1.2 ball descriptions for the strap meanings.
