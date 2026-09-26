@@ -167,8 +167,6 @@ _Tip: A simple change that I make is adding a print statement in main.cpp_
 
   If `cmake` version is not higher than min version mentioned, then follow installation of a proper version through this [link](https://docs.zephyrproject.org/latest/develop/getting_started/installation_linux.html#installation-linux).
 
-  > A higher version of cmake can also be added using the [kitware third-party apt repository](https://apt.kitware.com/) using the script `scripts/kitware-archive.sh`
-
   Verify other versions:
 
   ```
