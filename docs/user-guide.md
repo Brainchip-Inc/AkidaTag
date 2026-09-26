@@ -2,8 +2,8 @@
 
 This guide is for someone who has an AkidaTag with BrainChip's firmware already on it and wants to
 run the demos from a phone. It covers installing the BrainChip Connect app, connecting to the tag,
-running the keyword spotting demo, teaching the tag a new word, updating the firmware, loading a
-model, and what to do when something does not work.
+what the LEDs mean, running the keyword spotting demo, updating the firmware, loading a model, and
+what to do when something does not work.
 
 It was written from the source code of the firmware on the `main` branch of the AkidaTag
 repository, after release v1.2.0+0, and of BrainChip Connect on its `main` branch, release
