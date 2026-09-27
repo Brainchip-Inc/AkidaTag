@@ -438,13 +438,11 @@ built from. The rows below record what the design sets; every measured value is 
 
 ### 6.3 Current consumption
 
-| Condition | Value |
-|---|---|
-| Sleep, Bluetooth advertising | `TBD: sleep current` |
-| Bluetooth connected, idle | `TBD: idle current` |
-| Keyword spotting running | `TBD: keyword spotting current` |
-| Peak during inference | `TBD: peak inference current` |
-| Charging current from USB | 536 mA nominal fast charge, a design setting (section 3.11); `TBD: measured charge current` |
+Current consumption per state (asleep and advertising, connected and idle, keyword
+spotting running, peak during an inference) and the charge current drawn from USB will be
+measured on a revision 2 board and added in a later revision of this datasheet.
+`TBD: current consumption, deferred to a later revision.` Until then the only current
+figure on this page is the charger's 536 mA nominal fast-charge setting in section 3.11.
 
 No board-level consumption has been measured yet. The firmware measures the 1.8 V and
 0.8 V rails itself through the INA190 amplifiers (`power read`, `power measure`), which is

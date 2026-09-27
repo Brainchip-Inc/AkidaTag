@@ -71,7 +71,7 @@ the [block diagram](block-diagram.md).
 | **Battery life** | Depends on the cell fitted |
 | **Charging** | On-board linear charger with power path, 536 mA nominal fast charge from USB-C 5 V; the device runs while charging; charge time depends on the cell fitted |
 | **Power switch** | On/off slide switch |
-| **Power consumption** | `TBD: power consumption by mode` |
+| **Power consumption** | `TBD: power consumption, to be measured for a later revision` |
 | **Indicators** | One RGB LED and one white LED under firmware control |
 | **Controls** | One user button; the on/off slide switch |
 | **Board dimensions** | 27.7 mm x 39.5 mm, 1.0 mm thick, six-layer PCB, chamfered corners |
