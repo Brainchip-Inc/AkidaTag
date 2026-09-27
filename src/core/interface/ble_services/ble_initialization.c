@@ -1049,7 +1049,9 @@ static void disconnected_ble(struct bt_conn* conn, uint8_t reason) {
         bt_conn_unref(current_conn);
         current_conn = NULL;
     }
+#ifdef CONFIG_DK_BOARD
     dk_set_led_off(CON_STATUS_LED);
+#endif
     led_set_state(LED_STATE_NORMAL_APP);
     ble_connection_callback(BLE_NOT_CONNECTED);
     app_start_flag = FLAG_DISABLE;
