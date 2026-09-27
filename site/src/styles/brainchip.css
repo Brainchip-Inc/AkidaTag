@@ -1,0 +1,276 @@
+/*
+ * The BrainChip documentation look, derived from the BrainChip presentation
+ * template (theme "BrainChip", 2026-03-20): black text on white, the theme's
+ * accents, Sora SemiBold headings, Inter body text, a black band across the
+ * top carrying the white wordmark, and the symbol from the wordmark as the
+ * list bullet. The template defines no dark scheme; the dark scheme below is
+ * the same palette inverted, white text on black, as asked for in review.
+ *
+ * Everything the look needs sits next to this file: the fonts in ../fonts and
+ * the logo files in ../assets, so the set can be copied into another site.
+ */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../fonts/InterVariable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../fonts/InterVariable-Italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Sora';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('../fonts/SoraVariable.woff2') format('woff2');
+}
+
+:root {
+  --brainchip-black: #000000;
+  --brainchip-white: #ffffff;
+  --brainchip-slate: #323f4f;
+  --brainchip-blue: #0061ed;
+  --brainchip-navy: #002e72;
+  --brainchip-teal: #0bd6a5;
+  --brainchip-yellow: #ffc524;
+  --brainchip-gray: #bfc6d6;
+  --brainchip-followed-link: #585e70;
+  /* Not in the template: the app's own error colour, from src/app/theme/theme.tsx. */
+  --brainchip-danger: #ff004e;
+
+  --sl-font: 'Inter';
+  --brainchip-font-headings: 'Sora', var(--sl-font-system);
+  --sl-text-h1: var(--sl-text-4xl);
+}
+
+/* The template's title size needs a wide screen: on a phone a long title would break mid-word. */
+@media (min-width: 50rem) {
+  :root {
+    --sl-text-h1: 2.75rem;
+  }
+}
+
+/* Dark scheme: Starlight's default, so it sits on :root. White text on black. */
+:root,
+::backdrop {
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #f2f2f2;
+  --sl-color-gray-2: #e0e0e0;
+  --sl-color-gray-3: #b0b0b0;
+  --sl-color-gray-4: #7a7a7a;
+  --sl-color-gray-5: #3a3a3a;
+  --sl-color-gray-6: #1c1c1c;
+  --sl-color-black: #000000;
+
+  --sl-color-accent-low: #0c2b5e;
+  --sl-color-accent: var(--brainchip-blue);
+  --sl-color-accent-high: #a9c8ff;
+  --sl-color-text: #ffffff;
+  --sl-color-text-accent: #7fafff;
+
+  --sl-color-blue-low: #0c2b5e;
+  --sl-color-blue: #4d8dff;
+  --sl-color-blue-high: #cfe0ff;
+  --sl-color-green-low: #0a3a30;
+  --sl-color-green: var(--brainchip-teal);
+  --sl-color-green-high: #b9f3e4;
+  --sl-color-purple-low: #0a3a30;
+  --sl-color-purple: var(--brainchip-teal);
+  --sl-color-purple-high: #b9f3e4;
+  --sl-color-orange-low: #4a3800;
+  --sl-color-orange: var(--brainchip-yellow);
+  --sl-color-orange-high: #ffe9a8;
+  --sl-color-red-low: #4d0a22;
+  --sl-color-red: #ff4d80;
+  --sl-color-red-high: #ffc2d4;
+
+  --sl-color-bg-nav: var(--brainchip-black);
+  --sl-color-bg-sidebar: #0d0d0d;
+  --sl-color-bg-inline-code: #1c1c1c;
+  --sl-color-hairline: #2a2a2a;
+  --sl-color-hairline-light: #3a3a3a;
+  --sl-color-hairline-shade: #000000;
+}
+
+/* Light scheme: the template's own colours. */
+:root[data-theme='light'],
+[data-theme='light'] ::backdrop {
+  --sl-color-white: var(--brainchip-black);
+  --sl-color-gray-1: #1f2733;
+  --sl-color-gray-2: var(--brainchip-slate);
+  --sl-color-gray-3: var(--brainchip-followed-link);
+  --sl-color-gray-4: #8a94a6;
+  --sl-color-gray-5: var(--brainchip-gray);
+  --sl-color-gray-6: #e6eaf1;
+  --sl-color-gray-7: #f4f6fa;
+  --sl-color-black: var(--brainchip-white);
+
+  --sl-color-accent-low: #dce8ff;
+  --sl-color-accent: var(--brainchip-blue);
+  --sl-color-accent-high: var(--brainchip-navy);
+  --sl-color-text: var(--brainchip-black);
+  --sl-color-text-accent: var(--brainchip-blue);
+
+  --sl-color-blue-low: #e4eeff;
+  --sl-color-blue: var(--brainchip-blue);
+  --sl-color-blue-high: var(--brainchip-navy);
+  --sl-color-green-low: #dcf8f0;
+  --sl-color-green: var(--brainchip-teal);
+  --sl-color-green-high: #04563f;
+  --sl-color-purple-low: #dcf8f0;
+  --sl-color-purple: var(--brainchip-teal);
+  --sl-color-purple-high: #04563f;
+  --sl-color-orange-low: #fff3cf;
+  --sl-color-orange: var(--brainchip-yellow);
+  --sl-color-orange-high: #6b4e00;
+  --sl-color-red-low: #ffe0e9;
+  --sl-color-red: var(--brainchip-danger);
+  --sl-color-red-high: #8a0030;
+
+  --sl-color-bg-nav: var(--brainchip-black);
+  --sl-color-bg-sidebar: var(--brainchip-white);
+  --sl-color-bg-inline-code: #eef1f6;
+  --sl-color-hairline: #e6eaf1;
+  --sl-color-hairline-light: #e6eaf1;
+  --sl-color-hairline-shade: #e6eaf1;
+}
+
+/* Headings are Sora SemiBold; everything else stays Inter. */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6):not(:where(.not-content *)),
+.content-panel h1,
+.hero h1,
+.site-title,
+.sl-link-card .title,
+.card .title,
+.starlight-aside__title {
+  font-family: var(--brainchip-font-headings);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The black band at the top of every template slide, with the white wordmark. */
+.header {
+  color: var(--brainchip-white);
+}
+
+.site-title {
+  color: var(--brainchip-white);
+}
+
+.site-title img {
+  height: 1.75rem;
+}
+
+/* On a phone the wordmark alone is the header; the title stays for screen readers. */
+@media (max-width: 30rem) {
+  .site-title span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+.header site-search > button {
+  background-color: #1a1a1a;
+  border-color: #3a3a3a;
+  color: #d9dde5;
+}
+
+.header site-search > button:hover {
+  border-color: var(--brainchip-blue);
+  color: var(--brainchip-white);
+}
+
+.header site-search > button kbd {
+  background-color: #2a2a2a;
+  color: #d9dde5;
+}
+
+.header .social-icons a,
+.header starlight-theme-select label,
+.header starlight-theme-select select {
+  color: #d9dde5;
+}
+
+.header .social-icons a:hover,
+.header starlight-theme-select label:hover {
+  color: var(--brainchip-white);
+}
+
+.header starlight-theme-select select option {
+  color: initial;
+}
+
+.header starlight-menu-button button {
+  background-color: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  color: var(--brainchip-white);
+  box-shadow: none;
+}
+
+/* A phone screenshot is tall; hold it to a column rather than a full page. */
+.sl-markdown-content img:not(:where(.not-content *)) {
+  max-height: 36rem;
+  width: auto;
+}
+
+/* The template's bullet: the symbol from the wordmark. */
+.sl-markdown-content ul:not(:where(.not-content *)) > li {
+  list-style-image: url('../assets/brainchip-bullet.svg');
+}
+
+/* Room between sections, so a page reads as a document rather than a list. */
+.sl-markdown-content :is(h2):not(:where(.not-content *)) {
+  margin-top: 2.5em;
+}
+
+.sl-markdown-content :is(h3, h4):not(:where(.not-content *)) {
+  margin-top: 1.75em;
+}
+
+.sl-markdown-content :is(p, li):not(:where(.not-content *)) {
+  line-height: 1.7;
+}
+
+.sl-markdown-content :is(table, .starlight-aside, .expressive-code, img, figure):not(:where(.not-content *)) {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.75rem 1rem;
+}
+
+.sl-markdown-content .starlight-aside:not(:where(.not-content *)) {
+  padding: 1.25rem 1.5rem;
+}
+
+.sl-markdown-content li:not(:where(.not-content *)) + li {
+  margin-top: 0.5rem;
+}
+
+/* The black band at the foot of every template slide. */
+.brainchip-footer {
+  margin-top: 3rem;
+  padding: 0.75rem var(--sl-content-pad-x);
+  background-color: var(--brainchip-black);
+  color: var(--brainchip-white);
+  font-size: var(--sl-text-xs);
+  text-align: center;
+}
+
+.brainchip-footer p {
+  margin: 0;
+}
