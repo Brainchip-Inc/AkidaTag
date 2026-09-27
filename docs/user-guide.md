@@ -6,8 +6,7 @@ what the LEDs mean, running the keyword spotting demo, updating the firmware, lo
 what to do when something does not work.
 
 It was written from the source code of the firmware on the `main` branch of the AkidaTag
-repository, after release v1.2.0+0, and of BrainChip Connect on its `main` branch, release
-v1.0.0+0. Where a step could not be confirmed from the code it is marked `TBD`.
+repository and of BrainChip Connect on its `main` branch.
 
 If you want to build the firmware or write your own application, read the
 [developer guide](developer-guide.md) instead.
@@ -17,17 +16,15 @@ If you want to build the firmware or write your own application, read the
 You need:
 
 - An AkidaTag.
-- Its USB-C cable, for charging.
-- An Android phone running Android 13 or later, with Bluetooth. An iOS version of the app is
-  planned.
+- A USB-C cable, for charging. None is included.
+- An Android phone running Android 13 or later, with Bluetooth. The app is coming soon to the
+  iOS App Store.
 - The BrainChip Connect app. Its Google Play listing,
   https://play.google.com/store/apps/details?id=com.brainchip.connect, is open for
-  pre-registration. TBD: the app's release date.
+  pre-registration.
 
-In the box is the AkidaTag in its enclosure, with the latest firmware release and the keyword
-spotting model already loaded. The battery is not included. TBD: which battery the tag takes and
-how to fit it. TBD: photo of the AkidaTag with the USB-C connector, the LEDs and the button
-labelled.
+In the box is the AkidaTag board in its enclosure, with the latest firmware release and the
+keyword spotting model already loaded. No battery, camera or USB-C cable is included.
 
 ### Charging
 
@@ -36,14 +33,13 @@ the battery level and, next to it, `Charging` while the tag is on charge, `Warni
 fault the tag can recover from, such as over-temperature or a timeout, and `Fault` for one it
 cannot, such as an over-voltage.
 
-TBD: charging time and battery life. See the [datasheet](hardware/datasheet.md).
+The [datasheet](hardware/datasheet.md) has the battery and charging figures.
 
 ### Turning the tag on and off
 
-The rev2 board has a power switch. TBD: which board revision ships, and how a tag without the
-switch is turned on and off. The board also has a user button and a DFU button. In this firmware
-release the user button does nothing; a reset function for it is planned. TBD: whether the DFU
-button is fitted on the retail unit and what it does.
+Use the power switch to turn the tag on and off. The board also has a user button and a DFU
+button. In this firmware release the user button does nothing; a reset function for it is
+planned. The DFU button is not needed for anything in this guide.
 
 ## 2. What the LEDs mean
 
@@ -64,14 +60,12 @@ The tag has a green LED and a red LED.
 
 1. Pre-register for BrainChip Connect on Google Play at
    https://play.google.com/store/apps/details?id=com.brainchip.connect. Google Play tells you when
-   the app is released. TBD: the release date.
+   the app is released. It is coming soon to the iOS App Store.
 2. Open it. The first screens introduce the app and ask you to accept its terms and its
    privacy policy.
 3. Grant the permissions it asks for. Bluetooth is required to find and connect to the tag.
    Notifications are optional and are used for alerts about model events, firmware updates and
    device status.
-
-TBD: screenshots of the Get Started, Terms, Privacy Policy and Permissions screens.
 
 ## 4. Connect to your AkidaTag
 
@@ -84,15 +78,10 @@ TBD: screenshots of the Get Started, Terms, Privacy Policy and Permissions scree
    configuration_, and then opens the **Select the Application** screen. The green LED stays on
    while the app is connected.
 
-The firmware on `main` does not ask the phone for a pairing code. TBD: confirm whether your phone
-shows a Bluetooth pairing request on first connection, and whether the retail firmware turns
-pairing on.
+The tag does not ask the phone for a pairing code, so no pairing request appears.
 
 Only one phone can be connected to a tag at a time. If the app cannot connect, check that another
 phone is not already connected.
-
-TBD: screenshots of the device list, the preview screen, the connecting screen and the
-applications screen.
 
 ## 5. Run the keyword spotting demo
 
@@ -101,8 +90,7 @@ and recognises ten spoken words: `down`, `go`, `left`, `no`, `off`, `on`, `right
 and `yes`. Everything else is reported as silence or unknown and is not shown.
 
 The tag arrives with the keyword spotting model already loaded, so the demo is ready to run. If
-the tag has lost its model, load one first: see [Load a model](#7-load-a-model). TBD: the model's
-name as the app shows it.
+the tag has lost its model, load one first: see [Load a model](#7-load-a-model).
 
 1. On the **Select the Application** screen, find the **Keyword Spotting** card. **More
    Information** shows the model name, its input shape, the number of classes and the list of
@@ -114,8 +102,6 @@ name as the app shows it.
    LED flashes for about half a second.
 4. Tap **Stop Application** when you are finished. The tag stops listening.
 
-TBD: screenshots of the Keyword Spotting card and a detection.
-
 ## 6. Update the firmware over Bluetooth
 
 New firmware is published on the releases page of the AkidaTag repository:
@@ -124,10 +110,9 @@ Bluetooth, `akidatag-<version>.signed.bin`, and a package `akidatag-<version>-df
 the same image. The app accepts either. The `SHA256SUMS.txt` file lists the checksum of every
 file, if you want to verify a download.
 
-TBD: the current release, v1.2.0+0, predates the model transfer protocol that the app on `main`
-uses, so a tag on v1.2.0+0 cannot load a model from this app. Update the firmware before loading a
-model. A release cut from `main` before launch carries the protocol the app uses; TBD: its
-version number, which this guide will name.
+Keep the tag on the latest release, https://github.com/Brainchip-Inc/AkidaTag/releases/latest:
+the app loads models with a transfer that older firmware does not have, so update the firmware
+before loading a model.
 
 1. Download the firmware file to your phone.
 2. Connect to the tag and open **Settings** from the bar at the bottom.
@@ -157,15 +142,12 @@ You can also update the tag over its USB-C cable from a computer, with no phone.
 described in the developer guide under
 [Firmware update over USB-C](firmware-update-over-usb.md).
 
-TBD: screenshots of the Firmware Update screen and the progress dialog.
-
 ## 7. Load a model
 
-The model is a `.zip` package attached to the firmware release: TBD: model asset name. It holds
-three files, `info.yaml`, `kws_program_info.bin` and `kws_program_data.bin`. Do not unzip it.
-
-TBD: whether a plain keyword spotting package and an edge-learning package are both published,
-and which one to pick.
+Every firmware release attaches two model packages: `akidatag-kws-model.zip`, the keyword
+spotting model the tag ships with, and `akidatag-kws-edge-learning-model.zip`, the same model
+with room to learn new words on the device. Each holds three files, `info.yaml`,
+`kws_program_info.bin` and `kws_program_data.bin`. Do not unzip it.
 
 1. Download the package to your phone.
 2. Connect to the tag and open **Settings**, then **Model Update**.
@@ -191,8 +173,6 @@ across restarts and firmware updates.
 **Current Version** on the Model Update screen shows _Not Found_ until you have installed a model
 through the app.
 
-TBD: screenshots of the Model Update screen and the progress dialog.
-
 ## 8. Other things the app shows
 
 - The **i** button in the header opens **Device Information**: the tag's name and hardware
@@ -206,20 +186,20 @@ TBD: screenshots of the Model Update screen and the progress dialog.
 
 ## 9. Troubleshooting
 
-| Problem                                                | What to check                                                                                                                                                                  |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| The app does not find the tag.                         | Bluetooth is on and the app has its Bluetooth permission. The tag's green LED is blinking; if it is solid green, another phone is connected. If no LED is lit, charge the tag. |
-| Connection timed out.                                  | Move closer to the tag and try again. Restart the tag if it keeps happening.                                                                                                   |
-| No keywords are detected.                              | The application is _Active_ on the card. Speak clearly and close to the tag; its microphone is a quiet part.                                                                   |
-| Update did not install.                                | The firmware is signed with a key this tag does not accept. Use a release from https://github.com/Brainchip-Inc/AkidaTag/releases.                                             |
-| Model delivered, but not running.                      | Restart the tag. If it still does not run, the package is not for this tag.                                                                                                    |
-| Model update failed.                                   | Stay near the tag, keep the app open and send the model again.                                                                                                                 |
-| Green off, red on steady, and the app cannot connect.  | The tag is in its update mode, waiting for firmware over USB. Plug it into a computer and follow [Firmware update over USB-C](firmware-update-over-usb.md), or power-cycle it. |
-| The app cannot load a model on a tag running v1.2.0+0. | Update the firmware first. See [Update the firmware](#6-update-the-firmware-over-bluetooth).                                                                                   |
+| Problem                                               | What to check                                                                                                                                                                  |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The app does not find the tag.                        | Bluetooth is on and the app has its Bluetooth permission. The tag's green LED is blinking; if it is solid green, another phone is connected. If no LED is lit, charge the tag. |
+| Connection timed out.                                 | Move closer to the tag and try again. Restart the tag if it keeps happening.                                                                                                   |
+| No keywords are detected.                             | The application is _Active_ on the card. Speak clearly and close to the tag; its microphone is a quiet part.                                                                   |
+| Update did not install.                               | The firmware is signed with a key this tag does not accept. Use a release from https://github.com/Brainchip-Inc/AkidaTag/releases.                                             |
+| Model delivered, but not running.                     | Restart the tag. If it still does not run, the package is not for this tag.                                                                                                    |
+| Model update failed.                                  | Stay near the tag, keep the app open and send the model again.                                                                                                                 |
+| Green off, red on steady, and the app cannot connect. | The tag is in its update mode, waiting for firmware over USB. Plug it into a computer and follow [Firmware update over USB-C](firmware-update-over-usb.md), or power-cycle it. |
+| The app cannot load a model.                          | Update the firmware to the latest release first. See [Update the firmware](#6-update-the-firmware-over-bluetooth).                                                             |
 
 If none of this helps, the [FAQ](faq.md) answers the common questions, and [Support](support.md)
-says where to ask: an issue at https://github.com/Brainchip-Inc/AkidaTag/issues first, or
-BrainChip's Discord at https://discord.com/invite/9bmd9g52vn.
+says where to ask: BrainChip's Discord at https://discord.com/invite/9bmd9g52vn for help, and an
+issue at https://github.com/Brainchip-Inc/AkidaTag/issues for a bug.
 
 ---
 

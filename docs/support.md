@@ -9,14 +9,14 @@
 
 ## Where to ask
 
-1. **A GitHub issue**, at https://github.com/Brainchip-Inc/AkidaTag/issues. This is the preferred
-   place for a problem or a request: it is tracked, and the answer helps the next person. Search
-   the open issues first.
-2. **BrainChip's Discord**, at https://discord.com/invite/9bmd9g52vn, for questions and discussion.
-3. **Email.** TBD: the support address.
+1. **BrainChip's Discord**, at https://discord.com/invite/9bmd9g52vn, for help, questions and
+   discussion.
+2. **A GitHub issue**, at https://github.com/Brainchip-Inc/AkidaTag/issues, for a bug or a
+   feature request: it is tracked, and the answer helps the next person. Search the open issues
+   first.
 
 For BrainChip Connect, the app has its own documentation at
-https://brainchip-inc.github.io/BrainChip-Connect/ and its own issue tracker. TBD: the link.
+https://brainchip-inc.github.io/BrainChip-Connect/.
 
 ## What to include
 
@@ -30,10 +30,12 @@ https://brainchip-inc.github.io/BrainChip-Connect/ and its own issue tracker. TB
 
 ## Security
 
-TBD: how to report a security problem in the firmware or the app.
+Report a security problem privately, through the repository's **Security** tab on GitHub and
+**Report a vulnerability**, rather than in a public issue.
 
 ## More from BrainChip
 
+- This documentation: https://brainchip-inc.github.io/AkidaTag/
 - AkidaTag on the Developer Hub: https://developer.brainchip.com/akida-tag/
 - Developer Hub sign-up: https://developer.brainchip.com/signup/
 

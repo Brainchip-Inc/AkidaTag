@@ -3,13 +3,12 @@
 Six steps from the box to a keyword detected on the tag. The [user guide](user-guide.md) has the
 detail behind each one.
 
-1. **Charge the tag.** Plug the USB-C cable into the tag. TBD: how long a first charge takes.
+1. **Charge the tag.** Plug a USB-C cable into the tag; none is included.
 2. **Get the app.** BrainChip Connect is listed on Google Play at
    https://play.google.com/store/apps/details?id=com.brainchip.connect, open for pre-registration.
-   Google Play tells you when it is released. It needs Android 13 or later. TBD: the release
-   date.
-3. **Turn the tag on.** The green LED blinks slowly when the tag is ready. TBD: how the unit you
-   have is switched on.
+   Google Play tells you when it is released. It needs Android 13 or later, and is coming soon
+   to the iOS App Store.
+3. **Turn the tag on** with the power switch. The green LED blinks slowly when the tag is ready.
 4. **Connect.** Open the app, allow Bluetooth, tap `AkidaTag` in the device list, then **Connect
    to Device**. The green LED stays on while the app is connected.
 5. **Run the demo.** On the **Select the Application** screen, tap **Run Application** on the
@@ -34,8 +33,6 @@ detail behind each one.
 - No words detected: the tag's microphone is a quiet part. Speak clearly and close to it.
 - Everything else: [Troubleshooting](user-guide.md#9-troubleshooting) in the user guide, then the
   [FAQ](faq.md) and [Support](support.md).
-
-TBD: photo of the tag with the USB-C connector and the LEDs labelled.
 
 ---
 

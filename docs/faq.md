@@ -15,22 +15,23 @@ words and reports each one to the BrainChip Connect app. The model is loaded bef
 **Does it need the internet?** No. The tag talks to the phone over Bluetooth, and nothing in the
 demo leaves the phone. The app needs the internet only to download firmware and model files.
 
-**Is the battery included?** No. TBD: which battery the tag takes and how to fit it.
+**Is the battery included?** No. The box holds the board and its enclosure; there is no battery,
+camera or USB-C cable in it.
 
-**How do I turn it on?** The rev2 board has a power switch. TBD: which revision ships, and how a
-tag without the switch is turned on and off.
+**How do I turn it on?** With the power switch on the board. The green LED blinks slowly once it
+is ready.
 
 ## Phone and app
 
-**Which phones work?** Android phones running Android 13 or later, with Bluetooth. An iOS version
-of BrainChip Connect is planned.
+**Which phones work?** Android phones running Android 13 or later, with Bluetooth. BrainChip
+Connect is coming soon to the iOS App Store.
 
 **Where do I get the app?** Its Google Play listing,
 https://play.google.com/store/apps/details?id=com.brainchip.connect, is open for pre-registration.
-Google Play tells you when it is released. TBD: the release date.
+Google Play tells you when it is released.
 
 **Does the phone ask me to pair?** The firmware does not ask for a pairing code, so no pairing
-pop-up appears. TBD: whether that changes before launch.
+pop-up appears.
 
 **Can two phones connect at once?** No. One phone at a time. If the tag's green LED is solid,
 another phone is already connected.
@@ -47,8 +48,9 @@ check that the Keyword Spotting card says _Active_.
 version: green blinking is ready, green on is connected, a red flash is a detection, red on steady
 is a failure.
 
-**Can it learn a new word?** The firmware can learn new words on the device. TBD: how that is done
-from the app; the current guide leaves it out until the app side is settled.
+**Can it learn a new word?** The firmware can learn new words on the device, and every release
+attaches `akidatag-kws-edge-learning-model.zip` for that. Running a learning session from the app
+is not covered in this guide yet.
 
 **What does Factory Reset do?** Today it restarts the tag and nothing else. A full reset that
 erases the model and settings will come in a later release.
@@ -67,8 +69,9 @@ computer and the USB-C cable work too: [Firmware update over USB-C](firmware-upd
 file from a BrainChip release. Anything built from the source code is refused over Bluetooth and
 USB-C, by design.
 
-**I cannot load a model.** A tag on firmware v1.2.0+0 predates the model transfer the current app
-uses. Update the firmware first. TBD: the first release that carries the new transfer.
+**I cannot load a model.** Older firmware predates the model transfer the current app uses.
+Update the tag to the latest release, https://github.com/Brainchip-Inc/AkidaTag/releases/latest,
+and try again.
 
 ## Building your own
 
@@ -82,14 +85,13 @@ you can flash the whole image, after which the tag trusts your key instead. See
 [Signing, and which firmware a board accepts](developer-guide.md#8-signing-and-which-firmware-a-board-accepts).
 
 **Can I run my own model?** Yes, converted with the Akida tools and loaded like the demo model.
-[Models](developer-guide.md#7-models) explains the pipeline. TBD: where developers outside
-BrainChip get a model to start from.
+[Models](developer-guide.md#7-models) explains the pipeline.
 
 ## Help
 
-**Where do I ask?** Open an issue at https://github.com/Brainchip-Inc/AkidaTag/issues, or ask on
-BrainChip's Discord at https://discord.com/invite/9bmd9g52vn. [Support](support.md) says what to
-include.
+**Where do I ask?** For help, BrainChip's Discord at https://discord.com/invite/9bmd9g52vn. For a
+bug, an issue at https://github.com/Brainchip-Inc/AkidaTag/issues. [Support](support.md) says what
+to include.
 
 ---
 

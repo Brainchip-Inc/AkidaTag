@@ -26,7 +26,8 @@ Releases before `v1.2.0+0` carry the product's earlier name, Spark, in their fil
 
 - **A tag on `v1.2.0+0` cannot load a model from BrainChip Connect `v1.0.0+0`.** The app speaks
   the block-by-block model transfer that landed on `main` after the release. Update the firmware
-  before loading a model. TBD: the first release that carries the new transfer.
+  to the latest release, https://github.com/Brainchip-Inc/AkidaTag/releases/latest, before loading
+  a model.
 - **Turning Edge Learning on in the app restarts the tag.** Fixed on `main`; not yet released.
 
 ### On `main`, not yet released
@@ -46,7 +47,8 @@ Releases before `v1.2.0+0` carry the product's earlier name, Spark, in their fil
 | `akidatag-<version>-merged.hex` | Flashing a board with a debug probe: the bootloader plus the application. This is the only file that changes which signing key a board trusts. See the developer guide. |
 | `SHA256SUMS.txt`                | Checking a download: the checksum of every file above.                                                                                                                  |
 
-TBD: the model package attached to each release, and its name.
+Each release also attaches the model packages `akidatag-kws-model.zip` and
+`akidatag-kws-edge-learning-model.zip`; see [Load a model](user-guide.md#7-load-a-model).
 
 ---
 

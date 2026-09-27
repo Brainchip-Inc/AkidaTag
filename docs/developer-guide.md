@@ -57,7 +57,7 @@ Everything goes through `scripts/run.sh` inside the Docker image. Build the imag
 It downloads the SDK and takes a while; the result is about 17.6 GB. If you would rather install
 the toolchain on the host, Appendix I of [Environment setup](setup.md) lists what to install on
 Ubuntu 22.04. The CI release build pulls the same image from
-`ghcr.io/brainchip-inc/akidatag-ncs:v3.1.1-py3.12`. TBD: whether that package is public.
+`ghcr.io/brainchip-inc/akidatag-ncs:v3.1.1-py3.12`.
 
 Host-side tools, outside Docker:
 
@@ -205,7 +205,9 @@ is the shape of it.
    downloads the `.fbz` model named in the config and converts it, with the Akida package inside
    the Docker image, into `<model>_program_info.bin` and `<model>_program_data.bin`. The configs
    under `.env/` are git-ignored and their `model_url` is an internal host, so this step needs the
-   config and BrainChip's network. TBD: how a developer outside BrainChip obtains a model.
+   config and BrainChip's network. The converted packages are attached to every release as
+   `akidatag-kws-model.zip` and `akidatag-kws-edge-learning-model.zip`, so a developer without
+   that access starts from those.
 2. **Generate the package.** `src/utils/generate_info.py --config ...` writes `info.yaml` and zips
    the three files into `models/<model>/<model>.zip`, the package BrainChip Connect reads. It needs
    no Akida package, so it runs on the host.
@@ -286,8 +288,7 @@ either way.
   protects the update paths, not against someone with physical access and a probe.
 
 Units ship with the latest firmware release flashed and the demo model already in the AKD1500's
-flash, so a unit from BrainChip trusts the production key. TBD: whether the debug port is left
-open on retail units.
+flash, so a unit from BrainChip trusts the production key.
 
 **Developing on a unit from BrainChip.** Flash your `merged.hex` and `merged_CPUNET.hex` over SWD
 once. The unit now trusts the development key, accepts your builds over Bluetooth and USB-C, and
@@ -323,8 +324,6 @@ local file. BrainChip Connect shows a warning before sending a file whose key fi
 from the last one the board accepted through the app.
 
 ## 9. Developer caution
-
-TBD: proposed wording, awaiting approval. Do not publish until approved.
 
 > **Modify at your own risk.** AkidaTag is delivered with BrainChip's signed firmware. Building,
 > flashing or otherwise modifying the firmware, the bootloader or the model on a unit is done
@@ -412,7 +411,7 @@ manufacturer data of twelve ASCII bytes: a Bluetooth version `53`, a three-digit
 and the accelerator id `AKD1500`. The app filters on the accelerator id, so every board built
 around an AKD1500 appears in its list. There is no scan response and no service UUID on the air:
 the permanent hardware serial is reported only inside a connection, so that the rotating private
-address (`CONFIG_BT_PRIVACY`, 15-minute timeout) is not defeated. TBD: the firmware version bytes
+address (`CONFIG_BT_PRIVACY`, 15-minute timeout) is not defeated. The firmware version bytes
 in the manufacturer data are a fixed constant, not the image version.
 
 **Commands and responses** go over the Nordic UART Service. The phone writes a frame to the RX
@@ -428,7 +427,7 @@ multi-frame response. The phone always sends single frames.
 | Command                                 | Value  | Response                                                                                                                                                                                                                                                                                                                            |
 | --------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CMD_BATTERY`                           | 0      | `0:<soc percent>,<charger state>` where the state is 0 not charging, 1 charging, 2 recoverable fault, 3 non-recoverable fault.                                                                                                                                                                                                      |
-| `CMD_DEVICE_INFO`                       | 1      | Five frames: manufacturer, type, version, firmware, and the 16-hex-character device serial. TBD: the first four are placeholder constants in the firmware.                                                                                                                                                                          |
+| `CMD_DEVICE_INFO`                       | 1      | Five frames: manufacturer, type, version, firmware, and the 16-hex-character device serial. The first four are constants in the firmware.                                                                                                                                                                                           |
 | `CMD_APPS`                              | 2      | Three frames: application name, description, size. Also marks the phone as being on its main page, which starts the once-a-second battery stream.                                                                                                                                                                                   |
 | `CMD_CONFIG`                            | 4      | `4:GET` returns six frames, one parameter each, as `4:<name>:<value>`; `4:<id>:<value>` sets one and answers `4:<id>:OK` or `4:<id>:ERR:<ID or RANGE or PARSE or NVS>`; `4:RESET` restores the defaults and returns the snapshot. The ids are 0 rms, 1 debounce, 2 smoothing alpha, 3 score threshold, 4 chiming, 5 speech timeout. |
 | `CMD_APP_INFO`                          | 5      | Four frames: model name, input shape, number of classes, keywords separated by `;`.                                                                                                                                                                                                                                                 |
@@ -464,7 +463,7 @@ groups, so `smpmgr`, nRF Connect for Mobile and BrainChip Connect all work.
 Enforcement is a separate switch: `CONFIG_BT_LBS_SECURITY_ENABLED` makes the writable
 characteristics require an encrypted link and registers the pairing callbacks, and
 `scripts/run.sh` builds `demo_apps` with it off. In the build as shipped from `main`, nothing
-forces the phone to pair. TBD: whether the retail build turns it on.
+forces the phone to pair.
 
 ## 13. Contributing
 
@@ -483,20 +482,9 @@ forces the phone to pair. TBD: whether the retail build turns it on.
   pin in `scripts/requirements.txt` move together.
 - `AGENTS.md` at the repository root collects the sharp edges found in real work, and is worth a
   read before the first change.
-- Questions and problems go to a GitHub issue first, https://github.com/Brainchip-Inc/AkidaTag/issues,
-  and to BrainChip's Discord, https://discord.com/invite/9bmd9g52vn, for discussion. The AkidaTag
-  page on the Developer Hub is https://developer.brainchip.com/akida-tag/.
-
-## Open questions
-
-TBD: the points below could not be settled from the code and are waiting for an answer.
-
-- Whether the debug port is left open on retail units.
-- Whether the release should publish the network-core image alongside `merged.hex`.
-- Whether the retail build enables `CONFIG_BT_LBS_SECURITY_ENABLED`.
-- How a developer outside BrainChip obtains a model to convert, given the internal `model_url`.
-- Whether the toolchain image on `ghcr.io` is public.
-- Approval of the developer caution wording in section 9.
+- Help and questions go to BrainChip's Discord, https://discord.com/invite/9bmd9g52vn; bugs and
+  feature requests to a GitHub issue, https://github.com/Brainchip-Inc/AkidaTag/issues. The
+  AkidaTag page on the Developer Hub is https://developer.brainchip.com/akida-tag/.
 
 ---
 

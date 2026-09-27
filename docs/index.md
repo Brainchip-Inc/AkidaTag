@@ -5,8 +5,6 @@ BrainChip Akida AKD1500 neural processor on one board, with a microphone, an ine
 Bluetooth Low Energy. The AI model runs on the board itself, and the board reports to the
 BrainChip Connect app on your phone.
 
-TBD: launch wording for the introduction above. It is written from the repository README.
-
 ## Start here
 
 | Page                                  | Read it if                                                                                     |
@@ -45,8 +43,9 @@ TBD: launch wording for the introduction above. It is written from the repositor
 - Firmware releases: https://github.com/Brainchip-Inc/AkidaTag/releases
 - BrainChip Connect for Android: listed on Google Play at
   https://play.google.com/store/apps/details?id=com.brainchip.connect, open for pre-registration.
-  An iOS version is planned.
-- Model package: TBD: model asset name, attached to the firmware release.
+  Coming soon to the iOS App Store.
+- Model packages: `akidatag-kws-model.zip` and `akidatag-kws-edge-learning-model.zip`, attached
+  to every firmware release.
 
 ## BrainChip Connect
 
