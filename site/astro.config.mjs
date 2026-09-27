@@ -6,9 +6,10 @@ import starlight from '@astrojs/starlight';
 /**
  * Sidebar entries for the hardware pages, in reading order, taken from the
  * files under docs/hardware. Empty while that directory does not exist, so the
- * site builds before the hardware pages land.
+ * site builds before the hardware pages land. The labels are short, like the
+ * other groups' entries; the page titles carry the product name.
  *
- * @returns {Array<{ slug: string }>} One entry per hardware page.
+ * @returns {Array<{ label: string, slug: string }>} One entry per hardware page.
  */
 function hardwarePages() {
   const directory = new URL('../docs/hardware/', import.meta.url);
@@ -18,11 +19,13 @@ function hardwarePages() {
     const index = preferred.indexOf(slug);
     return index === -1 ? preferred.length : index;
   };
+  const label = slug =>
+    slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' ');
   return readdirSync(directory)
     .filter(name => name.endsWith('.md'))
     .map(name => name.replace(/\.md$/, ''))
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
-    .map(slug => ({ slug: `hardware/${slug}` }));
+    .map(slug => ({ label: label(slug), slug: `hardware/${slug}` }));
 }
 
 const hardware = hardwarePages();
