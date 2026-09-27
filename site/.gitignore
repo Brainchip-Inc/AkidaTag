@@ -1,0 +1,9 @@
+# Build output and generated types
+dist/
+.astro/
+
+# Dependencies
+node_modules/
+
+# Generated from ../docs by scripts/sync-docs.mjs on every build
+src/content/docs/

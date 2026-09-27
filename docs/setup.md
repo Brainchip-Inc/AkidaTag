@@ -8,14 +8,13 @@ Follow the pin connections as shown below:
 
 ![Pin Connections](./images_and_videos/Pin-Connection-nRF-UART.jpg)
 
-
 ---
 
 ### Step 2: Install Dependencies
 
 Current setup provide dockerfile to create a docker image that will have all the required dependices.
 
-*Note: If you'd like to install depenencies locally then follow Appendix I: Install Dependency On System.*
+_Note: If you'd like to install depenencies locally then follow Appendix I: Install Dependency On System._
 
 **Build Docker Image**
 
@@ -36,14 +35,14 @@ Based on the scripts you ran, following images should be build and seen. See bel
 `docker images`
 
 | IMAGE                      | ID           | DISK USAGE |
-|----------------------------|--------------|------------|
+| -------------------------- | ------------ | ---------- |
 | akidatag-ncs:v3.1.1-py3.12 | 7d2f06ee0930 | 17.6GB     |
 
 ---
 
 ### Step 3: Build, Flash And Test Connections
 
-*Note: Following scripts are running through docker. If installed dependency locally then simply remove `-d` from below runs.*
+_Note: Following scripts are running through docker. If installed dependency locally then simply remove `-d` from below runs._
 
 **1. Build And Flash demo_apps**
 
@@ -131,7 +130,7 @@ nRF Connect Mobile App; the FOTA section of
 To update a board over its USB-C cable instead, with no phone and no debug probe, see
 [firmware-update-over-usb.md](./firmware-update-over-usb.md).
 
-*Tip: A simple change that I make is adding a print statement in main.cpp*
+_Tip: A simple change that I make is adding a print statement in main.cpp_
 
 ---
 
@@ -143,11 +142,11 @@ To update a board over its USB-C cable instead, with no phone and no debug probe
 - Working on Ubuntu 22 LTS (as of 11/25/2025)
 - Min version for main dependencies
 
-  | **Tool**     | **Min. Version** |
-  |------------- |--------------|
-  | **cmake**    | 3.20.5       |
-  | **Python**   | 3.10         |
-  | **Devicetree compiler** | 1.4.6 |
+  | **Tool**                | **Min. Version** |
+  | ----------------------- | ---------------- |
+  | **cmake**               | 3.20.5           |
+  | **Python**              | 3.10             |
+  | **Devicetree compiler** | 1.4.6            |
 
   Install main dependencies with the following commands
 
@@ -167,8 +166,6 @@ To update a board over its USB-C cable instead, with no phone and no debug probe
   ```
 
   If `cmake` version is not higher than min version mentioned, then follow installation of a proper version through this [link](https://docs.zephyrproject.org/latest/develop/getting_started/installation_linux.html#installation-linux).
-
-  > A higher version of cmake can also be added using the [kitware third-party apt repository](https://apt.kitware.com/) using the script `scripts/kitware-archive.sh`
 
   Verify other versions:
 
@@ -204,7 +201,7 @@ To update a board over its USB-C cable instead, with no phone and no debug probe
   Firmware: J-Link OB-nRF5340-NordicSemi compiled Jul  8 2025 10:15:34
   Hardware version: V1.00
   J-Link uptime (since boot): 0d 00h 00m 00s
-  S/N: 1050082195
+  S/N: <serial number>
   License(s): RDI, FlashBP, FlashDL, JFlash, GDB
   USB speed mode: Full speed (12 MBit/s)
   VTref=3.300V
@@ -215,7 +212,6 @@ To update a board over its USB-C cable instead, with no phone and no debug probe
 
   > This confirms that the nRF5340 DK board is connected.
 
-
 **Download And Setup nRF Util**
 
 - Download the latest [nrfutil file](https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil).
@@ -224,16 +220,15 @@ Run script from project root to install the above file
 
 `./scripts/install_nrfutil.sh`
 
-Add nrfutil to path - environment variable for further steps 
+Add nrfutil to path - environment variable for further steps
 
 `source ./scripts/env.sh`
-
 
 **Install nrfutil sdk-manager and device**
 
 Install sdk-manager and device with nrfutil
 
- ```
+```
 # install the nrfutil sdk-manager
 nrfutil install sdk-manager
 
@@ -244,12 +239,13 @@ nrfutil install device
 `.nrfutil` folder will be created in your `$HOME` directory
 
 Next, install the latest nRF Connect SDK version. v3.1.1 at the time
+
 ```
 # search list of available installations
 nrfutil sdk-manager search
 
 # install the version v3.1.1
-nrfutil sdk-manager install v3.1.1 
+nrfutil sdk-manager install v3.1.1
 ```
 
 `ncs` folder will be created in your `$HOME` directory
