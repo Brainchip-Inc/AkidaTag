@@ -29,6 +29,9 @@ If the firmware does not build, flash or run for you, please open an
 [issue](https://github.com/Brainchip-Inc/AkidaTag/issues). That is the most useful thing
 you can send us, and we read every one.
 
+For a security vulnerability, follow [SECURITY.md](SECURITY.md) and report it privately
+instead.
+
 Please search the existing issues first, then include:
 
 - what you ran, and what happened instead of what you expected
