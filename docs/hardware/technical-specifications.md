@@ -68,23 +68,19 @@ the [block diagram](block-diagram.md).
 | **USB** | USB-C: 5 V charging input and a USB-to-serial console at 115200 baud; firmware update over the cable with nothing but a computer |
 | **Debug** | 10-pin 1.27 mm SWD header |
 | **Battery** | Not included. Fits a single-cell rechargeable Li-ion or Li-Po cell, 3.0 to 4.2 V, on a JST XH 2-pin connector |
-| **Battery life** | Depends on the cell fitted; `TBD: battery life with a reference cell` |
+| **Battery life** | Depends on the cell fitted |
 | **Charging** | On-board linear charger with power path, 536 mA nominal fast charge from USB-C 5 V; the device runs while charging; charge time depends on the cell fitted |
 | **Power switch** | On/off slide switch |
 | **Power consumption** | `TBD: power consumption by mode` |
 | **Indicators** | One RGB LED and one white LED under firmware control |
 | **Controls** | One user button; the on/off slide switch |
 | **Board dimensions** | 27.7 mm x 39.5 mm, 1.0 mm thick, six-layer PCB, chamfered corners |
-| **Enclosure** | `TBD: enclosure dimensions, material and colour` |
+| **Enclosure** | Ships in its enclosure; `TBD: enclosure dimensions, material and colour` |
 | **Weight** | `TBD: weight` |
 | **Operating temperature** | `TBD: operating temperature range`; the board as a whole has not been rated, and the host processor is rated -40 to 105 °C |
 | **Storage temperature** | `TBD: storage temperature range` |
 | **Humidity** | `TBD: humidity range` |
-| **Ingress protection** | `TBD: ingress protection rating` |
-| **Regulatory** | `TBD: regulatory approvals` |
-| **Bluetooth qualification** | `TBD: Bluetooth qualification` |
-| **RoHS** | `TBD: RoHS statement` |
-| **What is in the box** | `TBD: box contents`; no battery is included |
+| **What is in the box** | The AkidaTag board in its enclosure. No battery, USB-C cable or camera is included |
 
 ---
 
@@ -99,7 +95,7 @@ USB-C cable from a computer.
 
 | | |
 |---|---|
-| **Companion app** | BrainChip Connect for Android 13 or later. The Google Play listing is open for pre-registration; the app is not yet installable from it. `TBD: iOS availability` |
+| **Companion app** | BrainChip Connect for Android 13 or later. The Google Play listing is open for pre-registration; the app is not yet installable from it. An iOS version is to follow on the App Store |
 | **Firmware** | This repository, open for building and modification |
 | **Demonstrations** | Keyword spotting with on-device edge learning; motion sensing; camera capture |
 
@@ -119,9 +115,10 @@ Every value on this page is taken from the AkidaTag revision 2 design files, the
 firmware 1.2.0+0 in this repository, the
 [AKD1500 Product Brief V2.4](https://brainchip.com/wp-content/uploads/2025/10/AKD1500-Product-Brief-V2.4-Oct.25.pdf),
 the [Nordic nRF5340 product specification](https://docs.nordicsemi.com/bundle/ps_nrf5340/page/keyfeatures_html5.html),
-the Texas Instruments BQ25185 datasheet or the
-[Google Play listing](https://play.google.com/store/apps/details?id=com.brainchip.connect).
-The [datasheet](datasheet.md) lists the source next to each value.
+the Texas Instruments BQ25185 datasheet, the
+[Google Play listing](https://play.google.com/store/apps/details?id=com.brainchip.connect)
+or BrainChip's product decisions of September 2026 on the enclosure, the box contents and
+the app platforms. The [datasheet](datasheet.md) lists the source next to each value.
 
 ---
 

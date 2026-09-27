@@ -72,7 +72,8 @@ firmware drives the enable high.
 | CAM_PWR_EN | P1.06 | U2 | VDD_3V3_1V8_CAM |
 
 The battery sits behind the BQ27427 fuel gauge: the charger's BAT pin reaches the gauge's
-sense input, and the gauge's BAT pin reaches the connector. The gauge is on I2C1 at
+SRX sense input, and the gauge's BAT pin reaches the connector, which is the orientation the
+BQ27427 datasheet specifies. The gauge is on I2C1 at
 address 0x55 and raises its GPOUT interrupt line to P0.30 when the state of charge
 changes. The charger's STAT1 and STAT2 outputs go to P0.23 and P0.24 with pull-ups; a
 10 kilohm NTC thermistor is on the charger's TS pin and a second on the gauge's BIN pin.
@@ -244,9 +245,9 @@ Both amplifiers run from VDD_1V8 with their enable pins tied high. The A3 gain o
 
 The revision 2 schematic (SI-NRF-AKD_BRD-002 V11, 2026-08-25), netlist report, bill of
 materials and board outline; the earlier system block diagram and labelled layout
-drawing (January 2026); the Texas Instruments INA190 datasheet (SBOS863D); the AKD1500
-datasheet v1.2 ball descriptions and BrainChip application note AN-003 for the strap
-meanings; and the firmware board overlay `src/boards/nrf5340_cpuapp_akidatag.overlay`,
+drawing (January 2026); the Texas Instruments INA190 datasheet (SBOS863D) and BQ27427
+datasheet (SLUSEB5B); BrainChip AKD1500 documentation for the strap meanings; and the
+firmware board overlay `src/boards/nrf5340_cpuapp_akidatag.overlay`,
 `src/core/interface/gpio/gpio.c`, `src/core/interface/akd_spi_flash/akd_spi_flash_handler.cpp`
 and `src/README.md` on `main` at firmware 1.2.0+0.
 

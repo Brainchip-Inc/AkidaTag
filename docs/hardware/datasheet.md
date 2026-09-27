@@ -109,24 +109,22 @@ back. The chip can learn new classes on the device.
 | Core clock in firmware | 400 MHz default from the internal 800 MHz PLL; 5 to 400 MHz selectable | `src/Kconfig`, `src/README.md`; product brief gives the 5 to 400 MHz range |
 | Host SPI clock in firmware | 8 MHz default, runtime selectable 1 to 32 MHz | `src/Kconfig`, `src/README.md` |
 | Supplies | 0.8 V core (VDD_0V8_AKD), 1.8 V I/O (VDD_1V8_AKD); PLL supplies through ferrite beads from the same rails; PCIe PHY supplies tied to ground | Rev2 netlist |
-| Strapping | PCIe host select low (SPI host); SEL_CLK low (crystal oscillator); SPI slave mode pins low; OP_MODE0 low (crystal as the clock source); OP_MODE1 high (Safe Mode, see below); TAP_SEL and TESTMODE low | Rev2 netlist; AKD1500 datasheet v1.2 ball descriptions |
+| Strapping | PCIe host select low (SPI host); SEL_CLK low (crystal oscillator); SPI slave mode pins low; OP_MODE0 low (crystal as the clock source); OP_MODE1 high (Safe Mode, see below); TAP_SEL and TESTMODE low | Rev2 netlist; BrainChip AKD1500 documentation for the strap meanings |
 | Host control lines | SLEEP from P1.07; PWR_GOOD from P1.05 (pulled up on the board); GPIO0..GPIO3 to P1.11, P1.12, P0.02, P0.03 | Rev2 netlist |
 | Reset | No host-driven reset line is wired; PCIE_PERST_N is left unconnected | Rev2 netlist |
 
 Between inferences the firmware asserts SLEEP, which gates the AKD1500 clocks while the
 loaded model is retained, and releases it on demand with a reference count. The
 `app stop` command additionally turns the AKD1500 PLL off for the lowest idle power.
-GPIO3 (P0.03) is the completion interrupt the firmware waits on after each inference, which
-is the pad BrainChip's application note AN-001 recommends for it. The sleep behaviour is
-described in AN-002.
+GPIO3 (P0.03) is the completion interrupt the firmware waits on after each inference.
 
 OP_MODE1 is strapped high, which puts the AKD1500 in Safe Mode: after reset it stays on the
 25 MHz reference clock instead of switching itself onto its PLL, and the host has to make
 that switch once the PLL reports lock. The firmware does this at a low host SPI clock and
 only then raises the clock, because the AKD1500 requires the host clock to stay at or below
 a quarter of its SPI slave core clock, which caps the host at a few megahertz while the
-reference clock is in use. Source: `src/core/interface/akd_spi_flash/akd_spi_flash_handler.cpp`;
-AKD1500 application note AN-003.
+reference clock is in use. Source: `src/core/interface/akd_spi_flash/akd_spi_flash_handler.cpp`,
+which documents the mode and performs the switch.
 
 ### 3.3 Memory
 
@@ -225,12 +223,9 @@ J2 is a 10-pin, 1.27 mm pitch header carrying SWDIO, SWDCLK and reset, with ESD 
 on all three lines. Its pinout is in section 5.4. The board's reference voltage on this
 header is VDD_1V8.
 
-Pin 6 carries nRESET and pin 10 is not connected. That differs from the Arm 10-pin Cortex
-Debug layout, which puts SWO on pin 6 and nRESET on pin 10, so a probe's reset line does not
-reach the board through a pin-to-pin cable. `TBD: J2 pinout verified on a board.` The SWD
-connection guide of April 2026 describes the earlier board's labelled debug pads (GND, SWD,
-CLK, NRST and a 1.8 V reference) wired to a J-Link with five flying leads, not this header,
-so it does not settle the question.
+Pin 6 carries nRESET and pin 10 is not connected, as the revision 2 schematic wires it. That
+differs from the Arm 10-pin Cortex Debug layout, which puts SWO on pin 6 and nRESET on
+pin 10, so a probe's reset line does not reach the board through a pin-to-pin cable.
 
 ### 3.10 Indicators and controls
 
@@ -277,10 +272,12 @@ the IMU, then the microphones, then the camera enable. Source:
 No battery is supplied with the board. The firmware programs the fuel gauge for an
 1100 mAh, 4.2 V cell with a 3000 mV terminate voltage and a 4150 mV taper voltage, and the
 source notes that these values are for a test battery, so the state of charge it reports is
-only as good as the match between those parameters and the cell fitted. The firmware also
-inverts the sign of the gauge's current reading to correct for a sense resistor that the
-code describes as physically reversed; the netlist alone cannot show whether revision 2
-still has that orientation. `TBD: fuel gauge sense orientation on revision 2.` Source:
+only as good as the match between those parameters and the cell fitted. Revision 2
+connects the battery to the gauge's BAT pin and the charger to its SRX pin, which is the
+orientation the BQ27427 datasheet specifies for its integrated sense resistor. The firmware
+on `main` still inverts the sign of the gauge's current reading to correct for a sense
+resistor that its code describes as physically reversed, a correction that inverts the sign
+on this orientation. Source: Rev2 netlist; BQ27427 datasheet SLUSEB5B, pin functions;
 `src/include/fuel_gauge/fuel_gauge.h`, `src/core/interface/fuel_gauge/fuel_gauge.c`.
 
 ---
@@ -484,7 +481,7 @@ describe.
 | Serial recovery | MCUboot only, listening on the console UART | `src/sysbuild/mcuboot.conf` |
 
 Battery life in each state depends on the cell fitted; no battery is supplied with the
-board and no reference measurement exists yet. `TBD: battery life with a reference cell.`
+board.
 
 ---
 
@@ -520,20 +517,17 @@ board and no reference measurement exists yet. `TBD: battery life with a referen
 | Microphones | Bottom side, one in each corner beside the USB-C edge | Rev2 placement data |
 | Board thickness | 1.00 mm, plus or minus 10 % | Rev2 fabrication notes |
 | Weight | `TBD: weight` | |
-| Enclosure | `TBD: enclosure dimensions and material` | |
+| Enclosure | The board ships in its enclosure; `TBD: enclosure dimensions and material` | BrainChip product decision |
 
 ---
 
-## 10. Environmental and compliance
+## 10. Environmental
 
 | Item | Value |
 |---|---|
 | Operating temperature | `TBD: operating temperature range`; not rated for the assembly, see section 6.2 |
 | Storage temperature | `TBD: storage temperature range` |
 | Humidity | `TBD: humidity range` |
-| Regulatory | `TBD: regulatory approvals` |
-| Bluetooth qualification | `TBD: Bluetooth qualification` |
-| RoHS | The Rev2 bill of materials marks every listed part RoHS compliant except the nRF5340 line, which is blank; `TBD: board-level RoHS statement` |
 
 ---
 
@@ -542,8 +536,8 @@ board and no reference measurement exists yet. `TBD: battery life with a referen
 | Item | Value |
 |---|---|
 | Product name | AkidaTag |
-| What is in the box | `TBD: box contents`; no battery is included |
-| Companion app | BrainChip Connect for Android 13 or later; the [Google Play listing](https://play.google.com/store/apps/details?id=com.brainchip.connect) is open for pre-registration and the app is not yet installable from it |
+| What is in the box | The AkidaTag board in its enclosure. No battery, USB-C cable or camera is included |
+| Companion app | BrainChip Connect for Android 13 or later; the [Google Play listing](https://play.google.com/store/apps/details?id=com.brainchip.connect) is open for pre-registration and the app is not yet installable from it. An iOS version is to follow on the App Store |
 | Developer resources | [AkidaTag on the BrainChip Developer Hub](https://developer.brainchip.com/akida-tag/), [Developer Hub sign-up](https://developer.brainchip.com/signup/), [BrainChip community on Discord](https://discord.com/invite/9bmd9g52vn) |
 
 ---
@@ -589,9 +583,10 @@ first board shipped. Source: the revision summary on the Rev2 schematic cover sh
 - Board test records, internal: post-fabrication PCB test report (version 1.0, 2026-03-13),
   PCB testing checklist and procedures (version 1.0, 2026-02-18) and Spark board SWD
   connection guide (version 1.1, 2026-04-10); read for facts only, nothing copied.
-- BrainChip AKD1500 application notes AN-001 (interrupt-driven inference), AN-002 (sleep pin
-  and low-power operation) and AN-003 (clock and frequency management), revision 1.0,
-  2026-07-13; the AKD1500 datasheet v1.2 ball descriptions for the strap meanings.
+- BrainChip AKD1500 documentation for the strap meanings and the Safe Mode clock behaviour.
+- Texas Instruments BQ27427 datasheet, SLUSEB5B: pin functions.
+- BrainChip product decisions of September 2026: the enclosure ships with the board, the box
+  contents, and the companion app platforms.
 - [BrainChip Connect on Google Play](https://play.google.com/store/apps/details?id=com.brainchip.connect)
   for the Android version.
 
