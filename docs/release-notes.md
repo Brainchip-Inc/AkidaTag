@@ -13,14 +13,9 @@ changes. The app shows the same version on its firmware update screen.
 
 ## Releases
 
-| Release    | Date       | What it was for                                                                                                                                                                                              |
-| ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Release    | Date       | What it was for                                                                                                                                                                                         |
+| ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `v1.2.0+0` | 2026-09-14 | Pre-release. The product rename from Spark to AkidaTag, firmware update over the USB-C cable with no probe and no button, a build that works from a fresh clone, and the Akida engine committed to the tree. |
-| `v1.1.1+0` | 2026-08-25 | Patch release fixing the two defects that shipped in `v1.1.0+0`: a model update over Bluetooth never completed, and the DK build did not compile.                                                            |
-| `v1.1.0+0` | 2026-08-25 | Pre-release. Power measurement and power control on the board, a rewritten keyword-spotting scoring path, and the first hardware-in-the-loop CI job.                                                         |
-| `v1.0.0+0` | 2026-04-07 | First alpha of the firmware platform.                                                                                                                                                                        |
-
-Releases before `v1.2.0+0` carry the product's earlier name, Spark, in their file names.
 
 ### Known issues in `v1.2.0+0`
 

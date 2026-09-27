@@ -70,14 +70,10 @@ export default defineConfig({
         {
           label: 'Firmware reference',
           items: [
-            { label: 'Environment setup', slug: 'setup' },
+            { label: 'Firmware setup', slug: 'setup' },
             {
               label: 'Firmware update over USB-C',
               slug: 'firmware-update-over-usb',
-            },
-            {
-              label: 'BLE model transfer protocol',
-              slug: 'ble-model-transfer',
             },
           ],
         },
@@ -87,7 +83,6 @@ export default defineConfig({
             { label: 'FAQ', slug: 'faq' },
             { label: 'Support', slug: 'support' },
             { label: 'Release notes', slug: 'release-notes' },
-            { label: 'Open-source licences', slug: 'licences' },
           ],
         },
       ],
