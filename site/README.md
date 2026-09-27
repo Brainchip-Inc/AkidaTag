@@ -27,7 +27,7 @@ turns each page's first heading into the Starlight title, drops the copyright
 line that the site's own footer band carries, and rewrites links: a link to
 another page under `docs/` becomes that page's site URL, and a link to a file
 elsewhere in the repository points at GitHub. `docs/BOARD_OVERLAY_CHANGES.md`
-is left out of the site.
+and `docs/ble-model-transfer.md` are left out of the site.
 
 The sidebar is in `astro.config.mjs`. The hardware group is built from the
 files under `docs/hardware/` when that directory exists.

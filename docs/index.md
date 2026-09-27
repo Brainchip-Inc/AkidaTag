@@ -25,18 +25,16 @@ BrainChip Connect app on your phone.
 
 | Page                                                      | What it holds                                                                                                       |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| [Environment setup](setup.md)                             | The Docker toolchain image, a local install as the alternative, and the nRF5340 DK bench with an AKD1500 PCIe card. |
-| [Firmware update over USB-C](firmware-update-over-usb.md) | Updating a board with nothing but its USB-C cable, through the bootloader's serial recovery mode.                   |
-| [BLE model transfer protocol](ble-model-transfer.md)      | The wire contract between the firmware and BrainChip Connect for loading a model.                                   |
+| [Firmware setup](setup.md)                                | Building the Docker toolchain image, connecting an AkidaTag, and building and flashing the firmware.              |
+| [Firmware update over USB-C](firmware-update-over-usb.md) | Updating a board with nothing but its USB-C cable, through the bootloader's serial recovery mode.                 |
 
 ## Help
 
 | Page                                | What it holds                                                          |
 | ----------------------------------- | ---------------------------------------------------------------------- |
-| [FAQ](faq.md)                       | Short answers to the questions people ask first.                       |
-| [Support](support.md)               | Where to ask for help and what to include.                             |
-| [Release notes](release-notes.md)   | What each firmware release changed, and what each release file is for. |
-| [Open-source licences](licences.md) | The licence of the firmware and of the code it imports.                |
+| [FAQ](faq.md)                     | Short answers to the questions people ask first.                       |
+| [Support](support.md)             | Where to ask for help and what to include.                             |
+| [Release notes](release-notes.md) | What each firmware release changed, and what each release file is for. |
 
 ## Downloads
 

@@ -16,7 +16,10 @@ const sourceDir = path.resolve(siteDir, '..', 'docs');
 const targetDir = path.join(siteDir, 'src', 'content', 'docs');
 const siteBase = '/AkidaTag';
 const repositoryBlobUrl = 'https://github.com/Brainchip-Inc/AkidaTag/blob/main';
-const excludedPages = new Set(['BOARD_OVERLAY_CHANGES.md']);
+const excludedPages = new Set([
+  'BOARD_OVERLAY_CHANGES.md',
+  'ble-model-transfer.md',
+]);
 const footerPattern =
   /\n---\n\n© 2026 BrainChip Holdings Ltd\. All rights reserved\.\s*$/;
 
