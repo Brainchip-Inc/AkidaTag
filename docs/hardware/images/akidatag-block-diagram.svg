@@ -1,178 +1,118 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 940" width="1240" height="940" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 790" width="1240" height="790" role="img" aria-labelledby="title">
 <title id="title">AkidaTag system block diagram, hardware revision 2</title>
 <defs>
 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#323F4F"/></marker>
 <marker id="arrow-rev" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 10 0 L 0 5 L 10 10 z" fill="#323F4F"/></marker>
 </defs>
-<rect width="1240" height="940" fill="#FFFFFF"/>
+<rect width="1240" height="790" fill="#FFFFFF"/>
 <text x="620" y="32" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="20" font-weight="600" fill="#000000">AkidaTag system block diagram (hardware revision 2)</text>
-<rect x="20" y="60" width="330" height="420" rx="14" fill="#FFF6D6" stroke="none"/>
+<rect x="20" y="60" width="330" height="410" rx="14" fill="#FFF6D6" stroke="none"/>
 <text x="185.0" y="84" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">POWER SYSTEM</text>
-<rect x="20" y="500" width="330" height="250" rx="14" fill="#EEF1F5" stroke="none"/>
-<text x="185.0" y="524" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">USB &amp; DEBUG</text>
-<rect x="380" y="60" width="500" height="690" rx="14" fill="#E6EFFD" stroke="none"/>
-<text x="630.0" y="84" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">COMPUTE &amp; MEMORY</text>
+<rect x="20" y="490" width="330" height="220" rx="14" fill="#EEF1F5" stroke="none"/>
+<text x="185.0" y="514" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">USB &amp; DEBUG</text>
+<rect x="380" y="60" width="490" height="650" rx="14" fill="#E6EFFD" stroke="none"/>
+<text x="625.0" y="84" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">COMPUTE &amp; MEMORY</text>
 <rect x="910" y="60" width="310" height="130" rx="14" fill="#EEF1F5" stroke="none"/>
 <text x="1065.0" y="84" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">RF FRONT-END</text>
 <rect x="910" y="210" width="310" height="250" rx="14" fill="#E3FBF3" stroke="none"/>
 <text x="1065.0" y="234" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">SENSORS</text>
-<rect x="910" y="480" width="310" height="120" rx="14" fill="#EEF1F5" stroke="none"/>
+<rect x="910" y="480" width="310" height="100" rx="14" fill="#EEF1F5" stroke="none"/>
 <text x="1065.0" y="504" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">EXPANSION</text>
-<rect x="910" y="620" width="310" height="130" rx="14" fill="#EEF1F5" stroke="none"/>
-<text x="1065.0" y="644" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">INDICATORS &amp; CONTROLS</text>
-<rect x="40" y="100" width="140" height="60" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="110.0" y="126.0" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">USB-C J5</text>
-<text x="110.0" y="142.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">5 V VBUS</text>
-<rect x="200" y="100" width="130" height="60" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="265.0" y="126.0" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">Battery J4</text>
-<text x="265.0" y="142.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">single-cell Li-ion</text>
-<rect x="40" y="200" width="290" height="80" rx="8" fill="#FFC524" stroke="#323F4F" stroke-width="1.5"/>
-<text x="185.0" y="227.8" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">Battery circuit</text>
-<text x="185.0" y="244.1" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">BQ25185 charger with power path</text>
-<text x="185.0" y="260.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">BQ27427 fuel gauge (I2C)</text>
-<rect x="40" y="310" width="130" height="50" rx="8" fill="#FFC524" stroke="#323F4F" stroke-width="1.5"/>
-<text x="105.0" y="330.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">On/off switch</text>
-<text x="105.0" y="347.1" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">SW2 (slide)</text>
-<rect x="40" y="385" width="290" height="80" rx="8" fill="#FFC524" stroke="#323F4F" stroke-width="1.5"/>
-<text x="185.0" y="413.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#000000">Power rails</text>
-<text x="185.0" y="428.7" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#000000">TPS631000 1.8 V, TLV62585 0.8 V, TPS7A2033 3.3 V</text>
-<text x="185.0" y="443.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#000000">5 x TPS22991 load switches, 2 x INA190 current sense</text>
-<path d="M 110,160 L 110,200" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M 265,160 L 265,200" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<path d="M 105,280 L 105,310" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="115.0" y="289" width="26.8" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="120" y="300" text-anchor="start" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">SYS</text>
-<path d="M 105,360 L 105,385" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="115.0" y="367" width="122.0" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="120" y="378" text-anchor="start" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">VCC_SYS 3.0 to 4.2 V</text>
-<path d="M 330,425 L 365,425 L 365,330 L 400,330" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="346.0" y="289" width="38.0" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="365" y="300" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">rails</text>
-<rect x="40" y="540" width="130" height="60" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="105.0" y="565.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">USB-C J5</text>
-<text x="105.0" y="582.1" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">D+ / D-</text>
-<rect x="200" y="540" width="130" height="60" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="265.0" y="565.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">CP2105</text>
-<text x="265.0" y="582.1" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">USB-UART bridge</text>
-<rect x="200" y="660" width="130" height="60" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="265.0" y="685.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">SWD header J2</text>
-<text x="265.0" y="702.1" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">10-pin 1.27 mm</text>
-<path d="M 170,570 L 200,570" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<path d="M 330,570 L 400,570" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<rect x="346.0" y="551" width="38.0" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="365" y="562" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">UART0</text>
-<path d="M 330,690 L 365,690 L 365,620 L 400,620" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<rect x="351.6" y="719" width="26.8" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="365" y="730" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">SWD</text>
-<rect x="400" y="110" width="210" height="300" rx="8" fill="#0061ED" stroke="#002E72" stroke-width="1.5"/>
-<text x="505.0" y="207.3" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#FFFFFF">nRF5340</text>
-<text x="505.0" y="223.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">dual-core Arm Cortex-M33</text>
-<text x="505.0" y="239.8" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">128 MHz application core</text>
-<text x="505.0" y="255.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">64 MHz network core</text>
-<text x="505.0" y="272.1" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">Bluetooth Low Energy</text>
-<text x="505.0" y="288.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">1 MB flash, 512 KB RAM</text>
-<text x="505.0" y="304.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF"></text>
-<text x="505.0" y="320.8" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">Zephyr, MCUboot, LittleFS</text>
-<rect x="650" y="110" width="210" height="300" rx="8" fill="#002E72" stroke="#002E72" stroke-width="1.5"/>
-<text x="755.0" y="207.3" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#FFFFFF">AKD1500</text>
-<text x="755.0" y="223.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">Akida neuromorphic</text>
-<text x="755.0" y="239.8" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">AI co-processor</text>
-<text x="755.0" y="255.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">SPI slave host interface</text>
-<text x="755.0" y="272.1" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">25 MHz crystal, PLL</text>
-<text x="755.0" y="288.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">core clock up to 400 MHz</text>
-<text x="755.0" y="304.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">1 MB on-chip memory</text>
-<text x="755.0" y="320.8" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#FFFFFF">0.8 V core, 1.8 V I/O</text>
-<rect x="400" y="480" width="210" height="80" rx="8" fill="#BFC6D6" stroke="#323F4F" stroke-width="1.5"/>
-<text x="505.0" y="507.8" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">SPI NOR flash IC1</text>
-<text x="505.0" y="524.0" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">16 MB, host</text>
-<text x="505.0" y="540.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">update slot + LittleFS</text>
-<rect x="650" y="480" width="210" height="80" rx="8" fill="#BFC6D6" stroke="#323F4F" stroke-width="1.5"/>
-<text x="755.0" y="507.8" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">SPI NOR flash IC2</text>
-<text x="755.0" y="524.0" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">16 MB, AI</text>
-<text x="755.0" y="540.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">model storage</text>
-<path d="M 610,200 L 650,200" fill="none" stroke="#323F4F" stroke-width="3" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<rect x="597.3" y="174" width="65.4" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="186" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#323F4F">SPIM4 SPI</text>
-<rect x="594.2" y="211" width="71.6" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="222" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">8 to 32 MHz</text>
-<path d="M 610,290 L 650,290" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<rect x="583.0" y="265" width="94.0" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="276" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">SLEEP, PWR_GOOD</text>
-<rect x="585.8" y="299" width="88.4" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="310" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">GPIO0..3 (IRQ)</text>
-<path d="M 505,410 L 505,480" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<rect x="515.0" y="439" width="38.0" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="520" y="450" text-anchor="start" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">SPIM3</text>
-<path d="M 755,410 L 755,480" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<rect x="765.0" y="439" width="99.6" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="770" y="450" text-anchor="start" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">SPI master, quad</text>
-<path d="M 610,520 L 650,520" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
-<rect x="616.6" y="534" width="26.8" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="545" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">CS1</text>
-<rect x="473.8" y="574" width="312.4" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="585" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">feed-through: the host reaches IC2 through the AKD1500</text>
-<rect x="563.4" y="589" width="133.2" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="600" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">on SPIM4 chip select 1</text>
-<rect x="529.8" y="649" width="200.4" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="660" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">Both flashes are 128 Mbit SPI NOR;</text>
-<rect x="468.2" y="664" width="323.6" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="675" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">IC1 single-lane from the host, IC2 quad from the AKD1500</text>
-<rect x="457.0" y="701" width="346.0" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="712" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">Firmware update slot, LittleFS records and the AKD1500 model</text>
-<rect x="420.6" y="716" width="418.8" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="630" y="727" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">program all live in external flash; the nRF5340 boots from internal flash</text>
-<rect x="925" y="100" width="130" height="70" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="990.0" y="130.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">RF matching</text>
-<text x="990.0" y="147.1" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">network</text>
-<rect x="1070" y="100" width="135" height="70" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="1137.5" y="124.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#000000">Chip antenna</text>
-<text x="1137.5" y="138.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#000000">2.4 GHz</text>
-<text x="1137.5" y="151.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#000000">(U.FL footprint, not fitted)</text>
-<path d="M 1055,135 L 1070,135" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M 505.0,110 L 505,80 L 925,80 L 925,100" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="701.6" y="63" width="26.8" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="715" y="74" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">ANT</text>
-<rect x="925" y="250" width="280" height="55" rx="8" fill="#0BD6A5" stroke="#323F4F" stroke-width="1.5"/>
-<text x="1065.0" y="273.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">6-axis IMU: ISM330DHCX</text>
-<text x="1065.0" y="289.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">accelerometer + gyroscope, INT1</text>
-<rect x="925" y="320" width="280" height="55" rx="8" fill="#0BD6A5" stroke="#323F4F" stroke-width="1.5"/>
-<text x="1065.0" y="343.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">PDM microphone 1 (U19)</text>
-<text x="1065.0" y="359.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">digital MEMS, channel A</text>
-<rect x="925" y="390" width="280" height="55" rx="8" fill="#0BD6A5" stroke="#323F4F" stroke-width="1.5"/>
-<text x="1065.0" y="413.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#000000">PDM microphone 2 (U20)</text>
-<text x="1065.0" y="429.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#000000">digital MEMS, channel B</text>
-<path d="M 610,360 L 630,360 L 630,430 L 895,430 L 895,277 L 925,277" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<rect x="853.6" y="244" width="82.8" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="895" y="255" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">I2C1, 400 kHz</text>
-<path d="M 505,560 L 505,590 L 880,590 L 880,347 L 925,347" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M 880,417 L 925,417" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="830.2" y="459" width="99.6" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="880" y="470" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">PDM clock + data</text>
-<rect x="925" y="515" width="280" height="70" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="1065.0" y="538.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#000000">Camera header J1</text>
-<text x="1065.0" y="553.7" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#000000">10-pin 1.27 mm, level-shifted SPI</text>
-<text x="1065.0" y="568.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#000000">switched 3.3 V supply</text>
-<path d="M 610,400 L 640,400 L 640,460 L 870,460 L 870,550 L 925,550" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
-<rect x="828.6" y="494" width="82.8" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="870" y="505" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">SPI + enables</text>
-<rect x="925" y="655" width="135" height="80" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="992.5" y="683.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#000000">RGB LED D1</text>
-<text x="992.5" y="698.7" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#000000">white LED LED1</text>
-<text x="992.5" y="713.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#000000">4 GPIO</text>
-<rect x="1070" y="655" width="135" height="80" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
-<text x="1137.5" y="683.9" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#000000">User button SW1</text>
-<text x="1137.5" y="698.7" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#000000">GPIO P1.01</text>
-<text x="1137.5" y="713.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#000000">(on/off switch: SW2)</text>
-<path d="M 860,560 L 900,560 L 900,695 L 925,695" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<path d="M 900,695 L 900,745 L 1137,745 L 1137,735" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="883.8" y="749" width="32.4" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="900" y="760" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">GPIO</text>
-<rect x="205.4" y="778" width="829.3" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="620" y="790" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">Power enables from the nRF5340: P0.19 (AKD1500 1.8 V), P0.20 (IMU), P0.21 (microphones), P0.22 (AKD1500 0.8 V), P1.06 (camera header)</text>
-<rect x="368.6" y="800" width="502.8" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="620" y="812" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">Current sense outputs into the nRF5340 ADC: AIN0 (1.8 V rail), AIN1 (0.8 V rail)</text>
-<rect x="214.6" y="849" width="810.8" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="620" y="860" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">Drawn from the revision 2 netlist and bill of materials. Changes from the earlier board: camera header instead of a 20-pin expansion connector,</text>
-<rect x="217.4" y="864" width="805.2" height="16" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
-<text x="620" y="875" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="10" font-weight="400" fill="#323F4F">one button and an on/off switch instead of three buttons, a 10-pin SWD header, on-board current sensing, and the U.FL connector left unfitted.</text>
+<rect x="910" y="600" width="310" height="160" rx="14" fill="#EEF1F5" stroke="none"/>
+<text x="1065.0" y="624" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#323F4F">INDICATORS &amp; CONTROLS</text>
+<rect x="40" y="100" width="140" height="56" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="110.0" y="123.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">USB-C</text>
+<text x="110.0" y="141.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#000000">5 V</text>
+<rect x="200" y="100" width="130" height="56" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="265.0" y="123.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">Battery</text>
+<text x="265.0" y="141.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#000000">connector</text>
+<rect x="40" y="200" width="290" height="64" rx="8" fill="#FFC524" stroke="#323F4F" stroke-width="1.5"/>
+<text x="185.0" y="227.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">Charger +</text>
+<text x="185.0" y="245.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#000000">fuel gauge</text>
+<rect x="40" y="300" width="130" height="50" rx="8" fill="#FFC524" stroke="#323F4F" stroke-width="1.5"/>
+<text x="105.0" y="329.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">On/off switch</text>
+<rect x="40" y="385" width="290" height="64" rx="8" fill="#FFC524" stroke="#323F4F" stroke-width="1.5"/>
+<text x="185.0" y="412.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">Power rails</text>
+<text x="185.0" y="430.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#000000">1.8 V, 0.8 V, 3.3 V</text>
+<path d="M 110,156 L 110,200" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 265,156 L 265,200" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<path d="M 105,264 L 105,300" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 105,350 L 105,385" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 330,417 L 365,417 L 365,200 L 400,200" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="344.6" y="298" width="40.8" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="365" y="310" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">power</text>
+<rect x="40" y="530" width="130" height="56" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="105.0" y="553.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">USB-C</text>
+<text x="105.0" y="571.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#000000">D+ / D-</text>
+<rect x="200" y="530" width="130" height="56" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="265.0" y="553.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">USB-UART</text>
+<text x="265.0" y="571.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#000000">bridge</text>
+<rect x="200" y="640" width="130" height="50" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="265.0" y="669.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">SWD header</text>
+<path d="M 170,558 L 200,558" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<path d="M 330,558 L 440,558 L 440,310" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<rect x="367.7" y="539" width="34.6" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="385" y="551" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">UART</text>
+<path d="M 330,665 L 420,665 L 420,310" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<rect x="360.8" y="646" width="28.5" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="375" y="658" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">SWD</text>
+<rect x="400" y="110" width="210" height="200" rx="8" fill="#0061ED" stroke="#002E72" stroke-width="1.5"/>
+<text x="505.0" y="195.8" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#FFFFFF">nRF5340</text>
+<text x="505.0" y="214.7" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#FFFFFF">dual-core MCU</text>
+<text x="505.0" y="233.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#FFFFFF">with BLE</text>
+<rect x="650" y="110" width="210" height="200" rx="8" fill="#002E72" stroke="#002E72" stroke-width="1.5"/>
+<text x="755.0" y="205.3" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#FFFFFF">AKD1500</text>
+<text x="755.0" y="224.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#FFFFFF">AI accelerator</text>
+<rect x="460" y="430" width="150" height="60" rx="8" fill="#BFC6D6" stroke="#323F4F" stroke-width="1.5"/>
+<text x="535.0" y="455.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">Flash</text>
+<text x="535.0" y="473.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#000000">(MCU)</text>
+<rect x="650" y="430" width="210" height="60" rx="8" fill="#BFC6D6" stroke="#323F4F" stroke-width="1.5"/>
+<text x="755.0" y="455.6" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">Flash</text>
+<text x="755.0" y="473.2" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#000000">(AI)</text>
+<path d="M 610,180 L 650,180" fill="none" stroke="#323F4F" stroke-width="3" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<rect x="615.8" y="160" width="28.5" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="630" y="172" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#323F4F">SPI</text>
+<path d="M 610,250 L 650,250" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<rect x="612.7" y="230" width="34.6" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="630" y="242" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">GPIO</text>
+<path d="M 470,310 L 470,430" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<rect x="477.0" y="404" width="28.5" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="482" y="416" text-anchor="start" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">SPI</text>
+<path d="M 755,310 L 755,430" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<rect x="763.0" y="404" width="34.6" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="768" y="416" text-anchor="start" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">QSPI</text>
+<rect x="925" y="100" width="130" height="64" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="990.0" y="136.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">RF matching</text>
+<rect x="1070" y="100" width="135" height="64" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="1137.5" y="136.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">Chip antenna</text>
+<path d="M 1055,132 L 1070,132" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 505,110 L 505,50 L 990,50 L 990,100" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="735.8" y="32" width="28.5" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="750" y="44" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">ANT</text>
+<rect x="925" y="250" width="280" height="50" rx="8" fill="#0BD6A5" stroke="#323F4F" stroke-width="1.5"/>
+<text x="1065.0" y="279.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">6-axis IMU</text>
+<rect x="925" y="320" width="280" height="50" rx="8" fill="#0BD6A5" stroke="#323F4F" stroke-width="1.5"/>
+<text x="1065.0" y="349.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">PDM mic 1</text>
+<rect x="925" y="390" width="280" height="50" rx="8" fill="#0BD6A5" stroke="#323F4F" stroke-width="1.5"/>
+<text x="1065.0" y="419.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">PDM mic 2</text>
+<path d="M 550,310 L 550,335 L 895,335 L 895,275 L 925,275" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<rect x="665.8" y="316" width="28.5" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="680" y="328" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">I2C</text>
+<path d="M 565,310 L 565,355 L 905,355 L 905,345 L 925,345" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 905,355 L 905,415 L 925,415" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="665.8" y="336" width="28.5" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="680" y="348" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">PDM</text>
+<rect x="925" y="505" width="280" height="50" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="1065.0" y="534.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">SPI camera header</text>
+<path d="M 580,310 L 580,375 L 885,375 L 885,530 L 925,530" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<rect x="665.8" y="356" width="28.5" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="680" y="368" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">SPI</text>
+<rect x="925" y="630" width="280" height="44" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="1065.0" y="656.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">RGB LED + white LED</text>
+<rect x="925" y="690" width="280" height="44" rx="8" fill="#FFFFFF" stroke="#323F4F" stroke-width="1.5"/>
+<text x="1065.0" y="716.4" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#000000">User button</text>
+<path d="M 595,310 L 595,395 L 875,395 L 875,712 L 925,712" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow-rev)"/>
+<path d="M 875,652 L 925,652" fill="none" stroke="#323F4F" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="662.7" y="376" width="34.6" height="17" rx="4" fill="#FFFFFF" fill-opacity="0.92"/>
+<text x="680" y="388" text-anchor="middle" font-family="Sora, Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#323F4F">GPIO</text>
 </svg>

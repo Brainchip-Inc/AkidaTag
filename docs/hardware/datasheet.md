@@ -59,6 +59,9 @@ is the [block diagram](block-diagram.md) page.
 
 ![AkidaTag block diagram](images/akidatag-block-diagram.svg)
 
+The figure names blocks only; the part in each block is in section 3, and the
+[block diagram page](block-diagram.md) lists them in one table.
+
 The nRF5340 owns every peripheral. The AKD1500 is a slave on the nRF5340's SPIM4 bus and
 in turn masters its own NOR flash; the nRF5340 reaches that flash through the AKD1500's
 feed-through on the second chip select. Power enters from USB-C or the battery, passes
@@ -504,6 +507,10 @@ board.
 ## 9. Mechanical
 
 ![AkidaTag board outline, top view](images/akidatag-board-outline.svg)
+
+In the drawing: the camera header is J1, the SWD header J2, the U.FL footprint J3, the
+battery connector J4, the USB-C receptacle J5, the button SW1, the on/off switch SW2, the
+two flashes IC1 (top right) and IC2 (right), and the microphones U19 and U20.
 
 | Item | Value | Source |
 |---|---|---|

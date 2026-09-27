@@ -28,6 +28,27 @@ MEMS microphones. **Expansion** is the camera header with a level-shifted SPI bu
 switched 3.3 V supply. **Indicators and controls** are the RGB LED, the white LED and the
 user button.
 
+| Block | Part |
+|---|---|
+| nRF5340 | Nordic nRF5340-QKAA (U3); 32 MHz and 32.768 kHz crystals |
+| AKD1500 | BrainChip AKD1500 (U7); 25 MHz crystal |
+| Flash (MCU), Flash (AI) | Winbond W25Q128JWPIQ, 128 Mbit (IC1, IC2) |
+| RF matching, chip antenna | Abracon AMCA31-2R450G-S1F-T3 (AE1); U.FL footprint J3 not fitted |
+| 6-axis IMU | STMicroelectronics ISM330DHCX (U5) |
+| PDM mic 1, PDM mic 2 | Infineon IM73D122V01XTMA1 (U19, U20) |
+| SPI camera header | 10-pin 1.27 mm header J1 behind two SN74AXC2T245 level shifters (U14, U15) |
+| Charger + fuel gauge | Texas Instruments BQ25185 (U13) and BQ27427 (U12) |
+| On/off switch | Slide switch SW2 |
+| Power rails | TPS631000 1.8 V buck-boost (U1), TLV62585 0.8 V buck (U11), TPS7A2033 3.3 V LDO (U16), five TPS22991 load switches, two INA190A3 current-sense amplifiers |
+| USB-C | Würth 632722200211 receptacle J5 |
+| USB-UART bridge | Silicon Labs CP2105 (U6) |
+| SWD header | 10-pin 1.27 mm header J2 |
+| RGB LED + white LED | Würth 150505M173300 (D1), Inolux IN-S42ATUW (LED1) |
+| User button | Tactile switch SW1 |
+
+The buses in the figure are detailed in section 3; the power rails and enables in
+section 2.
+
 ### Changes from the earlier diagram
 
 Revision 2 is the first board shipped, but an earlier system block diagram of the
