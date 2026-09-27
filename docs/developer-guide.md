@@ -22,7 +22,7 @@ If you only want to run the demos from your phone, read the [user guide](user-gu
 .
 ├── src/                 The firmware. Source directory of the demo_apps application.
 │   ├── apps/demo_apps/  main.cpp, the app's Kconfig fragment and its sample inputs
-│   ├── boards/          Devicetree overlays and dk.conf for the AkidaTag board and the nRF5340 DK
+│   ├── boards/          The AkidaTag board definition, with one devicetree overlay per hardware revision
 │   ├── core/            SPI to the AKD1500, its flash, BLE services, audio, LEDs, battery, boot manager
 │   ├── deps/            Imported code: the Akida engine, FlatBuffers headers, kissfft (see deps/VENDORING.md)
 │   ├── include/         Headers
@@ -41,10 +41,11 @@ If you only want to run the demos from your phone, read the [user guide](user-gu
 └── CONTRIBUTING.md      Commit and pull request rules, enforced in CI
 ```
 
-Both boards build for the same Zephyr board target, `nrf5340dk/nrf5340/cpuapp`. What separates
-an AkidaTag build from a DK build is the set of CMake arguments `scripts/run.sh` passes when you
-give it `--dk`: the devicetree overlay, the MCUboot overlay, `CONFIG_AKIDATAG_BOARD`, and
-`boards/dk.conf`. The two overlays under `src/boards/` list every pin on both boards.
+The AkidaTag board is a Zephyr board definition, `src/boards/brainchip/akidatag/`, and its
+hardware revisions are Zephyr board revisions: `akidatag_nrf5340_cpuapp.dts` holds what both
+revisions share and `akidatag_nrf5340_cpuapp_1.overlay` and `akidatag_nrf5340_cpuapp_2.overlay`
+what each revision changes. Together they list every pin. `scripts/run.sh` builds revision 1
+unless you give it `--rev 2`.
 
 ## 2. Set up the environment
 
@@ -74,12 +75,15 @@ On macOS, Docker Desktop has no USB passthrough, so build inside Docker and flas
 
 ```sh
 ./scripts/run.sh -d -b --app demo_apps                                  # AkidaTag board
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -b --rev 2 --app demo_apps   # AkidaTag board, hardware revision 2
 BUILD_DIR=build_docker_dk ./scripts/run.sh -d -b --dk --app demo_apps   # nRF5340 DK
 ```
 
 A Docker build lands in `build_docker/demo_apps/`; a host build in `build/demo_apps/`. `--dk`
 changes the configuration, not the directory, so the two boards overwrite each other's build
 unless you set `BUILD_DIR`, which is why the DK command above builds into `build_docker_dk/`.
+The same holds for `--rev 2`, which builds for hardware revision 2 of the AkidaTag board; without
+it, the build is for revision 1.
 `./scripts/run.sh -d -i` opens a shell inside the image.
 
 | Output                         | What it is                                                                                                                    |
@@ -105,6 +109,7 @@ bootloader included. It does not touch the AKD1500's flash, so a model on the bo
 ./scripts/run.sh -d -f --app demo_apps                        # Linux, west flash inside Docker
 ./scripts/run.sh -f -jf --app demo_apps                       # host J-Link, network core then application core
 BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps   # macOS: flash the Docker build from the host
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -f -jf --app demo_apps   # the revision 2 build, from its own directory
 BUILD_DIR=build_docker_dk ./scripts/run.sh -d -f -jf --dk --app demo_apps   # the DK build, from its own directory
 ./scripts/run.sh -d -r                                        # reset the board
 ```

@@ -584,12 +584,18 @@ MOBILE APP                    BLE STACK                    FIRMWARE
      │    [CMD=3] Select Next Class │                             │
      │                              │                             │
 
-### Build the demo_apps Sample with AkidaTag board overlay file.
+### Build the demo_apps Sample for the AkidaTag board.
 After compiling the project, MCUBoot is automatically built along with the application.
 The sysbuild system generates a combined image that includes both MCUBoot and the demo_apps application.
 
 ```
 ./scripts/run.sh -d -b --app demo_apps
+```
+
+This builds for hardware revision 1. For hardware revision 2, add `--rev 2`:
+
+```
+./scripts/run.sh -d -b --rev 2 --app demo_apps
 ```
 ### Build the demo_apps Sample with dk board overlay file.
 After compiling the project, MCUBoot is automatically built along with the application.
@@ -657,11 +663,13 @@ Both the **application overlay** and the **MCUboot overlay** are selected during
 
 ### DK Board
 - **Application overlay:** `boards/nrf5340dk_nrf5340_cpuapp.overlay`
-- **MCUboot overlay:** `sysbuild/mcuboot_dk.overlay`
+- **MCUboot overlay:** `sysbuild/mcuboot/boards/nrf5340dk_nrf5340_cpuapp.overlay`
 
 ### AkidaTag Board
-- **Application overlay:** `boards/nrf5340_cpuapp_akidatag.overlay`
-- **MCUboot overlay:** `sysbuild/mcuboot_akidatag.overlay`
+- **Board definition:** `boards/brainchip/akidatag/`, with `akidatag_nrf5340_cpuapp.dts` for what
+  both hardware revisions share and `akidatag_nrf5340_cpuapp_<revision>.overlay` for each revision
+- **MCUboot overlays:** `sysbuild/mcuboot/boards/akidatag_nrf5340_cpuapp_<revision>.overlay`
+- **Revision:** 1 by default, 2 with `--rev 2`
 
 ### Model Generation and BLE Transfer
 
