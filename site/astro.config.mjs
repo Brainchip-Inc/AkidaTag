@@ -40,10 +40,12 @@ export default defineConfig({
       logo: {
         src: './src/assets/brainchip-wordmark-white.svg',
         alt: 'BrainChip',
+        replacesTitle: true,
       },
       customCss: ['./src/styles/brainchip.css'],
       components: {
         Footer: './src/components/Footer.astro',
+        Sidebar: './src/components/Sidebar.astro',
       },
       social: [
         {

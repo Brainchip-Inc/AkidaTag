@@ -170,16 +170,15 @@
   height: 1.75rem;
 }
 
-/* On a phone the wordmark alone is the header; the title stays for screen readers. */
-@media (max-width: 30rem) {
-  .site-title span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
+/* The band carries the wordmark alone; the site title heads the sidebar instead. */
+.sidebar-site-title {
+  display: block;
+  margin-bottom: 1rem;
+  font-family: var(--brainchip-font-headings);
+  font-weight: 600;
+  font-size: var(--sl-text-h4);
+  color: var(--sl-color-white);
+  text-decoration: none;
 }
 
 .header site-search > button {

@@ -1,0 +1,12 @@
+---
+/**
+ * Starlight's sidebar with the site title above the navigation. The black band
+ * at the top carries the BrainChip wordmark alone, so the title lives here.
+ */
+import Default from '@astrojs/starlight/components/Sidebar.astro';
+
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="sidebar-site-title" translate="no">{siteTitle}</a>
+<Default><slot /></Default>
