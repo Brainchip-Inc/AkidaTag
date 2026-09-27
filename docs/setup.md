@@ -201,7 +201,7 @@ _Tip: A simple change that I make is adding a print statement in main.cpp_
   Firmware: J-Link OB-nRF5340-NordicSemi compiled Jul  8 2025 10:15:34
   Hardware version: V1.00
   J-Link uptime (since boot): 0d 00h 00m 00s
-  S/N: 1050082195
+  S/N: <serial number>
   License(s): RDI, FlashBP, FlashDL, JFlash, GDB
   USB speed mode: Full speed (12 MBit/s)
   VTref=3.300V
