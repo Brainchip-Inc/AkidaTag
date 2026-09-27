@@ -6,14 +6,16 @@ on:
     branches: [release]
 
 permissions:
-  contents: write
-  packages: read
+  contents: read
 
 env:
   DOCKER_IMAGE: ghcr.io/brainchip-inc/akidatag-ncs:v3.1.1-py3.12
 
 jobs:
   build-and-release:
+    permissions:
+      contents: write
+      packages: read
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
