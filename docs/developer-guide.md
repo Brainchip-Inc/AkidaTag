@@ -73,12 +73,14 @@ On macOS, Docker Desktop has no USB passthrough, so build inside Docker and flas
 ## 3. Build
 
 ```sh
-./scripts/run.sh -d -b --app demo_apps         # AkidaTag board
-./scripts/run.sh -d -b --dk --app demo_apps    # nRF5340 DK
+./scripts/run.sh -d -b --app demo_apps                                  # AkidaTag board
+BUILD_DIR=build_docker_dk ./scripts/run.sh -d -b --dk --app demo_apps   # nRF5340 DK
 ```
 
-A Docker build lands in `build_docker/demo_apps/`; a host build in `build/demo_apps/`. Set
-`BUILD_DIR` to override. `./scripts/run.sh -d -i` opens a shell inside the image.
+A Docker build lands in `build_docker/demo_apps/`; a host build in `build/demo_apps/`. `--dk`
+changes the configuration, not the directory, so the two boards overwrite each other's build
+unless you set `BUILD_DIR`, which is why the DK command above builds into `build_docker_dk/`.
+`./scripts/run.sh -d -i` opens a shell inside the image.
 
 | Output                         | What it is                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -103,6 +105,7 @@ bootloader included. It does not touch the AKD1500's flash, so a model on the bo
 ./scripts/run.sh -d -f --app demo_apps                        # Linux, west flash inside Docker
 ./scripts/run.sh -f -jf --app demo_apps                       # host J-Link, network core then application core
 BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps   # macOS: flash the Docker build from the host
+BUILD_DIR=build_docker_dk ./scripts/run.sh -d -f -jf --dk --app demo_apps   # the DK build, from its own directory
 ./scripts/run.sh -d -r                                        # reset the board
 ```
 
