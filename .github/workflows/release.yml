@@ -12,11 +12,159 @@ env:
   DOCKER_IMAGE: ghcr.io/brainchip-inc/akidatag-ncs:v3.1.1-py3.12
 
 jobs:
+  model-packages:
+    name: model packages
+    permissions:
+      contents: read
+      packages: read
+    if: github.event.pull_request.merged == true
+    runs-on: self-hosted
+    timeout-minutes: 15
+    env:
+      KWS_CONFIG: .env/demo_apps/kws.yaml
+      KWS_EDGE_LEARNING_CONFIG: .env/demo_apps/kws_edge_learning.yaml
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull Docker image
+        run: docker pull "$DOCKER_IMAGE"
+
+      - name: Write model configs
+        env:
+          KWS_CONFIG_YAML: ${{ secrets.MODEL_CONFIG_DEMO_APPS_KWS }}
+          KWS_EDGE_LEARNING_CONFIG_YAML: ${{ secrets.MODEL_CONFIG_DEMO_APPS_KWS_EDGE_LEARNING }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KWS_CONFIG_YAML" ]]; then
+            echo "::error::Standard KWS model config is empty or unset"
+            exit 1
+          fi
+          if [[ -z "$KWS_EDGE_LEARNING_CONFIG_YAML" ]]; then
+            echo "::error::KWS edge-learning model config is empty or unset"
+            exit 1
+          fi
+          mkdir -p "$(dirname "$KWS_CONFIG")"
+          printf '%s\n' "$KWS_CONFIG_YAML" > "$KWS_CONFIG"
+          printf '%s\n' "$KWS_EDGE_LEARNING_CONFIG_YAML" > "$KWS_EDGE_LEARNING_CONFIG"
+          chmod 600 "$KWS_CONFIG" "$KWS_EDGE_LEARNING_CONFIG"
+
+      - name: Mask model source addresses
+        run: |
+          set -euo pipefail
+          model_urls=$(
+            docker run --rm -i \
+              --entrypoint python \
+              -v "$PWD:/akidatag:ro" \
+              -w /akidatag \
+              "$DOCKER_IMAGE" \
+              - "$KWS_CONFIG" "$KWS_EDGE_LEARNING_CONFIG" <<'PY'
+          import sys
+
+          import yaml
+
+          for config_path in sys.argv[1:]:
+              with open(config_path) as config_file:
+                  model_url = yaml.safe_load(config_file).get("model_url")
+              if not model_url:
+                  raise SystemExit(f"{config_path} has no model_url")
+              print(model_url)
+          PY
+          )
+          while IFS= read -r model_url; do
+            if [[ -n "$model_url" ]]; then
+              echo "::add-mask::$model_url"
+            fi
+          done <<< "$model_urls"
+
+      - name: Build model packages
+        run: |
+          set -euo pipefail
+          ./scripts/run.sh \
+            -d "$DOCKER_IMAGE" \
+            --release \
+            --fetch_model "$KWS_CONFIG" \
+            --generate_info "$KWS_CONFIG"
+          ./scripts/run.sh \
+            -d "$DOCKER_IMAGE" \
+            --release \
+            --fetch_model "$KWS_EDGE_LEARNING_CONFIG" \
+            --generate_info "$KWS_EDGE_LEARNING_CONFIG"
+
+      - name: Collect and verify model packages
+        run: |
+          set -euo pipefail
+          mkdir -p release-model-packages
+          cp models/kws/kws.zip \
+            release-model-packages/akidatag-kws-model.zip
+          cp models/kws_edge_learning/kws_edge_learning.zip \
+            release-model-packages/akidatag-kws-edge-learning-model.zip
+
+          docker run --rm -i \
+            --entrypoint python \
+            -v "$PWD:/akidatag:ro" \
+            -w /akidatag \
+            "$DOCKER_IMAGE" \
+            - <<'PY'
+          from zipfile import ZipFile
+
+          packages = {
+              "release-model-packages/akidatag-kws-model.zip": {
+                  "kws/info.yaml",
+                  "kws/kws_program_info.bin",
+                  "kws/kws_program_data.bin",
+              },
+              "release-model-packages/akidatag-kws-edge-learning-model.zip": {
+                  "kws_edge_learning/info.yaml",
+                  "kws_edge_learning/kws_program_info.bin",
+                  "kws_edge_learning/kws_program_data.bin",
+              },
+          }
+
+          for package_path, expected_files in packages.items():
+              with ZipFile(package_path) as package:
+                  corrupt_file = package.testzip()
+                  actual_files = {
+                      file_name
+                      for file_name in package.namelist()
+                      if not file_name.endswith("/")
+                  }
+              if corrupt_file:
+                  raise SystemExit(f"{package_path} has a corrupt file: {corrupt_file}")
+              if actual_files != expected_files:
+                  raise SystemExit(
+                      f"{package_path} contains {sorted(actual_files)}, "
+                      f"expected {sorted(expected_files)}"
+                  )
+              print(f"Verified {package_path}: {sorted(actual_files)}")
+          PY
+
+      - name: Upload model packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-model-packages
+          path: release-model-packages/*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove model configs
+        if: always()
+        run: rm -f "$KWS_CONFIG" "$KWS_EDGE_LEARNING_CONFIG"
+
   build-and-release:
     permissions:
       contents: write
       packages: read
     if: github.event.pull_request.merged == true
+    needs: [model-packages]
     runs-on: ubuntu-latest
 
     steps:
@@ -102,6 +250,8 @@ jobs:
           | \`akidatag-$VERSION.signed.bin\` | Signed firmware for OTA/DFU via BLE |
           | \`akidatag-$VERSION-merged.hex\` | MCUboot + app for initial programming |
           | \`akidatag-$VERSION-dfu.zip\` | DFU package for nRF Connect mobile app |
+          | \`akidatag-kws-model.zip\` | Keyword spotting model package for BrainChip Connect |
+          | \`akidatag-kws-edge-learning-model.zip\` | Keyword spotting edge-learning model package for BrainChip Connect |
           | \`SHA256SUMS.txt\` | Integrity checksums |
           EOF
 
@@ -180,6 +330,12 @@ jobs:
             -b \
             --app demo_apps
 
+      - name: Download model packages
+        uses: actions/download-artifact@v4
+        with:
+          name: release-model-packages
+          path: release-model-packages
+
       - name: Collect artifacts
         run: |
           VERSION="${{ steps.version.outputs.version }}"
@@ -193,6 +349,10 @@ jobs:
              "release-artifacts/akidatag-${VERSION}-merged.hex"
           cp build_docker/demo_apps/dfu_application.zip \
              "release-artifacts/akidatag-${VERSION}-dfu.zip"
+          cp release-model-packages/akidatag-kws-model.zip \
+             release-artifacts/akidatag-kws-model.zip
+          cp release-model-packages/akidatag-kws-edge-learning-model.zip \
+             release-artifacts/akidatag-kws-edge-learning-model.zip
 
       - name: Generate SHA256 checksums
         run: |
