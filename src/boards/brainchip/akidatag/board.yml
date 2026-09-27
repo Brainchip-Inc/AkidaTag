@@ -1,0 +1,13 @@
+board:
+  name: akidatag
+  full_name: AkidaTag
+  vendor: brainchip
+  socs:
+  - name: nrf5340
+  revision:
+    format: number
+    default: "1"
+    exact: true
+    revisions:
+    - name: "1"
+    - name: "2"

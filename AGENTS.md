@@ -25,10 +25,16 @@ The selectable application is `demo_apps`, with its entry point at
 [src/apps/demo_apps/main.cpp](src/apps/demo_apps/main.cpp). It combines the
 existing demonstrations and shared firmware services.
 
-Build for the AkidaTag board:
+Build for the AkidaTag board, hardware revision 1:
 
 ```sh
 ./scripts/run.sh -d -b --app demo_apps
+```
+
+Build for AkidaTag hardware revision 2 into a separate directory:
+
+```sh
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -b --rev 2 --app demo_apps
 ```
 
 Build for the nRF5340 DK into a separate directory:
@@ -37,15 +43,23 @@ Build for the nRF5340 DK into a separate directory:
 BUILD_DIR=build_docker_dk ./scripts/run.sh -d -b --dk --app demo_apps
 ```
 
-The outputs are `build_docker/demo_apps/` and `build_docker_dk/demo_apps/`,
-respectively. Without a `BUILD_DIR` override, both commands use the same output
-directory. Each build starts with a pristine configuration.
+The outputs are `build_docker/demo_apps/`, `build_docker_rev2/demo_apps/` and
+`build_docker_dk/demo_apps/`, respectively. Without a `BUILD_DIR` override, all
+three commands use the same output directory. Each build starts with a pristine
+configuration.
 
-Both boards use Zephyr's `nrf5340dk/nrf5340/cpuapp` target. `--dk` selects the DK
-application and MCUboot overlays, `CONFIG_AKIDATAG_BOARD=n` and
-[src/boards/dk.conf](src/boards/dk.conf). Keep board-specific settings with the
-appropriate overlay or configuration fragment; the Zephyr target name alone
-does not distinguish the two boards.
+The AkidaTag board is a Zephyr board definition in
+[src/boards/brainchip/akidatag/](src/boards/brainchip/akidatag/), and its hardware
+revisions are Zephyr board revisions. `run.sh` builds it as
+`akidatag/nrf5340/cpuapp`, or `akidatag@2/nrf5340/cpuapp` with `--rev 2`, and
+passes `src` as the board root; revision 1 is the default in its `board.yml`.
+Settings shared by both revisions live in `akidatag_nrf5340_cpuapp.dts`, and each
+revision's differences in `akidatag_nrf5340_cpuapp_<revision>.overlay`. MCUboot's
+own adjustments follow the same naming in `src/sysbuild/mcuboot/boards/`. Kconfig
+defaults that depend on the revision, such as the INA190 variant, test
+`BOARD_REVISION` in `src/Kconfig`. `--dk` builds Zephyr's `nrf5340dk/nrf5340/cpuapp`
+target with the DK application overlay, `CONFIG_AKIDATAG_BOARD=n` and
+[src/boards/dk.conf](src/boards/dk.conf).
 
 Ordinary builds use the RSA-3072 development key committed at
 `.env/development_key.pem`. It is intentionally public so a fresh clone can
@@ -75,7 +89,8 @@ and make `JLinkExe` available on `PATH`, then flash the container-built output:
 BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps
 ```
 
-For the DK build, use `BUILD_DIR=build_docker_dk` and add `--dk`. The script loads
+For a revision 2 build, use `BUILD_DIR=build_docker_rev2`; for the DK build, use
+`BUILD_DIR=build_docker_dk` and add `--dk`. The script loads
 `merged_CPUNET.hex` on the network core first and `merged.hex` on the application
 core second. These files include the bootloader needed for initial programming.
 Do not substitute an application-only image for the initial full flash.
@@ -136,10 +151,10 @@ named `my_demo`, update the following pieces together:
    still apply the old app's configuration.
 4. Add `my_demo` to the app-selection case in `scripts/run.sh`, use `src` as
    `APP_SRC_DIR`, and pass `-DCONFIG_MY_DEMO=y` instead of `CONFIG_DEMO_APPS`.
-   Carry over the board-selection arguments for each supported board. Add the
-   corresponding entry to `get_jlink_jobs` for J-Link flashing and update the
-   help text and available-app error. The build directory is already derived
-   from the app name.
+   Carry over the board target and board-selection arguments for each supported
+   board. Add the corresponding entry to `get_jlink_jobs` for J-Link flashing
+   and update the help text and available-app error. The build directory is
+   already derived from the app name.
 5. If the demo needs different model metadata, add the matching profile to
    `APP_PROFILES` in `src/utils/generate_info.py` and document its configuration
    fields. The existing model profile is `demo_apps`; a new firmware app name

@@ -1,0 +1,13 @@
+/* MCUboot on revision 2 needs only flash IC1, so the camera and AKD1500 buses stay off. */
+
+&spi2 {
+	status = "disabled";
+};
+
+&akd_flash {
+	status = "disabled";
+};
+
+&spi4 {
+	status = "disabled";
+};

@@ -78,7 +78,7 @@ git clone https://github.com/Brainchip-Inc/AkidaTag.git && cd AkidaTag
 # put SEGGER's J-Link V8.88 .deb in docker/tools/ first (docker/tools/README.md), accepting SEGGER's terms
 ./scripts/build_docker_image.sh --ncs v3.1.1 --python 3.12   # once; downloads the SDK
 
-./scripts/run.sh -d -b --app demo_apps        # build for the AkidaTag board (add --dk for the nRF5340 DK)
+./scripts/run.sh -d -b --app demo_apps        # build for the AkidaTag board (add --rev 2 for hardware revision 2)
 ./scripts/run.sh -d -f --app demo_apps        # flash MCUboot and the application over the debug probe
 ./scripts/run.sh -d -t                        # drive the shell over UART and check the AKD1500 link
 ```

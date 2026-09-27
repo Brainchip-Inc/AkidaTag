@@ -1,0 +1,123 @@
+/*
+ * AkidaTag hardware revision 2: the camera has SPIM2 to itself behind a level
+ * translator and a switched supply, both flashes are Winbond W25Q128JW, and the
+ * board has red, green, blue and white LEDs and a single user button.
+ */
+
+&pinctrl {
+	spi2_default: spi2_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 6)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 7)>,
+				<NRF_PSEL(SPIM_MISO, 0, 26)>;
+		};
+	};
+
+	spi2_sleep: spi2_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 6)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 7)>,
+				<NRF_PSEL(SPIM_MISO, 0, 26)>;
+			low-power-enable;
+		};
+	};
+};
+
+/ {
+	chosen {
+		nordic,pm-ext-flash = &ext_flash;
+	};
+
+	gpios {
+		/* Output enable of the camera SPI level translators, active low. */
+		cam_enb: cam_enb {
+			gpios = <&gpio1 15 GPIO_ACTIVE_LOW>;
+		};
+
+		cam_pwr_enb: cam_pwr_enb {
+			gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	custom_buttons {
+		compatible = "gpio-keys";
+
+		/* The board pulls this line up externally. */
+		user_btn: user_btn {
+			gpios = <&gpio1 1 GPIO_ACTIVE_LOW>;
+			label = "User Button";
+		};
+	};
+
+	custom_leds {
+		compatible = "gpio-leds";
+
+		led_red: led_red {
+			gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_green: led_green {
+			gpios = <&gpio0 27 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_blue: led_blue {
+			gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
+		};
+
+		led_white: led_white {
+			gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	aliases {
+		cam-enb = &cam_enb;
+		user-button = &user_btn;
+		mcuboot-button0 = &user_btn;
+		mcuboot-led0 = &led_red;
+	};
+};
+
+&spi4 {
+	akd_flash: w25q128jw@1 {
+		compatible = "jedec,spi-nor";
+		reg = <1>;
+		spi-max-frequency = <8000000>;
+		size = <DT_SIZE_M(128)>;
+		jedec-id = [ef 60 18];
+		has-dpd;
+		t-enter-dpd = <3000>;
+		t-exit-dpd = <30000>;
+	};
+};
+
+&spi3 {
+	cs-gpios = <&gpio0 18 GPIO_ACTIVE_LOW>;
+
+	ext_flash: w25q128jw@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <8000000>;
+		size = <DT_SIZE_M(128)>;
+		jedec-id = [ef 60 18];
+		has-dpd;
+		t-enter-dpd = <3000>;
+		t-exit-dpd = <30000>;
+	};
+};
+
+/* Camera. SPIM2 tops out at 8 MHz, the camera's existing clock. */
+&spi2 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi2_default>;
+	pinctrl-1 = <&spi2_sleep>;
+	pinctrl-names = "default", "sleep";
+	cs-gpios = <&gpio0 25 GPIO_ACTIVE_LOW>;
+
+	camera: camera@0 {
+		compatible = "spi-device";
+		reg = <0>;
+		spi-max-frequency = <8000000>;
+		label = "CAMERA";
+	};
+};

@@ -41,28 +41,33 @@ container.
 
 ## 3. Build and flash the firmware
 
-Build the application in Docker:
+Build the application in Docker. The first command builds for hardware revision 1, the default;
+the second builds for hardware revision 2 into its own directory:
 
 ```sh
 ./scripts/run.sh -d -b --app demo_apps
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -b --rev 2 --app demo_apps
 ```
 
 Every build starts with a pristine configuration and writes its output to
-`build_docker/demo_apps/`. It signs the images with the public development key committed at
-`.env/development_key.pem`. See
+`build_docker/demo_apps/`, or under the `BUILD_DIR` it is given. It signs the images with the
+public development key committed at `.env/development_key.pem`. See
 [Application Security](../src/README.md#application-security) for how the key is used and how to
 replace it.
 
-On Linux, flash through the J-Link from inside the container:
+Flash the build that matches the board's revision. On Linux, flash through the J-Link from inside
+the container:
 
 ```sh
-./scripts/run.sh -d -f -jf --app demo_apps
+./scripts/run.sh -d -f -jf --app demo_apps                              # revision 1
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -f -jf --app demo_apps  # revision 2
 ```
 
 On macOS, flash the container-built output with the host J-Link tools:
 
 ```sh
-BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps
+BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps          # revision 1
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -f -jf --app demo_apps     # revision 2
 ```
 
 The script loads `merged_CPUNET.hex` on the network core first and `merged.hex` on the application

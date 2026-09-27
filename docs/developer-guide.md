@@ -21,7 +21,7 @@ If you only want to run the demos from your phone, read the [user guide](user-gu
 .
 ├── src/                 The firmware. Source directory of the demo_apps application.
 │   ├── apps/demo_apps/  main.cpp, the app's Kconfig fragment and its sample inputs
-│   ├── boards/          Devicetree overlays and board-specific configuration
+│   ├── boards/          The AkidaTag board definition, with one devicetree overlay per hardware revision
 │   ├── core/            SPI to the AKD1500, its flash, BLE services, audio, LEDs, battery, boot manager
 │   ├── deps/            Imported code: the Akida engine, FlatBuffers headers, kissfft (see deps/VENDORING.md)
 │   ├── include/         Headers
@@ -40,9 +40,11 @@ If you only want to run the demos from your phone, read the [user guide](user-gu
 └── CONTRIBUTING.md      Commit and pull request rules, enforced in CI
 ```
 
-The AkidaTag build uses the Zephyr board target `nrf5340dk/nrf5340/cpuapp` with the board's
-devicetree and MCUboot overlays and `CONFIG_AKIDATAG_BOARD=y`. The target name comes from Zephyr;
-the custom overlays define the AkidaTag hardware.
+The AkidaTag board is a Zephyr board definition, `src/boards/brainchip/akidatag/`, and its
+hardware revisions are Zephyr board revisions: `akidatag_nrf5340_cpuapp.dts` holds what both
+revisions share and `akidatag_nrf5340_cpuapp_1.overlay` and `akidatag_nrf5340_cpuapp_2.overlay`
+what each revision changes. Together they list every pin. `scripts/run.sh` builds revision 1
+unless you give it `--rev 2`.
 
 ## 2. Set up the environment
 
@@ -71,10 +73,14 @@ On macOS, Docker Desktop has no USB passthrough, so build inside Docker and flas
 ## 3. Build
 
 ```sh
-./scripts/run.sh -d -b --app demo_apps
+./scripts/run.sh -d -b --app demo_apps                                      # hardware revision 1
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -b --rev 2 --app demo_apps  # hardware revision 2
 ```
 
-A Docker build lands in `build_docker/demo_apps/`; a host build in `build/demo_apps/`.
+A Docker build lands in `build_docker/demo_apps/`; a host build in `build/demo_apps/`. `--rev 2`
+changes the configuration, not the directory, so the two revisions overwrite each other's build
+unless you set `BUILD_DIR`, which is why the revision 2 command above builds into
+`build_docker_rev2/`.
 `./scripts/run.sh -d -i` opens a shell inside the image.
 
 | Output                         | What it is                                                                                                                    |
@@ -97,9 +103,11 @@ Flashing `merged.hex` and `merged_CPUNET.hex` over SWD replaces everything on th
 bootloader included. It does not touch the AKD1500's flash, so a model on the board survives.
 
 ```sh
-./scripts/run.sh -d -f -jf --app demo_apps                       # Linux: J-Link inside Docker
-BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps   # macOS: host J-Link
-./scripts/run.sh -d -r                                           # reset the board
+./scripts/run.sh -d -f -jf --app demo_apps                              # Linux: J-Link inside Docker
+BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps          # macOS: host J-Link
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -f -jf --app demo_apps  # Linux: the revision 2 build
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -f -jf --app demo_apps     # macOS: the revision 2 build
+./scripts/run.sh -d -r                                                  # reset the board
 ```
 
 Use the J-Link path, `-jf`, on an AkidaTag board. The board's debug header reports a target

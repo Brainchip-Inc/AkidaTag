@@ -267,7 +267,7 @@ The revision 2 schematic (SI-NRF-AKD_BRD-002 V11, 2026-08-25), netlist report, b
 materials and board outline; the earlier system block diagram and labelled layout
 drawing (January 2026); the Texas Instruments INA190 datasheet (SBOS863D) and BQ27427
 datasheet (SLUSEB5B); BrainChip AKD1500 documentation for the strap meanings; and the
-firmware board overlay `src/boards/nrf5340_cpuapp_akidatag.overlay`,
+firmware board definition `src/boards/brainchip/akidatag/`,
 `src/core/interface/gpio/gpio.c`, `src/core/interface/akd_spi_flash/akd_spi_flash_handler.cpp`
 and `src/README.md` on `main`.
 

@@ -134,13 +134,15 @@ config CURRENT_DEFAULT_RATE_HZ
 
 choice
     prompt "INA190 current-sense variant"
+    default INA190_VARIANT_A3 if BOARD_REVISION = "2"
     default INA190_VARIANT_A1
     depends on AKIDATAG_BOARD
     help
       Fitted INA190 amplifier variant. The A1/A3 difference is gain only
       (A1 = 25 V/V, A3 = 100 V/V); the shunt resistors are board parts. The
-      variant cannot be auto-detected (analog part, no board ID), so the fitted
-      one must be selected here. Runtime-overridable via `power variant`.
+      variant cannot be auto-detected (analog part, no board ID), so the default
+      follows the board revision the build selects: A1 on revision 1, A3 on
+      revision 2. Runtime-overridable via `power variant`.
 
 config INA190_VARIANT_A1
     bool "INA190A1RSW (gain 25 V/V)"
