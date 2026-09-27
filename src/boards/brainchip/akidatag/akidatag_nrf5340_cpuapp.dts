@@ -1,0 +1,229 @@
+/*
+ * Copyright (c) 2019-2020 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+#include <nordic/nrf5340_cpuapp_qkaa.dtsi>
+#include "akidatag_nrf5340_cpuapp-pinctrl.dtsi"
+
+/ {
+	model = "BrainChip AkidaTag NRF5340 Application";
+	compatible = "brainchip,akidatag-nrf5340-cpuapp";
+
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,uart-mcumgr = &uart0;
+		zephyr,bt-mon-uart = &uart0;
+		zephyr,bt-c2h-uart = &uart0;
+		zephyr,bt-hci = &bt_hci_ipc0;
+		zephyr,sram = &sram0_image;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
+	};
+
+	/* Power enables and status lines that are not a bus of their own. */
+	gpios {
+		compatible = "gpio-keys";
+
+		akd_lp: akd_lp {
+			gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
+		};
+
+		akd_async: akd_async {
+			gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+		};
+
+		imui: imui {
+			gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
+		};
+
+		akd_enb: akd_enb {
+			gpios = <&gpio0 19 GPIO_ACTIVE_HIGH>;
+		};
+
+		acc_enb: acc_enb {
+			gpios = <&gpio0 20 GPIO_ACTIVE_HIGH>;
+		};
+
+		pdm_enb: pdm_enb {
+			gpios = <&gpio0 21 GPIO_ACTIVE_HIGH>;
+		};
+
+		akd_0v_enb: akd_0v_enb {
+			gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
+		};
+
+		fg_int: fg_int {
+			gpios = <&gpio0 30 GPIO_ACTIVE_HIGH>;
+		};
+
+		chgr_sts1: chgr_sts1 {
+			gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
+		};
+
+		chgr_sts2: chgr_sts2 {
+			gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	zephyr,user {
+		/* Current-sense amplifier outputs: index 0 is the 1.8 V rail, 1 the 0.8 V rail. */
+		io-channels = <&adc 0>, <&adc 1>;
+	};
+
+	aliases {
+		akd-lp = &akd_lp;
+		spi2 = &spi2;
+		akd-spi = &spi4;
+		imui = &imui;
+		akd-enb = &akd_enb;
+		acc-enb = &acc_enb;
+		pdm-enb = &pdm_enb;
+		akd-0v-enb = &akd_0v_enb;
+		akd-async = &akd_async;
+		fg-int = &fg_int;
+		chgr-sts1 = &chgr_sts1;
+		chgr-sts2 = &chgr_sts2;
+		watchdog = &wdt;
+		watchdog0 = &wdt0;
+	};
+};
+
+&vregmain {
+	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
+};
+
+&vregradio {
+	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
+};
+
+&vregh {
+	status = "okay";
+};
+
+&lfxo {
+	load-capacitors = "internal";
+	load-capacitance-picofarad = <7>;
+};
+
+/* P0.02 and P0.03 are AKD1500 GPIOs, so the NFC antenna function is released. */
+&uicr {
+	nfct-pins-as-gpios;
+};
+
+&clock {
+	hfclkaudio-frequency = <12288000>;
+};
+
+&gpiote {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&ipc0 {
+	status = "okay";
+};
+
+&uart0 {
+	compatible = "nordic,nrf-uarte";
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart0_default>;
+	pinctrl-1 = <&uart0_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+&i2c1 {
+	compatible = "nordic,nrf-twim";
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	pinctrl-0 = <&i2c1_default>;
+	pinctrl-1 = <&i2c1_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	mysensor: mysensor@6a {
+		compatible = "i2c-device";
+		status = "okay";
+		reg = <0x6a>;
+	};
+};
+
+dmic_dev: &pdm0 {
+	status = "okay";
+	pinctrl-0 = <&pdm0_default>;
+	pinctrl-names = "default";
+	clock-source = "ACLK";
+};
+
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* 1.8 V rail current, AIN0 on P0.04 */
+	channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1_3";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,input-positive = <NRF_SAADC_AIN0>;
+		zephyr,resolution = <12>;
+	};
+
+	/* 0.8 V rail current, AIN1 on P0.05 */
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1_3";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,input-positive = <NRF_SAADC_AIN1>;
+		zephyr,resolution = <12>;
+	};
+};
+
+/* AKD1500 host interface. SPIM4 is the only instance that runs above 8 MHz. */
+&spi4 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi4_default>;
+	pinctrl-1 = <&spi4_sleep>;
+	pinctrl-names = "default", "sleep";
+	/* MISO sample delay that reads cleanly at 8, 16 and 32 MHz; `spi_rxdelay`
+	 * overrides it at runtime.
+	 */
+	rx-delay = <1>;
+	cs-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>,
+		   <&gpio0 12 GPIO_ACTIVE_LOW>;
+
+	akd: akd@0 {
+		compatible = "spi-device";
+		reg = <0>;
+		spi-max-frequency = <32000000>;
+		label = "AKD";
+	};
+
+	/* akd_flash@1, the AKD1500's model flash reached through its slave-to-master
+	 * feed-through, is defined per revision.
+	 */
+};
+
+/* Flash IC1: the MCUboot update slot and the LittleFS volume. */
+&spi3 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi3_default>;
+	pinctrl-1 = <&spi3_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+#include <nordic/nrf5340_cpuapp_partition.dtsi>

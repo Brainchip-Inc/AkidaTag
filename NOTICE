@@ -168,6 +168,30 @@ that a source redistribution retains the list of conditions it asks for:
     SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
+Zephyr nRF5340 DK board and MCUboot configuration
+--------------------------------------------------------------------------------
+
+Upstream:   Zephyr RTOS and MCUboot as shipped in nRF Connect SDK v3.1.1,
+            zephyr/boards/nordic/nrf5340dk/ and
+            bootloader/mcuboot/boot/zephyr/prj.conf
+Paths:      src/boards/brainchip/akidatag/
+            src/sysbuild/mcuboot/prj.conf
+Licence:    Apache License, Version 2.0 (SPDX-License-Identifier: Apache-2.0)
+Copyright:  Copyright (c) 2019-2022 Nordic Semiconductor ASA
+            Copyright (c) 2022 Zephyr Project members and individual contributors
+            Copyright (c) 2021 Linaro Limited (pre_dt_board.cmake)
+
+The AkidaTag board definition is adapted from Zephyr's nRF5340 DK board. Its
+Kconfig files, board.cmake, pre_dt_board.cmake and defconfig files, the network
+core devicetree and its pinctrl file follow the DK's, and the application core
+devicetree keeps the DK's chosen nodes, regulator, crystal and partition
+settings. Each of those files carries the upstream copyright and SPDX lines;
+the pin descriptions, the revision overlays and board.yml are BrainChip's.
+src/sysbuild/mcuboot/prj.conf restates MCUboot's own prj.conf, which declares
+no copyright or licence of its own; MCUboot is distributed under the Apache
+License, Version 2.0. The licence text is in LICENSE.
+
+--------------------------------------------------------------------------------
 Keyword-spotting sample input
 --------------------------------------------------------------------------------
 

@@ -435,6 +435,7 @@ fi
 # -----------------------------------------------------------------------------
 APP_SRC_DIR=""
 APP_BUILD_DIR=""
+BOARD_TARGET=""
 BUILD_CMD=""
 FLASH_CMD=""
 
@@ -457,14 +458,16 @@ if [[ -n "$APP" ]]; then
 	  CMAKE_EXTRA_ARGS+=(-DCONFIG_AUDIO_CAPTURE_TEST=n)
       # Overlay selection using USE_AUDIO
       if $DK_OVERLAY; then
+        BOARD_TARGET="nrf5340dk/nrf5340/cpuapp"
         CMAKE_EXTRA_ARGS+=(-DCONFIG_AKIDATAG_BOARD=n)
         CMAKE_EXTRA_ARGS+=("-DEXTRA_CONF_FILE=boards/dk.conf")
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/src/sysbuild/mcuboot_dk.overlay")
       else
+        BOARD_TARGET="akidatag/nrf5340/cpuapp"
         CMAKE_EXTRA_ARGS+=(-DCONFIG_AKIDATAG_BOARD=y)
-        CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340_cpuapp_akidatag.overlay")
-        CMAKE_EXTRA_ARGS+=("-Dmcuboot_DTC_OVERLAY_FILE=/akidatag/src/sysbuild/mcuboot_akidatag.overlay")
+        # A relative board root resolves against the application directory, so
+        # this is src/, which holds boards/brainchip/akidatag/
+        CMAKE_EXTRA_ARGS+=("-DBOARD_ROOT=.")
       fi
       ;;
     *)
@@ -488,8 +491,7 @@ if [[ -n "$APP" ]]; then
     fi
   fi
 
-  # IMPORTANT: "$BOARD" must stay escaped so it expands inside the environment
-  BUILD_CMD="west build -p always -b \"\$BOARD\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
+  BUILD_CMD="west build -p always -b \"$BOARD_TARGET\" -s \"$APP_SRC_DIR\" -d \"$APP_BUILD_DIR\""
 
   # Append CMake args only if we have any
   if (( ${#CMAKE_EXTRA_ARGS[@]} > 0 )); then
