@@ -18,7 +18,7 @@ CDC flashing is not possible and is not what this page describes.
 
 Listening at every boot is not free. `CONFIG_BOOT_SERIAL_WAIT_FOR_DFU_TIMEOUT` in
 `src/sysbuild/mcuboot.conf` makes MCUboot hold the board for about a second before it starts
-the application, on both build targets and in every release: measured, the application banner
+the application in every release: measured, the application banner
 appears about 1.5 s after a reset. That timeout is a budget which also covers the slot 0
 signature check, which happens whether or not this option is set, so raising it does not add
 delay one for one.
@@ -94,9 +94,6 @@ the boot-time listening window. It gives the bootloader a second, independent en
 the image in slot 0 fails signature validation, the bootloader stays in serial recovery over
 the USB-C cable instead of halting, and waits there without any command from the host. That
 is what makes a board carrying a bad image recoverable without a debug probe.
-
-Because `src/sysbuild/mcuboot.conf` is shared by both build targets, the nRF5340 DK build
-behaves exactly the same way.
 
 ### What you see on the board
 

@@ -11,7 +11,6 @@ If you only want to run the demos from your phone, read the [user guide](user-gu
 | Part              | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Board             | AkidaTag: a Nordic nRF5340 (the application core runs this firmware, the network core runs the Bluetooth controller) and a BrainChip Akida AKD1500 neural processor connected over SPI, with a PDM microphone, an ISM330 accelerometer and gyroscope, a BQ27427 fuel gauge, two INA190 current monitors, a CP2105 USB-to-UART bridge behind the USB-C connector, a red and a green LED. The AKD1500 has its own SPI flash, which holds the model. |
-| Bench alternative | An nRF5340 DK with an AKD1500 PCIe card in SPI mode on an interposer board. [Environment setup](setup.md) describes the wiring.                                                                                                                                                                                                                                                                                                                   |
 | SDK               | nRF Connect SDK v3.1.1 (Zephyr), built with sysbuild. MCUboot is the bootloader and its secondary image slot is in the external SPI NOR flash on the nRF side.                                                                                                                                                                                                                                                                                    |
 | Application       | One application, `demo_apps`, which runs keyword spotting on the AKD1500 with on-device edge learning, and serves the BrainChip Connect app over Bluetooth Low Energy.                                                                                                                                                                                                                                                                            |
 | Toolchain         | A Docker image, `akidatag-ncs:v3.1.1-py3.12`, holding the SDK, the Akida Python package for model conversion, and clang-format.                                                                                                                                                                                                                                                                                                                   |
@@ -56,8 +55,8 @@ Everything goes through `scripts/run.sh` inside the Docker image. Build the imag
 ```
 
 It downloads the SDK and takes a while; the result is about 17.6 GB. If you would rather install
-the toolchain on the host, Appendix I of [Environment setup](setup.md) lists what to install on
-Ubuntu 22.04. The CI release build pulls the same image from
+the toolchain on the host, the [local install appendix](setup.md#appendix-install-dependencies-locally)
+lists what to install on Ubuntu 22.04. The CI release build pulls the same image from
 `ghcr.io/brainchip-inc/akidatag-ncs:v3.1.1-py3.12`.
 
 Host-side tools, outside Docker:
@@ -74,16 +73,14 @@ On macOS, Docker Desktop has no USB passthrough, so build inside Docker and flas
 ## 3. Build
 
 ```sh
-./scripts/run.sh -d -b --app demo_apps                                  # AkidaTag board
-BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -b --rev 2 --app demo_apps   # AkidaTag board, hardware revision 2
-BUILD_DIR=build_docker_dk ./scripts/run.sh -d -b --dk --app demo_apps   # nRF5340 DK
+./scripts/run.sh -d -b --app demo_apps                                      # hardware revision 1
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -b --rev 2 --app demo_apps  # hardware revision 2
 ```
 
-A Docker build lands in `build_docker/demo_apps/`; a host build in `build/demo_apps/`. `--dk`
-changes the configuration, not the directory, so the two boards overwrite each other's build
-unless you set `BUILD_DIR`, which is why the DK command above builds into `build_docker_dk/`.
-The same holds for `--rev 2`, which builds for hardware revision 2 of the AkidaTag board; without
-it, the build is for revision 1.
+A Docker build lands in `build_docker/demo_apps/`; a host build in `build/demo_apps/`. `--rev 2`
+changes the configuration, not the directory, so the two revisions overwrite each other's build
+unless you set `BUILD_DIR`, which is why the revision 2 command above builds into
+`build_docker_rev2/`.
 `./scripts/run.sh -d -i` opens a shell inside the image.
 
 | Output                         | What it is                                                                                                                    |
@@ -106,12 +103,11 @@ Flashing `merged.hex` and `merged_CPUNET.hex` over SWD replaces everything on th
 bootloader included. It does not touch the AKD1500's flash, so a model on the board survives.
 
 ```sh
-./scripts/run.sh -d -f --app demo_apps                        # Linux, west flash inside Docker
-./scripts/run.sh -f -jf --app demo_apps                       # host J-Link, network core then application core
-BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps   # macOS: flash the Docker build from the host
-BUILD_DIR=build_docker_rev2 ./scripts/run.sh -f -jf --app demo_apps   # the revision 2 build, from its own directory
-BUILD_DIR=build_docker_dk ./scripts/run.sh -d -f -jf --dk --app demo_apps   # the DK build, from its own directory
-./scripts/run.sh -d -r                                        # reset the board
+./scripts/run.sh -d -f -jf --app demo_apps                              # Linux: J-Link inside Docker
+BUILD_DIR=build_docker ./scripts/run.sh -f -jf --app demo_apps          # macOS: host J-Link
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -d -f -jf --app demo_apps  # Linux: the revision 2 build
+BUILD_DIR=build_docker_rev2 ./scripts/run.sh -f -jf --app demo_apps     # macOS: the revision 2 build
+./scripts/run.sh -d -r                                                  # reset the board
 ```
 
 Use the J-Link path, `-jf`, on an AkidaTag board. The board's debug header reports a target
@@ -143,8 +139,7 @@ full chip erase.
 The application's console and shell are on `uart0`, TX P0.29 and RX P1.04, at 115200 baud. On the
 AkidaTag board those pins reach the CP2105 bridge behind the USB-C connector, so the cable that
 powers the board carries the console. The bridge presents two serial ports and only the
-higher-numbered one is the console; the other stays silent. On the DK the pins go to a header, so
-use a USB-to-TTL adapter.
+higher-numbered one is the console; the other stays silent.
 
 ```sh
 minicom -D /dev/ttyUSB1          # or ./scripts/run.sh -m /dev/ttyUSB1
@@ -224,9 +219,8 @@ The transfer stages one 4,096-byte flash sector at a time, carries an absolute o
 write and a committed position in every acknowledgement, and checks the whole file against a
 CRC32 before trusting it. The board reports `DONE` when the file is stored and verified, then
 programs the AKD1500, runs a test inference, and reports `READY`. Only `READY` means the model is
-running. [BLE model transfer protocol](ble-model-transfer.md) is the wire contract; change the
-firmware and that page together, and remember that BrainChip Connect is a second repository that
-has to move with them.
+running. Keep the firmware and BrainChip Connect implementations aligned when changing this
+exchange.
 
 On the board, the model data is written to the AKD1500's SPI flash at the address the package
 names (0x101000 for the keyword model), and the metadata and program info are stored as LittleFS
@@ -411,7 +405,7 @@ on a pull request.
 
 This is what BrainChip Connect speaks. All of it is in `src/core/interface/ble_services`.
 
-**Advertising.** The board advertises as `AkidaTag` (`AkidaTag-DK` for a DK build) with
+**Advertising.** The board advertises as `AkidaTag` with
 manufacturer data of twelve ASCII bytes: a Bluetooth version `53`, a three-digit firmware version,
 and the accelerator id `AKD1500`. The app filters on the accelerator id, so every board built
 around an AKD1500 appears in its list. There is no scan response and no service UUID on the air:
@@ -449,7 +443,7 @@ is on its main page.
 **Model transfer service**, UUID `f000aa00-0451-4000-b000-000000000000`: metadata
 characteristics, a control characteristic (start, abort), a data characteristic that carries an
 absolute offset in every write, and a status notification that reports the committed position and
-the result codes. [BLE model transfer protocol](ble-model-transfer.md) specifies every message.
+the result codes.
 
 **Edge learning service**, UUID `f000bb11-0111-9000-c000-000000000000`: a command characteristic
 (`f000bb10-...`) that takes one byte, and an acknowledgement characteristic (`f000bb12-...`) that

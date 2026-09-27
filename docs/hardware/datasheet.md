@@ -485,10 +485,10 @@ board.
 
 | Interface | Detail | Source |
 |---|---|---|
-| Bluetooth device name | `AkidaTag` (`AkidaTag-DK` on the development-kit build) | `src/prj.conf`, `src/boards/dk.conf` |
+| Bluetooth device name | `AkidaTag` | `src/prj.conf` |
 | Bluetooth role and security | Peripheral; LE Secure Connections only, MITM protection required, bonding with up to 3 bonds, 128-bit keys, resolvable private address rotated every 900 s | `src/prj.conf` |
 | Advertising | Flags, complete device name, manufacturer-specific data; the device serial is never advertised | `ble_initialization.c` |
-| Model transfer service | `f000aa00-0451-4000-b000-000000000000`, one flash sector per stage with an absolute offset in every write | [BLE model transfer](../ble-model-transfer.md) |
+| Model transfer service | `f000aa00-0451-4000-b000-000000000000`, one flash sector per stage with an absolute offset in every write | `src/core/interface/ble_services/file_transfer.c` |
 | Edge learning service | `f000bb11-0111-9000-c000-000000000000` (command `f000bb10`, acknowledgement `f000bb12`) | `edge_learning.c` |
 | Command and streaming channel | Nordic UART Service frames, including battery state of charge and charger status | `src/README.md`, `battery_service.c` |
 | Firmware update over Bluetooth | MCUmgr SMP over Bluetooth with the image, OS and statistics groups; MCUboot with RSA-3072 signatures, two updateable images (application and network core) | `src/prj.conf`, `src/sysbuild/mcuboot.conf` |
@@ -563,8 +563,7 @@ first board shipped. Source: the revision summary on the Rev2 schematic cover sh
   `src/Kconfig`, `src/pm_static.yml`, `src/apps/demo_apps/custom_app.conf`,
   `src/imu_app.conf`, `src/README.md`, `src/core/interface/gpio/gpio.c`,
   `src/core/interface/audio/pdm_mic.c`, `src/core/interface/ble_services/`,
-  `src/include/fuel_gauge/fuel_gauge.h`, `docs/ble-model-transfer.md`,
-  `docs/firmware-update-over-usb.md`, `AGENTS.md`.
+  `src/include/fuel_gauge/fuel_gauge.h`, `docs/firmware-update-over-usb.md`, `AGENTS.md`.
 - [AKD1500 Product Brief V2.4](https://brainchip.com/wp-content/uploads/2025/10/AKD1500-Product-Brief-V2.4-Oct.25.pdf).
 - [Nordic Semiconductor nRF5340 product page](https://www.nordicsemi.com/Products/nRF5340)
   and [product specification key features](https://docs.nordicsemi.com/bundle/ps_nrf5340/page/keyfeatures_html5.html).
