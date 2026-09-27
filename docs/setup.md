@@ -107,9 +107,9 @@ versions:
 Install the system packages:
 
 ```sh
-sudo apt install --no-install-recommends git wget make file \\
-  ccache dfu-util device-tree-compiler \\
-  xz-utils gcc gcc-multilib g++-multilib \\
+sudo apt install --no-install-recommends git wget make file \
+  ccache dfu-util device-tree-compiler \
+  xz-utils gcc gcc-multilib g++-multilib \
   libsdl2-dev libmagic1 ninja-build
 ```
 
