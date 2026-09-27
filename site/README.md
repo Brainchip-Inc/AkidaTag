@@ -38,4 +38,5 @@ files under `docs/hardware/` when that directory exists.
 are copied as they are from the BrainChip Connect documentation site, where
 the look was approved: black text on white, white on black in dark mode, blue
 links, Sora headings and Inter body text. Keep the two copies the same; change
-the look there first.
+the look there first. The one difference is whitespace: this repository's lint
+gate runs prettier over CSS, so the stylesheet is formatted with it here.
