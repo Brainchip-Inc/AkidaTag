@@ -114,6 +114,21 @@ voltage of about 1.4 V, so `west flash` through nrfjprog aborts with a low-volta
 though SWD works. A re-run that prints `Flash download: ... Skipped. Contents already match` for
 both banks is the cheapest proof that the board holds what you built.
 
+**Wiring a J-Link to the board.** The debug header is a row of pads labelled on the silkscreen,
+and five wires connect it to the J-Link's 20-pin header. Pin 1 is at the bottom-right corner of
+both connectors. The mapping is from the Spark Board SWD Connection Guide v1.1:
+
+| J-Link pin       | Signal                 | Board pad      |
+| ---------------- | ---------------------- | -------------- |
+| 1                | VTref, 1.8 V reference | Pin 10 (1.8 V) |
+| 7                | TMS / SWDIO            | SWD            |
+| 9                | TCK / SWCLK            | CLK            |
+| 15               | RESET, active low      | NRST           |
+| 8, or any ground | GND                    | GND            |
+
+The reference pin carries the board's 1.8 V rail, which is why nrfjprog reads it as a low target
+voltage.
+
 The AkidaTag overlay sets `nfct-pins-as-gpios` in the UICR, because P0.03 drives the AKD1500's
 asynchronous mode. That is a one-time programmable setting: it disables NFC on the chip until a
 full chip erase.
