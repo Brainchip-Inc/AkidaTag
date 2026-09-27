@@ -21,7 +21,7 @@
 /* U25 senses VDD_1V8 (shunt R117), U26 senses VDD_0V8_AKD (shunt R118).     */
 /* Vout(mV) = I(mA) * Rshunt(ohm) * gain  =>  I(mA) = Vout(mV) / (Rshunt*gain)*/
 /* The A1/A3 difference is amplifier gain only; the shunts are board parts    */
-/* (same on the A1 board — re-verify against the A3 board BOM).               */
+/* of the same values on both revisions (revision 2: U18/R55, U17/R28).       */
 /* ------------------------------------------------------------------------- */
 #define SHUNT_OHMS_1V8 0.1f   /* R117 */
 #define SHUNT_OHMS_0V8 0.02f  /* R118 */
@@ -66,8 +66,8 @@ typedef enum {
  * part, no board ID), so it is selected: boot default CONFIG_INA190_VARIANT,
  * overridable at runtime. */
 typedef enum {
-    INA190_A1 = 0, /* gain 25 V/V (current AkidaTag board) */
-    INA190_A3 = 1, /* gain 100 V/V */
+    INA190_A1 = 0, /* gain 25 V/V (AkidaTag revision 1) */
+    INA190_A3 = 1, /* gain 100 V/V (AkidaTag revision 2) */
 } ina190_variant_t;
 
 /* Latest per-rail current/power snapshot maintained by the sampler. */

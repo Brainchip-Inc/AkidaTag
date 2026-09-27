@@ -10,3 +10,4 @@ board:
     exact: true
     revisions:
     - name: "1"
+    - name: "2"

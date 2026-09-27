@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -18,6 +19,18 @@ LOG_MODULE_REGISTER(AKD_SPI_FLASH, LOG_LEVEL_DBG);
 
 #define CMD_CLEAR_FLAG_STATUS_REG (0x50)
 #define CMD_READ_FLAG_STATUS_REG (0x70)
+
+#define JEDEC_MANUFACTURER_MICRON (0x20)
+
+#define AKD_FLASH_NODE DT_NODELABEL(akd_flash)
+
+/* Only Micron parts latch erase and program failures in a flag status register.
+ * Other vendors assign its opcodes to unrelated commands, so the checks are left
+ * out for them. A node that declares no JEDEC ID keeps the checks. */
+#define AKD_FLASH_HAS_FLAG_STATUS                                                           \
+    COND_CODE_1(DT_NODE_HAS_PROP(AKD_FLASH_NODE, jedec_id),                                 \
+                (DT_PROP_BY_IDX(AKD_FLASH_NODE, jedec_id, 0) == JEDEC_MANUFACTURER_MICRON), \
+                (true))
 
 #define CMD_READ_ID (0x9F)
 
@@ -113,9 +126,9 @@ int spi_flash_probe(akida::ZephyrSpiDriver spi_flash_driver_) {
      * all-zero (AN-002: "A sleeping AKD1500 returns 0x00000000 on register
      * reads"), and a floating MISO reads all-ones.
      *
-     * Deliberately part-agnostic rather than pinned to one ID: the AkidaTag board
-     * carries an MT25QU128ABA behind the AKD1500 and the DK an W25Q128, and this
-     * has to pass on both. */
+     * Deliberately part-agnostic rather than pinned to one ID: AkidaTag revision 1
+     * carries an MT25QU128ABA behind the AKD1500, revision 2 and the DK a
+     * W25Q128, and this has to pass on all of them. */
     if (id == 0x000000U || id == FLASH_JEDEC_ID_MASK) {
         LOG_ERR(
             "AKD_SPI_FLASH: flash not responding (JEDEC ID 0x%06X). The "
@@ -148,7 +161,9 @@ int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t secto
     if (sector_size == 0) {
         return -EINVAL;
     }
-    spi_flash_clear_flag(spi_flash_driver_);
+    if (AKD_FLASH_HAS_FLAG_STATUS) {
+        spi_flash_clear_flag(spi_flash_driver_);
+    }
 
     int ret;
     for (uint32_t i = 0; i < no_of_sectors; i++) {
@@ -184,13 +199,15 @@ int spi_flash_erase_api(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t secto
             LOG_ERR("AKD_SPI_FLASH: Error in erase operation\n");
             return ret;
         }
-        ret = spi_flash_read_flag_status(spi_flash_driver_);
-        if ((ret & 0x20) == 0x20) {
-            LOG_ERR(
-                "AKD_SPI_FLASH: read_flag_status error in erase operation, error "
-                "value %x\n",
-                ret);
-            return ret;
+        if (AKD_FLASH_HAS_FLAG_STATUS) {
+            ret = spi_flash_read_flag_status(spi_flash_driver_);
+            if ((ret & 0x20) == 0x20) {
+                LOG_ERR(
+                    "AKD_SPI_FLASH: read_flag_status error in erase operation, error "
+                    "value %x\n",
+                    ret);
+                return ret;
+            }
         }
     }
 
@@ -208,7 +225,9 @@ int spi_flash_erase(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, 
 int spi_flash_write(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, const uint8_t* data,
                     size_t length) {
     size_t offset = 0;
-    spi_flash_clear_flag(spi_flash_driver_);
+    if (AKD_FLASH_HAS_FLAG_STATUS) {
+        spi_flash_clear_flag(spi_flash_driver_);
+    }
 
     while (offset < length) {
         size_t page_offset = address % PAGE_SIZE;
@@ -236,10 +255,12 @@ int spi_flash_write(akida::ZephyrSpiDriver spi_flash_driver_, uint32_t address, 
             LOG_ERR("AKD_SPI_FLASH: Error in write operation");
             return ret;
         }
-        ret = spi_flash_read_flag_status(spi_flash_driver_);
-        if ((ret & 0x10) == 0x10) {
-            LOG_ERR("AKD_SPI_FLASH: read_flag_status error in flash write operation");
-            return ret;
+        if (AKD_FLASH_HAS_FLAG_STATUS) {
+            ret = spi_flash_read_flag_status(spi_flash_driver_);
+            if ((ret & 0x10) == 0x10) {
+                LOG_ERR("AKD_SPI_FLASH: read_flag_status error in flash write operation");
+                return ret;
+            }
         }
         address += chunk;
         offset += chunk;

@@ -17,6 +17,7 @@ K_SEM_DEFINE(akd_async_sem, 0, 1);
 #define PDM_ENB_NODE DT_NODELABEL(pdm_enb)
 #define AKD_0V_ENB_NODE DT_NODELABEL(akd_0v_enb)
 #define CAM_ENB_NODE DT_NODELABEL(cam_enb)
+#define CAM_PWR_ENB_NODE DT_NODELABEL(cam_pwr_enb)
 #define AKD_ASYNC_ENB_NODE DT_NODELABEL(akd_async)
 #define AKD_LP_NODE DT_NODELABEL(akd_lp)
 
@@ -29,6 +30,10 @@ static const struct gpio_dt_spec enable_pdm = GPIO_DT_SPEC_GET(PDM_ENB_NODE, gpi
 static const struct gpio_dt_spec enable_akd_0V = GPIO_DT_SPEC_GET(AKD_0V_ENB_NODE, gpios);
 
 static const struct gpio_dt_spec enable_camera = GPIO_DT_SPEC_GET(CAM_ENB_NODE, gpios);
+
+/* Camera supply switch; its port is NULL on boards that do not switch the supply. */
+static const struct gpio_dt_spec enable_camera_power =
+    GPIO_DT_SPEC_GET_OR(CAM_PWR_ENB_NODE, gpios, {0});
 
 static const struct gpio_dt_spec enable_akd_async = GPIO_DT_SPEC_GET(AKD_ASYNC_ENB_NODE, gpios);
 
@@ -240,6 +245,10 @@ int gpio_init(void) {
         LOG_ERR("Camera enable GPIO not ready");
         return -ENODEV;
     }
+    if (enable_camera_power.port != NULL && !gpio_is_ready_dt(&enable_camera_power)) {
+        LOG_ERR("Camera power enable GPIO not ready");
+        return -ENODEV;
+    }
     if (!gpio_is_ready_dt(&enable_akd_async)) {
         LOG_ERR("AKD ASYNC enable GPIO not ready");
         return -ENODEV;
@@ -277,6 +286,13 @@ int gpio_init(void) {
     if (err) {
         LOG_ERR("Failed to configure camera enable pin (err %d)", err);
         return err;
+    }
+    if (enable_camera_power.port != NULL) {
+        err = gpio_pin_configure_dt(&enable_camera_power, GPIO_OUTPUT_INACTIVE);
+        if (err) {
+            LOG_ERR("Failed to configure camera power enable pin (err %d)", err);
+            return err;
+        }
     }
     err = gpio_pin_configure_dt(&enable_akd_async, GPIO_INPUT);
     if (err) {
@@ -353,12 +369,16 @@ void akd_irq_disable(void) {
  * 2. Enable AKD1500 device
  * 3. Enable accelerometer
  * 4. Enable PDM microphone
- * 5. Enable camera module
+ * 5. Enable the camera supply, on boards that switch it
+ * 6. Enable camera module
  */
 void akidatag_peripherals_power_enable(void) {
     gpio_pin_set_dt(&enable_akd_0V, GPIO_ENABLE);
     gpio_pin_set_dt(&enable_akd, GPIO_ENABLE);
     gpio_pin_set_dt(&enable_acc, GPIO_ENABLE);
     gpio_pin_set_dt(&enable_pdm, GPIO_ENABLE);
+    if (enable_camera_power.port != NULL) {
+        gpio_pin_set_dt(&enable_camera_power, GPIO_ENABLE);
+    }
     gpio_pin_set_dt(&enable_camera, GPIO_ENABLE);
 }

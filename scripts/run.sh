@@ -29,6 +29,7 @@ Options:
   -r, --reset        | (flag) | Do Board Reset
   -h, --help         | (flag) | Show this help message
   --dk               | (flag) | Select dk board pin configuration overlay file.
+  --rev              | (str)  | AkidaTag hardware revision to build for (default: 1). Not used with --dk.
   -t, --test-cli     | (flag) | Run CLI-based hardware validation test (Python)
   -t --infer-test, --test-cli --infer-test   | (flag) | Run CLI-based hardware validation test (Python) only for inference test of kws
 ###################################################################################################
@@ -45,6 +46,9 @@ How to use script - Examples runs:
 
   # Build demo_apps with dk board overlay file inside Docker
   $SCRIPT_INVOCATION -d -b --dk --app demo_apps
+
+  # Build demo_apps for AkidaTag hardware revision 2 inside Docker
+  $SCRIPT_INVOCATION -d -b --rev 2 --app demo_apps
 
   # Flash locally using west flash
   $SCRIPT_INVOCATION -f --app demo_apps
@@ -131,6 +135,7 @@ GENERATE_CONFIG=""
 SEND_BLE=false
 CLI_TEST_CMD=""
 DK_OVERLAY=false
+AKIDATAG_REV=""
 DO_INFER_TEST=false
 
 DOCKER=false
@@ -233,6 +238,7 @@ while [[ $# -gt 0 ]]; do
             DK_OVERLAY=true
             shift
             ;;
+        --rev) AKIDATAG_REV="${2:-}"; shift 2;;
         -r|--reset) DO_RESET=true; shift;;
         -h|--help) print_help; exit 0;;
         -t|--test-cli)
@@ -270,6 +276,11 @@ fi
 if ! $DO_SHELL && ! $DO_MINICOM && ! $DO_RESET && $_needs_app && [[ -z "$APP" ]]; then
     echo "Error: --app is required"
     exit 1
+fi
+
+# Hardware revisions belong to the AkidaTag board; the DK has none
+if $DK_OVERLAY && [[ -n "$AKIDATAG_REV" ]]; then
+    die "--rev selects an AkidaTag hardware revision and cannot be used with --dk"
 fi
 
 # --jlink only makes sense with --flash
@@ -463,7 +474,8 @@ if [[ -n "$APP" ]]; then
         CMAKE_EXTRA_ARGS+=("-DEXTRA_CONF_FILE=boards/dk.conf")
         CMAKE_EXTRA_ARGS+=("-DDTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp.overlay")
       else
-        BOARD_TARGET="akidatag/nrf5340/cpuapp"
+        # Without --rev, the board definition's default revision applies
+        BOARD_TARGET="akidatag${AKIDATAG_REV:+@$AKIDATAG_REV}/nrf5340/cpuapp"
         CMAKE_EXTRA_ARGS+=(-DCONFIG_AKIDATAG_BOARD=y)
         # A relative board root resolves against the application directory, so
         # this is src/, which holds boards/brainchip/akidatag/

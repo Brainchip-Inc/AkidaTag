@@ -66,9 +66,9 @@ static __noinit uint8_t camera_frame_buffer[MAX_RGB888_SIZE];
 
 /* ==================== SPI Device & Configuration ==================== */
 
-/* SPI device used to communicate with the camera */
+/* SPI bus the camera sits on, which depends on the board */
 
-const struct device* spi3_dev = DEVICE_DT_GET(DT_NODELABEL(spi3));
+const struct device* camera_spi_dev = DEVICE_DT_GET(DT_BUS(DT_NODELABEL(camera)));
 
 /* SPI configuration for the camera */
 
@@ -95,7 +95,7 @@ static void camera_write_reg(uint8_t addr, uint8_t val) {
     uint8_t tx[2] = {addr | 0x80, val};
     struct spi_buf buf = {.buf = tx, .len = 2};
     struct spi_buf_set set = {.buffers = &buf, .count = 1};
-    spi_write(spi3_dev, &spi_cfg_camera, &set);
+    spi_write(camera_spi_dev, &spi_cfg_camera, &set);
 }
 
 /**
@@ -112,7 +112,7 @@ static uint8_t camera_read_reg(uint8_t addr) {
     struct spi_buf rxb = {.buf = rx, .len = 3};
     struct spi_buf_set txs = {.buffers = &txb, .count = 1};
     struct spi_buf_set rxs = {.buffers = &rxb, .count = 1};
-    spi_transceive(spi3_dev, &spi_cfg_camera, &txs, &rxs);
+    spi_transceive(camera_spi_dev, &spi_cfg_camera, &txs, &rxs);
     return rx[2];
 }
 
@@ -162,7 +162,7 @@ static void fifo_read(uint8_t* buf, uint32_t len) {
         {.buf = NULL, .len = 1}, {.buf = NULL, .len = 1}, {.buf = buf, .len = len}};
     struct spi_buf_set tx = {.buffers = txb, .count = 3};
     struct spi_buf_set rx = {.buffers = rxb, .count = 3};
-    spi_transceive(spi3_dev, &spi_cfg_camera, &tx, &rx);
+    spi_transceive(camera_spi_dev, &spi_cfg_camera, &tx, &rx);
 }
 
 /* ==================== Camera Initialization & Capture ==================== */
@@ -178,7 +178,7 @@ static void fifo_read(uint8_t* buf, uint32_t len) {
  */
 
 int camera_init(void) {
-    if (!device_is_ready(spi3_dev)) {
+    if (!device_is_ready(camera_spi_dev)) {
         LOG_ERR("ERROR: SPI not ready");
         return -ENODEV;
     }
@@ -378,7 +378,7 @@ static void send_base64_rgb888(const uint8_t* buf, uint32_t len) {
  */
 
 int camera_start(void) {
-    if (spi3_dev == NULL) {
+    if (camera_spi_dev == NULL) {
         return -ENODEV;
     }
 
