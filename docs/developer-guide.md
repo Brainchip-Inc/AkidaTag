@@ -219,9 +219,8 @@ existing no-model path), flash it, transfer a good model, then restore the code.
 
 ## 8. Signing, and which firmware a board accepts
 
-This section is established from `src/sysbuild.conf`, `src/sysbuild/mcuboot.conf`,
-`.github/workflows/release.yml`, `.gitignore`, the header of `.env/development_key.pem`, and the
-_Application Security_ section of `src/README.md`.
+This section is established from `src/sysbuild.conf`, `src/sysbuild/mcuboot.conf`, the header of
+`.env/development_key.pem`, and the _Application Security_ section of `src/README.md`.
 
 **How images are signed.** Every application image is signed with an RSA-3072 key
 (`SB_CONFIG_BOOT_SIGNATURE_TYPE_RSA` and `CONFIG_BOOT_SIGNATURE_TYPE_RSA_LEN=3072`). MCUboot
@@ -231,14 +230,16 @@ the serial port. The public half of the key is compiled into MCUboot itself.
 
 **Two keys.**
 
-| Key             | Where it is                                                                                                                                                                                                                                                                       | What it signs                                         |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Development key | `.env/development_key.pem`, committed to the repository. It is public on purpose; its own header says so.                                                                                                                                                                         | Every build made from this repository, with no setup. |
-| Production key  | Held as a CI secret. The release workflow writes it to `.env/production_key.pem` for the duration of a release build, repoints `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` at it, and fails the release if that patch did not take. It is never committed, and `.gitignore` keeps it out. | BrainChip's published releases only.                  |
+| Key             | Where it is                                                                                               | What it signs                                         |
+| --------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Development key | `.env/development_key.pem`, committed to the repository. It is public on purpose; its own header says so. | Every build made from this repository, with no setup. |
+| Production key  | Private, held by BrainChip, and not in this repository.                                                   | BrainChip's published releases only.                  |
 
 Because the development key is public, a signature made with it proves nothing about who built
-the firmware; treat any image signed with it as untrusted. That one line in `src/sysbuild.conf` is
-the entire difference between a build from this repository and a build BrainChip publishes.
+the firmware; treat any image signed with it as untrusted. Build with it while you develop, and
+keep the two keys apart in your head: a board from BrainChip trusts the production key, so it
+refuses development-signed images over Bluetooth and USB-C, and a board you have re-keyed refuses
+BrainChip's releases. Use a key of your own for anything you ship; see below.
 
 **What a board trusts.** A board trusts whichever key built the MCUboot currently on it, and only
 a flash that replaces MCUboot changes that.
@@ -450,9 +451,9 @@ forces the phone to pair. TBD: whether the retail build turns it on.
 ## 13. Contributing
 
 - `CONTRIBUTING.md` is the rule for commit subjects and pull request titles,
-  `type(scope): concise message`, and CI enforces it. Pull requests squash into `main`; a release
-  is a pull request from `main` into `release`, merged with every commit intact, which tags,
-  builds with the production key and publishes the assets.
+  `type(scope): concise message`, and CI enforces it. Pull requests squash into `main`. Releases
+  are published by BrainChip at https://github.com/Brainchip-Inc/AkidaTag/releases, signed with
+  the production key.
 - The lint job checks only the files a pull request changes, with clang-format for C and C++,
   ruff for Python and shellcheck for shell. clang-format is in the Docker image:
   `./scripts/clang_format.sh check <files>`. Most of the tree predates the current
