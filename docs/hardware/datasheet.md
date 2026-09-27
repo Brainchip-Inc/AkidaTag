@@ -14,8 +14,7 @@ is the [block diagram](block-diagram.md) page.
 | Document status | |
 |---|---|
 | Hardware described | AkidaTag hardware revision 2, design NRF-AKD1500-002 |
-| Firmware referenced | AkidaTag firmware 1.2.0+0, the `main` branch of this repository |
-| Status | Draft for review. Every entry marked `TBD:` is a value that no design file, firmware source or datasheet in reach provides, and is awaiting confirmation. Nothing on this page is estimated. |
+| Firmware referenced | The AkidaTag firmware in this repository; the current build is the [latest release](https://github.com/Brainchip-Inc/AkidaTag/releases/latest) |
 
 ---
 
@@ -202,7 +201,7 @@ Bluetooth Low Energy behaviour is set by the firmware; see section 8.
 Nordic specifies the nRF5340 radio for a configurable transmit power of -40 to +3 dBm and
 a receiver sensitivity of -98 dBm at 1 Mbps. The firmware does not set a transmit power, so
 the Bluetooth controller's default applies. Source: nRF5340 product specification, key
-features; `src/prj.conf`. `TBD: transmit power and range measured on this board.`
+features; `src/prj.conf`.
 
 ### 3.8 USB-C and console
 
@@ -374,7 +373,7 @@ materials.
 
 No battery is supplied with the board. Fit a single-cell rechargeable Li-ion or Li-Po cell
 with a JST XH 2-pin plug, positive on pin 1. The charger regulates the cell to 4.2 V and the
-board is designed for 3.0 to 4.2 V on VCC_SYS (section 6.2).
+board is designed for 3.0 to 4.2 V on VCC_SYS (section 6.1).
 
 ### 5.3 J1, camera header
 
@@ -420,14 +419,10 @@ Source: Rev2 netlist.
 
 ## 6. Electrical characteristics
 
-No board-level electrical characterisation is available in the sources this page is
-built from. The rows below record what the design sets; every measured value is marked.
+The values below are the settings the revision 2 design makes. Measured characteristics
+will be added in a later revision of this document.
 
-### 6.1 Absolute maximum ratings
-
-`TBD: absolute maximum ratings.` None have been established for the assembly.
-
-### 6.2 Recommended operating conditions
+### 6.1 Recommended operating conditions
 
 | Parameter | Min | Typ | Max | Unit | Source |
 |---|---|---|---|---|---|
@@ -437,26 +432,19 @@ built from. The rows below record what the design sets; every measured value is 
 | VDD_0V8_AKD core rail | | 0.8 | | V | Rev2 schematic |
 | EXT_VDD_3V3 camera rail | | 3.3 | | V | Rev2 schematic |
 | Camera header supply | | 3.3 (1.8 option not fitted) | | V | Rev2 netlist |
-| Operating temperature | `TBD: operating temperature range` | | | °C | Not rated for the assembly. The nRF5340 is rated -40 to 105 °C (Nordic) and the charger -40 to 125 °C junction (TI); the other parts and the cell fitted narrow this |
 
-### 6.3 Current consumption
+### 6.2 Current consumption
 
-Current consumption per state (asleep and advertising, connected and idle, keyword
-spotting running, peak during an inference) and the charge current drawn from USB will be
-measured on a revision 2 board and added in a later revision of this datasheet.
-`TBD: current consumption, deferred to a later revision.` Until then the only current
-figure on this page is the charger's 536 mA nominal fast-charge setting in section 3.11.
+Power consumption figures, per operating state and for the charge current drawn from USB,
+will be added in a later revision of this document. The charger's 536 mA nominal
+fast-charge setting is in section 3.11.
 
-No board-level consumption has been measured yet. The firmware measures the 1.8 V and
-0.8 V rails itself through the INA190 amplifiers (`power read`, `power measure`), which is
-the way to fill in the rows for the rails behind them: the shunts are 0.1 ohm on the 1.8 V
-rail and 0.02 ohm on the 0.8 V rail, and revision 2 fits the 100 V/V amplifier, so run
-`power variant a3` first because the firmware's build-time default is the 25 V/V A1 part.
-The total draw, which also covers the charger, the LEDs and the 3.3 V rail, needs a meter in
-series with the battery or the USB input. Source: Rev2 bill of materials, `src/README.md`.
-The only board test records available, the post-fabrication PCB test report of March 2026
-and the PCB testing checklist of February 2026, cover bare-board impedance and short/open
-checks and the power-on procedure, and contain no current measurements.
+The firmware measures the 1.8 V and 0.8 V rails itself through the INA190 amplifiers
+(`power read`, `power measure`): the shunts are 0.1 ohm on the 1.8 V rail and 0.02 ohm on
+the 0.8 V rail, and revision 2 fits the 100 V/V amplifier, so run `power variant a3` first
+because the firmware's build-time default is the 25 V/V A1 part. The total draw, which
+also covers the charger, the LEDs and the 3.3 V rail, needs a meter in series with the
+battery or the USB input. Source: Rev2 bill of materials, `src/README.md`.
 
 What the on-board measurement can resolve follows from the INA190 datasheet. The A3 device
 has a gain error of plus or minus 0.3 % and a zero-current output offset of up to 3 mV at a
@@ -500,7 +488,7 @@ board.
 | Firmware update over USB-C | MCUboot serial recovery on the CP2105 UART, entered without a button | [firmware update over USB](../firmware-update-over-usb.md) |
 | Console | Zephyr shell on UART0 at 115200 8N1 | `src/prj.conf`, board overlay |
 | Watchdog | 8 s application watchdog | `src/prj.conf` |
-| Firmware version | 1.2.0+0, readable over Bluetooth with `smpmgr image state-read` | `VERSION`, `AGENTS.md` |
+| Firmware version | Readable over Bluetooth with `smpmgr image state-read`; the current build is the [latest release](https://github.com/Brainchip-Inc/AkidaTag/releases/latest) | `VERSION`, `AGENTS.md` |
 
 ---
 
@@ -517,37 +505,29 @@ two flashes IC1 (top right) and IC2 (right), and the microphones U19 and U20.
 | Board size | 27.7 mm x 39.5 mm | Rev2 board outline (DXF) |
 | Corners | 0.889 mm chamfer on all four corners | Rev2 board outline (DXF) |
 | Layer count | 6 | Rev2 fabrication artwork layer set |
-| Mounting holes | None found in the outline data; `TBD: mounting provisions` | Rev2 board outline (DXF) |
+| Mounting holes | None | Rev2 board outline (DXF) |
 | USB-C position | Bottom side, centred near one short edge, receptacle projecting beyond the edge | Rev2 placement data |
 | Microphones | Bottom side, one in each corner beside the USB-C edge | Rev2 placement data |
 | Board thickness | 1.00 mm, plus or minus 10 % | Rev2 fabrication notes |
-| Weight | `TBD: weight` | |
-| Enclosure | The board ships in its enclosure; `TBD: enclosure dimensions and material` | BrainChip product decision |
+| Enclosure | The board ships in its enclosure | BrainChip product decision |
 
 ---
 
-## 10. Environmental
-
-| Item | Value |
-|---|---|
-| Operating temperature | `TBD: operating temperature range`; not rated for the assembly, see section 6.2 |
-| Storage temperature | `TBD: storage temperature range` |
-| Humidity | `TBD: humidity range` |
-
----
-
-## 11. Product information
+## 10. Product information
 
 | Item | Value |
 |---|---|
 | Product name | AkidaTag |
 | What is in the box | The AkidaTag board in its enclosure. No battery, USB-C cable or camera is included |
-| Companion app | BrainChip Connect for Android 13 or later; the [Google Play listing](https://play.google.com/store/apps/details?id=com.brainchip.connect) is open for pre-registration and the app is not yet installable from it. An iOS version is to follow on the App Store |
-| Developer resources | [AkidaTag on the BrainChip Developer Hub](https://developer.brainchip.com/akida-tag/), [Developer Hub sign-up](https://developer.brainchip.com/signup/), [BrainChip community on Discord](https://discord.com/invite/9bmd9g52vn) |
+| Companion app | BrainChip Connect for Android 13 or later, in [pre-registration on Google Play](https://play.google.com/store/apps/details?id=com.brainchip.connect), and coming soon to the iOS App Store |
+| Firmware and models | The [latest firmware release](https://github.com/Brainchip-Inc/AkidaTag/releases/latest) of this repository; every release attaches the model packages `akidatag-kws-model.zip` and `akidatag-kws-edge-learning-model.zip` |
+| Licence | Apache License 2.0, in `LICENSE` at the root of this repository |
+| Documentation | [AkidaTag documentation](https://brainchip-inc.github.io/AkidaTag/), [BrainChip Connect documentation](https://brainchip-inc.github.io/BrainChip-Connect/), [AkidaTag on the BrainChip Developer Hub](https://developer.brainchip.com/akida-tag/) and [Developer Hub sign-up](https://developer.brainchip.com/signup/) |
+| Support | Help on the [BrainChip Discord](https://discord.com/invite/9bmd9g52vn); bugs as [GitHub issues](https://github.com/Brainchip-Inc/AkidaTag/issues); security problems reported privately through the repository's Security tab ("Report a vulnerability") |
 
 ---
 
-## 12. Revision history
+## 11. Revision history
 
 ### Hardware
 
@@ -562,16 +542,16 @@ first board shipped. Source: the revision summary on the Rev2 schematic cover sh
 
 | Date | Change |
 |---|---|
-| 2026-09-25 | First draft from the revision 2 design files and firmware 1.2.0+0 |
+| 2026-09-25 | First edition, from the revision 2 design files and the firmware on `main` |
 
 ---
 
-## 13. Sources
+## 12. Sources
 
 - Revision 2 design files: schematic SI-NRF-AKD_BRD-002 V11 (2026-08-25), bill of
   materials NRF-AKD1500-002 V11, netlist report (2026-08-24), placement file, board
   outline DXF and fabrication artwork set.
-- Firmware on `main` at 1.2.0+0: `src/boards/nrf5340_cpuapp_akidatag.overlay`,
+- Firmware on `main` of this repository: `src/boards/nrf5340_cpuapp_akidatag.overlay`,
   `src/sysbuild/mcuboot_akidatag.overlay`, `src/sysbuild/mcuboot.conf`, `src/prj.conf`,
   `src/Kconfig`, `src/pm_static.yml`, `src/apps/demo_apps/custom_app.conf`,
   `src/imu_app.conf`, `src/README.md`, `src/core/interface/gpio/gpio.c`,
@@ -585,9 +565,9 @@ first board shipped. Source: the revision summary on the Rev2 schematic cover sh
   charging thresholds and timers.
 - Texas Instruments INA190 datasheet, SBOS863D: gain options, gain error, zero-current
   output offset and output swing.
-- Board test records, internal: post-fabrication PCB test report (version 1.0, 2026-03-13),
+- BrainChip board test records: post-fabrication PCB test report (version 1.0, 2026-03-13),
   PCB testing checklist and procedures (version 1.0, 2026-02-18) and Spark board SWD
-  connection guide (version 1.1, 2026-04-10); read for facts only, nothing copied.
+  connection guide (version 1.1, 2026-04-10).
 - BrainChip AKD1500 documentation for the strap meanings and the Safe Mode clock behaviour.
 - Texas Instruments BQ27427 datasheet, SLUSEB5B: pin functions.
 - BrainChip product decisions of September 2026: the enclosure ships with the board, the box

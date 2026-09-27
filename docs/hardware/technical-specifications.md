@@ -15,8 +15,7 @@ the [block diagram](block-diagram.md).
 | Document status | |
 |---|---|
 | Hardware described | AkidaTag hardware revision 2 |
-| Firmware referenced | AkidaTag firmware 1.2.0+0 |
-| Status | Draft for review. Every entry marked `TBD:` is awaiting confirmation; nothing here is estimated. |
+| Firmware referenced | The AkidaTag firmware in this repository; the current build is the [latest release](https://github.com/Brainchip-Inc/AkidaTag/releases/latest) |
 
 ---
 
@@ -64,22 +63,17 @@ the [block diagram](block-diagram.md).
 | **Power monitoring** | On-board current sensing of the 1.8 V system rail and the 0.8 V AI core rail, readable from the firmware console |
 | **Bluetooth** | Bluetooth Low Energy peripheral, device name `AkidaTag`; LE Secure Connections only with bonding; firmware update over Bluetooth |
 | **Radio** | nRF5340 radio, specified by Nordic for -40 to +3 dBm configurable transmit power and -98 dBm sensitivity at 1 Mbps; on-board 2.4 GHz chip antenna |
-| **Bluetooth range** | `TBD: Bluetooth range` |
 | **USB** | USB-C: 5 V charging input and a USB-to-serial console at 115200 baud; firmware update over the cable with nothing but a computer |
 | **Debug** | 10-pin 1.27 mm SWD header |
 | **Battery** | Not included. Fits a single-cell rechargeable Li-ion or Li-Po cell, 3.0 to 4.2 V, on a JST XH 2-pin connector |
 | **Battery life** | Depends on the cell fitted |
 | **Charging** | On-board linear charger with power path, 536 mA nominal fast charge from USB-C 5 V; the device runs while charging; charge time depends on the cell fitted |
 | **Power switch** | On/off slide switch |
-| **Power consumption** | `TBD: power consumption, to be measured for a later revision` |
+| **Power consumption** | Power consumption figures will be added in a later revision of this document |
 | **Indicators** | One RGB LED and one white LED under firmware control |
 | **Controls** | One user button; the on/off slide switch |
 | **Board dimensions** | 27.7 mm x 39.5 mm, 1.0 mm thick, six-layer PCB, chamfered corners |
-| **Enclosure** | Ships in its enclosure; `TBD: enclosure dimensions, material and colour` |
-| **Weight** | `TBD: weight` |
-| **Operating temperature** | `TBD: operating temperature range`; the board as a whole has not been rated, and the host processor is rated -40 to 105 °C |
-| **Storage temperature** | `TBD: storage temperature range` |
-| **Humidity** | `TBD: humidity range` |
+| **Enclosure** | Ships in its enclosure |
 | **What is in the box** | The AkidaTag board in its enclosure. No battery, USB-C cable or camera is included |
 
 ---
@@ -95,24 +89,31 @@ USB-C cable from a computer.
 
 | | |
 |---|---|
-| **Companion app** | BrainChip Connect for Android 13 or later. The Google Play listing is open for pre-registration; the app is not yet installable from it. An iOS version is to follow on the App Store |
-| **Firmware** | This repository, open for building and modification |
+| **Companion app** | BrainChip Connect for Android 13 or later, in pre-registration on Google Play, and coming soon to the iOS App Store |
+| **Firmware** | This repository, under the Apache License 2.0; the current build is the [latest release](https://github.com/Brainchip-Inc/AkidaTag/releases/latest) |
+| **Models** | Every firmware release attaches the keyword spotting model packages `akidatag-kws-model.zip` and `akidatag-kws-edge-learning-model.zip` |
 | **Demonstrations** | Keyword spotting with on-device edge learning; motion sensing; camera capture |
 
 ## Resources
 
+- [AkidaTag documentation](https://brainchip-inc.github.io/AkidaTag/)
+- [BrainChip Connect documentation](https://brainchip-inc.github.io/BrainChip-Connect/)
+- [AkidaTag firmware releases](https://github.com/Brainchip-Inc/AkidaTag/releases/latest)
 - [AkidaTag on the BrainChip Developer Hub](https://developer.brainchip.com/akida-tag/)
 - [Developer Hub sign-up](https://developer.brainchip.com/signup/)
 - [BrainChip Connect on Google Play (pre-registration)](https://play.google.com/store/apps/details?id=com.brainchip.connect)
-- [BrainChip community on Discord](https://discord.com/invite/9bmd9g52vn)
 - [AKD1500 product brief](https://brainchip.com/wp-content/uploads/2025/10/AKD1500-Product-Brief-V2.4-Oct.25.pdf)
+- Help: the [BrainChip Discord](https://discord.com/invite/9bmd9g52vn) for questions and
+  [GitHub issues](https://github.com/Brainchip-Inc/AkidaTag/issues) for bugs. Security
+  problems are reported privately through the repository's Security tab
+  ("Report a vulnerability")
 
 ---
 
 ## Sources
 
 Every value on this page is taken from the AkidaTag revision 2 design files, the AkidaTag
-firmware 1.2.0+0 in this repository, the
+firmware in this repository, the
 [AKD1500 Product Brief V2.4](https://brainchip.com/wp-content/uploads/2025/10/AKD1500-Product-Brief-V2.4-Oct.25.pdf),
 the [Nordic nRF5340 product specification](https://docs.nordicsemi.com/bundle/ps_nrf5340/page/keyfeatures_html5.html),
 the Texas Instruments BQ25185 datasheet, the

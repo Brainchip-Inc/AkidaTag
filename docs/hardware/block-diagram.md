@@ -9,7 +9,6 @@ the [datasheet](datasheet.md); the buyer-facing summary is the
 | Document status | |
 |---|---|
 | Hardware described | AkidaTag hardware revision 2 |
-| Status | Draft for review. Every entry marked `TBD:` is awaiting confirmation; nothing here is estimated. |
 
 ---
 
@@ -270,7 +269,7 @@ drawing (January 2026); the Texas Instruments INA190 datasheet (SBOS863D) and BQ
 datasheet (SLUSEB5B); BrainChip AKD1500 documentation for the strap meanings; and the
 firmware board overlay `src/boards/nrf5340_cpuapp_akidatag.overlay`,
 `src/core/interface/gpio/gpio.c`, `src/core/interface/akd_spi_flash/akd_spi_flash_handler.cpp`
-and `src/README.md` on `main` at firmware 1.2.0+0.
+and `src/README.md` on `main`.
 
 ---
 
