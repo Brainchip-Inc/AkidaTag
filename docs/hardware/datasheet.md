@@ -145,8 +145,9 @@ channel. Source: `src/pm_static.yml`.
 The firmware's partition map uses the first 8 MB of IC1. Source: `src/pm_static.yml`.
 
 Both positions are fitted with the Winbond W25Q128JWPIQ (1.8 V, 128 Mbit) listed in the
-Rev2 bill of materials. The firmware on `main` still identifies the devices by the JEDEC ID
-of the Micron part named in the schematic symbols, so it does not match the fitted part.
+Rev2 bill of materials. A revision 2 build identifies both devices by the Winbond JEDEC ID;
+see section 4 for how to build it. The default build is for revision 1 and expects the
+Micron part named in the schematic symbols.
 
 ### 3.4 Audio: microphones
 
@@ -186,8 +187,7 @@ output; a 1.8 V option exists through unpopulated resistors.
 The firmware drives an ArduCam Mega camera and supports 96 x 96 and 128 x 128 RGB
 frames. Source: `src/README.md`, `src/include/camera/spi_camera.h`.
 
-See section 5.3 for the pinout and section 4 for a difference between the header's wiring
-and the pins the current firmware uses.
+See section 5.3 for the pinout and section 4 for the pins a revision 2 build uses.
 
 ### 3.7 Wireless
 
@@ -268,7 +268,8 @@ safety timer. Source: BQ25185 datasheet SLUSF65B, electrical characteristics and
 Rev2 bill of materials for R84 and R85.
 
 The firmware's power-up order is: 0.8 V AKD1500 core, then the AKD1500 1.8 V rail, then
-the IMU, then the microphones, then the camera enable. Source:
+the IMU, then the microphones, then, in a revision 2 build, the camera supply, then the
+camera enable. Source:
 `akidatag_peripherals_power_enable()` in `src/core/interface/gpio/gpio.c`.
 
 No battery is supplied with the board. The firmware programs the fuel gauge for an
@@ -277,20 +278,27 @@ source notes that these values are for a test battery, so the state of charge it
 only as good as the match between those parameters and the cell fitted. Revision 2
 connects the battery to the gauge's BAT pin and the charger to its SRX pin, which is the
 orientation the BQ27427 datasheet specifies for its integrated sense resistor. The firmware
-on `main` still inverts the sign of the gauge's current reading to correct for a sense
-resistor that its code describes as physically reversed, a correction that inverts the sign
-on this orientation. Source: Rev2 netlist; BQ27427 datasheet SLUSEB5B, pin functions;
+applies the same current-sign handling on both board revisions: it inverts the sign of the
+gauge's current reading to correct for a sense resistor that its code describes as
+physically reversed. The resulting sign is checked on the first revision 2 board. Source:
+Rev2 netlist; BQ27427 datasheet SLUSEB5B, pin functions;
 `src/include/fuel_gauge/fuel_gauge.h`, `src/core/interface/fuel_gauge/fuel_gauge.c`.
 
 ---
 
 ## 4. Pin assignment
 
-The table lists every nRF5340 GPIO as wired on hardware revision 2, and how the firmware on
-`main` uses it. Rows marked **differs** are places where the firmware's board definition
-still describes the previous board revision; they are listed together after the table.
+The table lists every nRF5340 GPIO as wired on hardware revision 2, and how the firmware
+uses it when built for revision 2:
 
-| nRF5340 pin | Rev2 signal | Connected to | Firmware use on `main` |
+```sh
+./scripts/run.sh -d -b --rev 2 --app demo_apps
+```
+
+The default build, without `--rev 2`, is for revision 1. Where the two revisions differ is
+listed after the table.
+
+| nRF5340 pin | Rev2 signal | Connected to | Firmware use (revision 2 build) |
 |---|---|---|---|
 | P0.00 / XL1 | XL1 | 32.768 kHz crystal Y1 | Low-frequency crystal |
 | P0.01 / XL2 | XL2 | 32.768 kHz crystal Y1 | Low-frequency crystal |
@@ -298,8 +306,8 @@ still describes the previous board revision; they are listed together after the 
 | P0.03 / NFC2 | AKD_GPIO3 | AKD1500 GPIO_03 | `akd_async` input, inference-complete interrupt |
 | P0.04 / AIN0 | I1V8_AIN0 | INA190 U18 output (1.8 V rail current), TP7 | SAADC channel 0 |
 | P0.05 / AIN1 | I0V8_AIN1 | INA190 U17 output (0.8 V rail current), TP6 | SAADC channel 1 |
-| P0.06 / AIN2 | CAM_SPI_CLK | Level shifter U15 to J1 pin 3 | Not used, **differs** (camera SCK expected on P0.17) |
-| P0.07 / AIN3 | CAM_SPI_MOSI | Level shifter U15 to J1 pin 5 | Not used, **differs** (camera MOSI expected on P0.13) |
+| P0.06 / AIN2 | CAM_SPI_CLK | Level shifter U15 to J1 pin 3 | SPIM2 SCK, camera |
+| P0.07 / AIN3 | CAM_SPI_MOSI | Level shifter U15 to J1 pin 5 | SPIM2 MOSI, camera |
 | P0.08 | HSPI_SCK | AKD1500 SPI_S_SCK, TP5 | SPIM4 SCK, high drive |
 | P0.09 | HSPI_MOSI | AKD1500 SPI_S_IO0 | SPIM4 MOSI |
 | P0.10 | HSPI_MISO | AKD1500 SPI_S_IO1 | SPIM4 MISO |
@@ -310,50 +318,48 @@ still describes the previous board revision; they are listed together after the 
 | P0.15 | QSPI_IO2 | Flash IC1 W#/DQ2, pull-up | Not used |
 | P0.16 | QSPI_IO3 | Flash IC1 HOLD#/DQ3, pull-up | Not used |
 | P0.17 | QSPI_CLK | Flash IC1 C, TP4 | SPIM3 SCK |
-| P0.18 | QSPI_CS_0 | Flash IC1 S#, pull-up | SPIM3 chip select 1 (application), chip select 0 (MCUboot) |
+| P0.18 | QSPI_CS_0 | Flash IC1 S#, pull-up | SPIM3 chip select 0, application and MCUboot |
 | P0.19 | VDD_1V8_AKD_EN | Load switch U10 ON, 100 kilohm pull-down | `akd_enb` output |
 | P0.20 | VDD_1V8_ACC_EN | Load switch U4 ON, pull-down | `acc_enb` output |
 | P0.21 | VDD_1V8_PDM_EN | Load switch U8 ON, pull-down | `pdm_enb` output |
 | P0.22 | VDD_0V8_AKD_EN | Load switch U9 ON, then TLV62585 EN | `akd_0v_enb` output |
 | P0.23 | CHGR_STS1 | BQ25185 STAT1, 10 kilohm pull-up | `chgr_sts1` input |
 | P0.24 | CHGR_STS2 | BQ25185 STAT2, pull-up | `chgr_sts2` input |
-| P0.25 / AIN4 | CAM_SPI_CS | Level shifter U14 to J1 pin 6, 10 kilohm pull-up | SPIM3 chip select 0, camera |
-| P0.26 / AIN5 | CAM_SPI_MISO | Level shifter U14 from J1 pin 4 | `user_btn` input, **differs** (no button on this pin) |
+| P0.25 / AIN4 | CAM_SPI_CS | Level shifter U14 to J1 pin 6, 10 kilohm pull-up | SPIM2 chip select 0, camera |
+| P0.26 / AIN5 | CAM_SPI_MISO | Level shifter U14 from J1 pin 4 | SPIM2 MISO, camera |
 | P0.27 / AIN6 | LED_G | Q3, RGB LED green | `led_green` output |
-| P0.28 / AIN7 | LED_W_1 | Q4, white LED | `led_red` output, **differs** (drives the white LED); MCUboot DFU LED |
+| P0.28 / AIN7 | LED_W_1 | Q4, white LED | `led_white`, not driven |
 | P0.29 | DBG_TXD | CP2105 RXD_SCI, TP11 | UART0 TX |
 | P0.30 | INT_FL_GAUG | BQ27427 GPOUT, pull-up | `fg_int` input |
 | P0.31 | ACC_INT1 | ISM330DHCX INT1 | `imui` input |
 | P1.00 | ACC_INT2 | ISM330DHCX INT2 | Not used |
-| P1.01 | USER_IO | Push button SW1, 10 kilohm pull-up | MCUboot DFU button only, **differs** (the application's button is defined on P0.26) |
+| P1.01 | USER_IO | Push button SW1, 10 kilohm pull-up | `user_btn` input; MCUboot DFU button |
 | P1.02 | ACC_FG_SDA | ISM330DHCX SDA, BQ27427 SDA, 2.2 kilohm pull-up | I2C1 SDA |
 | P1.03 | ACC_FG_SCL | ISM330DHCX SCL, BQ27427 SCL, 2.2 kilohm pull-up | I2C1 SCL |
 | P1.04 | DBG_RXD | CP2105 TXD_SCI, TP13 | UART0 RX |
 | P1.05 | AKD_PGOOD | AKD1500 PWR_GOOD through R47, 10 kilohm pull-up to VDD_1V8_AKD, TP1 | Not used |
-| P1.06 | CAM_PWR_EN | Load switch U2 ON (camera 3.3 V), 100 kilohm pull-down | Not used, **differs** (camera header power is never enabled) |
+| P1.06 | CAM_PWR_EN | Load switch U2 ON (camera 3.3 V), 100 kilohm pull-down | `cam_pwr_enb` output, camera supply |
 | P1.07 | AKD_LP | AKD1500 SLEEP through R48 | `akd_lp` output, sleep control |
 | P1.08 | not connected | | Not used on this board |
 | P1.09 | PDM_PCLK | Microphones U19 and U20 CLOCK | PDM clock |
 | P1.10 | PDM_PDAT | Microphones U19 and U20 DATA, 100 ohm each | PDM data |
 | P1.11 | AKD_GPIO0 | AKD1500 GPIO_00 | Not used |
 | P1.12 | AKD_GPIO1 | AKD1500 GPIO_01 | Not used |
-| P1.13 | LED_B | Q1, RGB LED blue | `akdreset` node, unused by code, **differs** |
-| P1.14 | LED_R | Q2, RGB LED red | Not used, **differs** (the firmware's red indication is on P0.28) |
-| P1.15 | CAM_SPI_EN | Level shifters U14 and U15 output enable, pull-down | `cam_enb` output |
+| P1.13 | LED_B | Q1, RGB LED blue | `led_blue`, not driven |
+| P1.14 | LED_R | Q2, RGB LED red | `led_red` output; MCUboot DFU LED |
+| P1.15 | CAM_SPI_EN | Level shifters U14 and U15 output enable, pull-down | `cam_enb` output, active low |
 
 Dedicated pins: SWDIO and SWDCLK to J2; RESET to J2 pin 6; ANT to the antenna matching
 network; D+, D- and VBUS not connected. Source: Rev2 netlist joined with the nRF5340 ball
-map; firmware `src/boards/nrf5340_cpuapp_akidatag.overlay` and
-`src/sysbuild/mcuboot_akidatag.overlay`.
+map; firmware board definition `src/boards/brainchip/akidatag/` and the MCUboot overlays in
+`src/sysbuild/mcuboot/boards/`.
 
-**Differences between the revision 2 wiring and the firmware on `main`.** The firmware's
-board definition predates this revision in five places: the camera SPI lines (it shares the
-flash bus on P0.17, P0.13 and P0.14, where revision 2 wires the camera to P0.06, P0.07 and
-P0.26), the camera supply enable on P1.06 (never driven), the push button (defined on
-P0.26, wired on P1.01), the LEDs (the firmware's red LED is the white LED on P0.28; the RGB
-red and blue on P1.14 and P1.13 are not driven), and the `akdreset` node on P1.13, which is
-the blue LED. The pin table is the hardware; the firmware column describes `main` as it is
-today.
+**Differences between revision 2 and the default build.** The default build is for
+revision 1. Compared with a revision 2 build, it puts the camera on the flash bus (P0.17,
+P0.13 and P0.14), does not drive the camera supply enable on P1.06, drives P1.15 active
+high, reads the push button on P0.26, drives the red LED on P0.28 and the green LED on P0.27
+only, defines an `akdreset` node on P1.13, expects Micron flash parts (section 3.3) and
+defaults to the 25 V/V INA190 (section 6.2).
 
 ---
 
@@ -441,8 +447,9 @@ fast-charge setting is in section 3.11.
 
 The firmware measures the 1.8 V and 0.8 V rails itself through the INA190 amplifiers
 (`power read`, `power measure`): the shunts are 0.1 ohm on the 1.8 V rail and 0.02 ohm on
-the 0.8 V rail, and revision 2 fits the 100 V/V amplifier, so run `power variant a3` first
-because the firmware's build-time default is the 25 V/V A1 part. The total draw, which
+the 0.8 V rail, and revision 2 fits the 100 V/V amplifier, which a revision 2 build
+selects by default. The default build selects revision 1's 25 V/V A1 part, so on that build
+run `power variant a3` first. The total draw, which
 also covers the charger, the LEDs and the 3.3 V rail, needs a meter in series with the
 battery or the USB input. Source: Rev2 bill of materials, `src/README.md`.
 
@@ -551,8 +558,8 @@ first board shipped. Source: the revision summary on the Rev2 schematic cover sh
 - Revision 2 design files: schematic SI-NRF-AKD_BRD-002 V11 (2026-08-25), bill of
   materials NRF-AKD1500-002 V11, netlist report (2026-08-24), placement file, board
   outline DXF and fabrication artwork set.
-- Firmware on `main` of this repository: `src/boards/nrf5340_cpuapp_akidatag.overlay`,
-  `src/sysbuild/mcuboot_akidatag.overlay`, `src/sysbuild/mcuboot.conf`, `src/prj.conf`,
+- Firmware on `main` of this repository: `src/boards/brainchip/akidatag/`,
+  `src/sysbuild/mcuboot/boards/`, `src/sysbuild/mcuboot.conf`, `src/prj.conf`,
   `src/Kconfig`, `src/pm_static.yml`, `src/apps/demo_apps/custom_app.conf`,
   `src/imu_app.conf`, `src/README.md`, `src/core/interface/gpio/gpio.c`,
   `src/core/interface/audio/pdm_mic.c`, `src/core/interface/ble_services/`,
