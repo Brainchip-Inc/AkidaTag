@@ -31,12 +31,6 @@ on:
 
 permissions:
   contents: read
-  checks: write
-  # A comment on a pull request is an issue comment that GitHub authorises
-  # against the pull-requests scope, so reacting to one needs both written out.
-  # Neither grants any ability to change code.
-  issues: write
-  pull-requests: write
 
 env:
   # Model parameters live in a per-(app,model) config YAML. It is git-ignored, so
@@ -52,6 +46,11 @@ jobs:
   # runner and never occupies the hardware.
   authorize:
     name: authorize
+    permissions:
+      contents: read
+      checks: write
+      issues: write
+      pull-requests: write
     if: >-
       github.event_name == 'issue_comment'
       && github.event.issue.pull_request
@@ -233,6 +232,9 @@ jobs:
   # cancelling the run is exactly when nothing else would ever close it.
   report:
     name: report
+    permissions:
+      contents: read
+      checks: write
     needs: [authorize, hardware]
     if: ${{ always() && needs.authorize.outputs.check_id != '' }}
     runs-on: ubuntu-latest

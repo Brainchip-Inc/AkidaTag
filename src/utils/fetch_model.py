@@ -1,3 +1,5 @@
+"""Convert a configured local or downloaded model into firmware model artifacts."""
+
 import argparse
 import json
 import os
@@ -13,6 +15,7 @@ from model_config import load_model_config, require_keys, resolve_args
 
 
 def _shapes_json_path(output_dir, prefix):
+    """Return the shapes sidecar path for an output directory and model prefix."""
     return os.path.join(output_dir, f"{prefix}_shapes.json")
 
 
@@ -33,6 +36,7 @@ def _save_shapes_json(output_dir, prefix, input_shape, output_shape, is_el=False
 
 
 def fetch_and_convert(args):
+    """Fetch and convert the configured model, exiting on source access errors."""
     output_dir = args.output_dir
     prefix = args.prefix
     os.makedirs(output_dir, exist_ok=True)
@@ -55,7 +59,7 @@ def fetch_and_convert(args):
                 urllib.request.urlretrieve(model_path, fbz_path)
             except Exception as e:
                 print(f"Error downloading model: {e}")
-                print("Ensure VPN is connected and the URL is correct.")
+                print("Check the model URL and your network connection.")
                 sys.exit(1)
             print(f"Downloaded to {fbz_path}")
         else:
@@ -74,14 +78,14 @@ def fetch_and_convert(args):
         if not model_url:
             print(f"Error: {env_key} not found in .env/models.conf")
             print("Add it to .env/models.conf, e.g.:")
-            print(f"  {env_key}=http://your-server/path/to/akida_model.fbz")
+            print(f"  {env_key}=https://example.com/models/akida_model.fbz")
             sys.exit(1)
         print(f"Downloading model from {model_url} ...")
         try:
             urllib.request.urlretrieve(model_url, fbz_path)
         except Exception as e:
             print(f"Error downloading model: {e}")
-            print("Ensure VPN is connected and the URL is correct.")
+            print("Check the model URL and your network connection.")
             sys.exit(1)
         print(f"Downloaded to {fbz_path}")
 

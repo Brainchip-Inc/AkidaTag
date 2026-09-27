@@ -720,17 +720,18 @@ edge_learning:
 
 ### Model build config (`--config`)
 
-`fetch_model.py` and `generate_info.py` take **only** `--config` — a per-(app, model) YAML file
-at `.env/<app>/<model>.yaml` that holds every parameter. This keeps the values out of git and lets
-CI run the exact same commands as local dev. The file is git-ignored and lives locally / on the
-self-hosted runner.
+`fetch_model.py` and `generate_info.py` take **only** `--config`, a per-(app, model) YAML file
+at `.env/<app>/<model>.yaml` that holds every parameter. Create this git-ignored file locally
+before running either command. Set `model_url` to an accessible HTTP(S) URL or a local `.fbz`
+file. When using Docker, keep local model files inside the repository and use
+repository-relative paths so the container can read them.
 
 ```yaml
 # .env/demo_apps/kws.yaml
 app: demo_apps                                   # generate_info profile
 model_name: kws                                  # file prefix for bins/cpp/.h + shapes sidecar
 output_dir: models/kws                           # everything Steps 1 and 2 write goes here; its basename names the bundle
-model_url: http://<internal-host>/path/to/akida_model.fbz   # .fbz to download (VPN required)
+model_url: .env/models/akida_model.fbz            # supply your own local .fbz file or accessible URL
 map_mode: 2                                      # Akida MapMode (optional, default 1)
 neurons_per_class: 1                             # regular kws: 1, edge-learning: e.g. 10
 num_el_classes: 0                                # edge-learning novel classes (regular: 0)
@@ -938,25 +939,15 @@ enabled. The signature therefore protects the over-the-air and serial update pat
 only control. It does not protect against someone with physical access and a debug probe, who can
 replace MCUboot itself.
 
-#### Two keys, and why one of them is public
-
-| Key | Where it lives | Signs |
-| --- | --- | --- |
-| Development | `.env/development_key.pem`, committed here | Everything built from this repository |
-| Production | `.env/production_key.pem` in a release build only, from a CI secret; never committed | BrainChip's official releases only |
+#### The public development key
 
 The development key is **public on purpose** and is not a secret. Anyone can sign firmware with it,
 so a signature made with it proves nothing about who produced the image; treat any image signed with
 it as untrusted. It exists so that a fresh clone builds and flashes with no setup step. Nothing in
 the filename says any of this, so the file's own header does, in the first line inside it.
 
-Official releases are signed with the production key. `.github/workflows/release.yml` writes it to
-`.env/production_key.pem` from the `PRODUCTION_SIGNING_KEY_PEM_B64` secret and repoints the
-`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` line in `src/sysbuild.conf` at it, then refuses to build if that
-patch did not take. That one override is the entire difference between a build from this repository
-and a build BrainChip publishes. The production key is never committed: `.env/*` and `*.pem` both
-ignore it, and the `.gitignore` exception that lets the development key through names only that one
-file.
+Official releases use a different signing identity from local development builds. The committed
+development key does not authenticate official firmware.
 
 #### Which key a board trusts, and how to change it
 
@@ -982,8 +973,7 @@ If you want your boards to run only your own firmware, generate your own key and
 
 The key has to live inside your working tree, because a containerised build sees nothing else: it
 runs with this repository bind-mounted at `/akidatag` and no other host path in reach. Put it in
-`.env/` under a name of your own, which is git-ignored, so it stays out of any commit. This is the
-same directory the two keys above live in.
+`.env/` under a name of your own, which is git-ignored, so it stays out of any commit.
 
 ```
 docker run --rm -v "$PWD":/akidatag -w /akidatag \
