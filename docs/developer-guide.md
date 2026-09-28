@@ -117,7 +117,7 @@ both banks is the cheapest proof that the board holds what you built.
 
 **Wiring a J-Link to the board.** The debug header is a row of pads labelled on the silkscreen,
 and five wires connect it to the J-Link's 20-pin header. Pin 1 is at the bottom-right corner of
-both connectors. The mapping is from the Spark Board SWD Connection Guide v1.1:
+both connectors. The mapping is:
 
 | J-Link pin       | Signal                 | Board pad      |
 | ---------------- | ---------------------- | -------------- |
