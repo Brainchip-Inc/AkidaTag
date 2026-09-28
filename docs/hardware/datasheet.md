@@ -571,9 +571,8 @@ first board shipped. Source: the revision summary on the Rev2 schematic cover sh
   charging thresholds and timers.
 - Texas Instruments INA190 datasheet, SBOS863D: gain options, gain error, zero-current
   output offset and output swing.
-- BrainChip board test records: post-fabrication PCB test report (version 1.0, 2026-03-13),
-  PCB testing checklist and procedures (version 1.0, 2026-02-18) and Spark board SWD
-  connection guide (version 1.1, 2026-04-10).
+- BrainChip board test records: post-fabrication PCB test report (version 1.0, 2026-03-13)
+  and PCB testing checklist and procedures (version 1.0, 2026-02-18).
 - BrainChip AKD1500 documentation for the strap meanings and the Safe Mode clock behaviour.
 - Texas Instruments BQ27427 datasheet, SLUSEB5B: pin functions.
 - BrainChip product decisions of September 2026: the enclosure ships with the board, the box
