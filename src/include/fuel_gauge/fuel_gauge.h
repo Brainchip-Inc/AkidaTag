@@ -35,14 +35,14 @@
 #define BQ27427_FLAG_CFGUPMODE BIT(4) /* config update mode      */
 #define BQ27427_FLAG_ITPOR BIT(5)     /* POR occurred — in FLAGS */
 #define BQ27427_CSTS_SS BIT(13)       /* sealed — in CSTS        */
-/*As per 1100 mah battery*/
-#define BATTERY_DESIGN_CAPACITY 1100
-#define BATTERY_DESIGN_ENERGY 4070
+/*As per 500 mah battery*/
+#define BATTERY_DESIGN_CAPACITY 500
+#define BATTERY_DESIGN_ENERGY 1850
 #define BATTERY_TERMINATE_VOLTAGE 3000
 /*The Taper Rate is a parameter used by the fuel gauge to detect
  * when the battery has finished charging*/
 #define BATTERY_TAPER_RATE                                                     \
-  100 /*Standard (0.1C)	110 mA	(1100 / 110) × 10 = 10 × 10	100*/
+  100 /*Standard (0.1C)	50 mA	(500 / 50) × 10 = 10 × 10	100*/
 /*
  * Default = 4100 mV. Must be BELOW your charger's full-charge voltage.
  * Your battery charges to 4200 mV, so set to 4150 mV (50 mV margin).
@@ -62,6 +62,8 @@
 #define SAMPLES_COUNT 10
 #define FG_DATA_MEMORY_BLOCK_SIZE 32
 #define FG_DATA_MEMORY_WRITE_BUFFER_SIZE (FG_DATA_MEMORY_BLOCK_SIZE + 1)
+
+extern bool low_bat;
 
 int fuel_gauge_init(void);
 int fuel_gauge_get_soc(void);

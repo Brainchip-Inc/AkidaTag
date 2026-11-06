@@ -12,7 +12,7 @@ static const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c1));
 #define FG_INT_NODE DT_ALIAS(fg_int)
 static const struct gpio_dt_spec fg_int = GPIO_DT_SPEC_GET(FG_INT_NODE, gpios);
 static struct gpio_callback fg_int_cb;
-
+bool low_bat = false;
 /**
  * @brief Interrupt handler for fuel gauge SOC change notification
  *
@@ -667,7 +667,11 @@ int fuel_gauge_get_soc(void) {
   uint16_t soc_pct = 0;
   int ret = 0;
   ret |= fg_read_word(BQ27427_CMD_SOC, &soc_pct);
-
+  if(soc_pct < 50){
+    low_bat = true;
+  }else{
+    low_bat = false;
+  }
   if (ret) {
     LOG_ERR("[BQ27427] Read error (%d)", ret);
     return -1;

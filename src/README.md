@@ -5,7 +5,11 @@ The application uses the LittleFS file system and also keeps track of the number
 
 ### LED Indication
 
-This application provides visual status indication using Red and Green LEDs.  
+This application provides visual status indication using a dedicated White LED and a three-color RGB LED.
+
+White LED: Used primarily for BLE connectivity and communication status.
+RGB LED: Used for system/application status, including normal operation, learning, model update, and error indications.
+
 A dedicated Zephyr thread manages LED patterns based on the system state.
 
 ---
@@ -17,11 +21,12 @@ This application currently runs the following LED-related thread:
 - **LED Indication Thread**
   - **Function:** `led_ind_thread()`
   - **Responsibilities:**
-    - Controls the Red and Green LEDs.
+    - Controls the White LED and RGB LED.
     - Displays device status using predefined LED patterns.
-    - Monitors the global LED state (`current_state`).
+    - Monitors the global LED state (current_state).
     - Updates LED behavior based on the system state.
-
+    - Maintains the White LED indication according to BLE connection status.
+    - Provides visual indications for model updates, edge learning, full erase, battery status and keyword detection.
 ---
 
 ### LED Thread Synchronization
@@ -56,8 +61,10 @@ This allows the LED logic to operate in two modes:
 
 | LED        | GPIO  | Pin | Active Level |
 |------------|-------|-----|--------------|
-| Red LED    | GPIO0 | 28  | Active High  |
+| White LED  | GPIO0 | 28  | Active High  |
+| Red LED    | GPIO1 | 14  | Active High  |
 | Green LED  | GPIO0 | 27  | Active High  |
+| Blue LED   | GPIO1 | 13  | Active High  |
 
 ---
 
@@ -65,15 +72,21 @@ This allows the LED logic to operate in two modes:
 
 | State           | Behavior |
 |-----------------|----------|
-| NORMAL_APP      | Green slow blink (2s), Red OFF |
-| BLE_CONNECTED   | Green ON, Red OFF |
-| MODEL_RECEIVING | Green ON, Red fast blink (500ms) |
-| FLASH_WRITE / FLASH FULL_ERASE    | Green ON, Red ON |
-| UPDATE_SUCCESS  | Both LEDs blink 3 times, then restore runtime state based on BLE status |
-| UPDATE_FAILED   | Green OFF, Red ON |
-| EL_SPEAK_PROMPT (AkidaTag board)  | Red LED solid ON during each "speak now" prompt window in the edge-learning 5-utterance flow; cleared as soon as speech is detected or the flow is aborted/completed. Green LED behavior preserved. |
-| INFERENCE_TRIGGER (AkidaTag board)| Red LED flashes ~500 ms on every keyword prediction in inference mode for at-a-glance trigger confirmation. |
-
+| Power On / Boot | White ON + Green RGB ON for ~2 seconds, then both OFF |
+| NORMAL_APP      | White slow blink + Green RGB slow pulse |
+| BLE_CONNECTED   | White ON + Green RGB slow pulse |
+| BLE_DISCONNECTED| White slow blink |
+| MODEL_RECEIVING | White fast blink |
+| FLASH_WRITE / FLASH FULL_ERASE    | Yellow LED fast blink, White follows BLE status|
+| MODEL_UPDATE_SUCCESS  | Green RGB blinks 3 times, then restores runtime BLE/application state |
+| MODEL_UPDATE_FAILED   | Red RGB blinks 3 times, then restores runtime BLE/application state |
+| LEARN_LISTENING | Blue RGB fast blink; White follows BLE status |
+| LEARN_PROGRESS  | Blue RGB solid ON; White follows BLE status |
+| LEARN_SUCCESS   | Green RGB blinks 2 times, then restores runtime state |
+| LEARN_FAILED    | Red RGB blinks 3 times, then restores runtime BLE/application state|
+| KEYWORD_TRIGGERED| Intended Red RGB indication for ~500 ms, then restores runtime state |
+|LED_STATE_FIRMWARE_UPDATE| Purple slow blink (~2s).
+| LOW_BATTERY    | Amber RGB blinks Slow |
 ### PDM MIC 
 This application uses the DMIC (PDM microphone) interface with PDM_CLK on P1.9 and PDM_DIN on P1.10.
 The DMIC peripheral is enabled via DeviceTree using the dmic_dev node and pinctrl configuration.

@@ -37,6 +37,8 @@ LOG_MODULE_REGISTER(akd_spi_flash, LOG_LEVEL_DBG);
 #define AKD_CLK_APBDIV_REG 0xFCE01034U  /* [7:0]=APB_DIV_RATIO, [31]=DC_50PCT_EN */
 #define AKD_CLK_SPISDIV_REG 0xFCE0103CU /* [7:0]=SPIS_DIV_RATIO, [31]=DC_50PCT_EN */
 
+bool erase_complete = true;
+
 /* Live PLL output (Hz); core (SYS_DIV) and SPI_S (SPIS_DIV) both tap this. */
 static uint32_t akd_pllclk_hz = 800000000u;
 
@@ -417,7 +419,7 @@ void init_akd_1500_spi_flash() {
     akd1500.write(0xfcf20010, rw_data.ucdata, 4);
     rw_data.uint_data = 8;
     akd1500.write(0xfcf20014, rw_data.ucdata, 4); /* BAUD */
-    rw_data.uint_data = 0x08100200 | 1 << 20 | 10 << 11 | 6 << 2 | 1;
+    rw_data.uint_data = 0x08100200 | 1 << 20 | 6 << 11 | 6 << 2 | 1;
     akd1500.write(0xfcf200f4, rw_data.ucdata, 4);
     rw_data.uint_data = 0;
     akd1500.write(0xfcf200f8, rw_data.ucdata, 4);
@@ -569,7 +571,7 @@ extern "C" int spi_flash_erase_helper_func(uint32_t offset, uint32_t size) {
     } else {
         LOG_PRINTK("Erase Successful\n");
     }
-
+    erase_complete = true;
     return ret;
 }
 
