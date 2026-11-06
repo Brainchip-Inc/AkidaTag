@@ -50,9 +50,10 @@ LOG_MODULE_REGISTER(ble_initialization, CONFIG_LOG_DEFAULT_LEVEL);
 #define NUM_STATES 3
 #ifdef CONFIG_DK_BOARD
 static bool app_button_state;
-
 #endif
 
+bool button_locked = false;
+bool adv_started = false;
 static struct bt_conn* current_conn = NULL;
 static bool notifications_enabled = false;
 static bool send_in_progress = false;
@@ -943,6 +944,8 @@ static void nus_send_enabled_cb(enum bt_nus_send_status status) {
     } else {
         notifications_enabled = false;
         LOG_INF("\nNotifications DISABLED\n\n");
+        button_locked = true;
+        led_set_state(LED_STATE_FIRMWARE_UPDATE);
     }
 }
 
@@ -1006,6 +1009,7 @@ static void le_data_len_updated_cb(struct bt_conn* conn, struct bt_conn_le_data_
 static void connected_ble(struct bt_conn* conn, uint8_t err) {
     if (err) {
         LOG_ERR("Connection failed (err 0x%02x)\n", err);
+        led_set_state(LED_STATE_BLE_DISCONNECTED);
         return;
     }
     led_set_state(LED_STATE_BLE_CONNECTED);
@@ -1250,15 +1254,19 @@ int ble_init(void)
     }
 #endif
     get_device_id();
-    err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, BT_GAP_ADV_FAST_INT_MIN_2,
+    return 0;
+}
+int ble_adv_start(void) {
+  int err = bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, BT_GAP_ADV_FAST_INT_MIN_2,
                                           BT_GAP_ADV_FAST_INT_MAX_2, NULL),
                           ad, ARRAY_SIZE(ad), NULL, 0);
     if (err) {
         LOG_ERR("Advertising failed to start (err %d)\n", err);
+        adv_started = false;
         return -1;
     }
-
     LOG_INF("Advertising successfully started\n");
+    adv_started = true;
     return 0;
 }
 

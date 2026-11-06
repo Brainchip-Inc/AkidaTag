@@ -83,7 +83,7 @@ static int lsdir(const char *path) {
 }
 
 /* function to format the filesystem storage */
-static int storage_format(void) {
+int storage_format(void) {
   int rc;
 
   /* 1. You MUST unmount before formatting if it was previously mounted */

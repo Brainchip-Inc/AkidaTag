@@ -11,7 +11,7 @@ int storage_init(void);
 
 void test_create_file(void);
 void read_and_print_file(const char *path);
-
+int storage_format(void);
 int cmd_dir(const struct shell *shell, size_t argc, char **argv);
 int cmd_mkfs(const struct shell *shell, size_t argc, char **argv);
 

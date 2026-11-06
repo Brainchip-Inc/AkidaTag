@@ -138,39 +138,28 @@ The DK board defines only basic LED GPIOs. The AkidaTag board adds full power-en
 
 ---
 
-## 6. User Button
+## 6. User/DFU Button
 
 | Property | DK Board | AkidaTag Board |
 |----------|----------|-------------|
-| Node | Not defined | `user_btn` |
-| Pin | — | P0.26 |
+| Node | Not defined | `user_btn` `dfu_button` |
+| Pin | — | P1.01 |
 | Flags | — | `GPIO_PULL_UP \| GPIO_ACTIVE_LOW` |
 | Interrupt | — | `GPIO_INT_EDGE_TO_ACTIVE` |
-| Alias | — | `user-button` |
+| Alias | — | `user-button` `mcuboot-button0` |
 
 > **Breaking Change:** The DK board has no `user_btn` node.
 
----
-
-## 7. DFU Button
-
-| Property | DK Board | AkidaTag Board |
-|----------|----------|-------------|
-| Node | Not defined | `dfu_button` |
-| Pin | — | P1.01 |
-| Flags | — | `GPIO_PULL_UP \| GPIO_ACTIVE_LOW` |
-| Alias | — | `mcuboot-button0` |
-
----
 
 ## 8. LED Configuration
 
 | LED | Pin | DK Board | AkidaTag Board |
 |-----|-----|----------|-------------|
-| `led_red` | P0.28 |  Defined |  Defined |
+| `led_white` | P0.28 |  Defined |  Defined |
+| `led_red` | P1.14 |  Defined |  Defined |
 | `led_green` | P0.27 |  Defined |  Defined |
+| `led_blue` | P1.13 |  Defined |  Defined |
 
-Both boards define the same LED pins. Default DK board LEDs (`led0`–`led3`) are disabled on both overlays.
 
 ---
 
@@ -246,8 +235,10 @@ Both overlays disable the following DK-specific peripherals to avoid conflicts:
 | GPIO | PDM Enable | — | **P0.21** | Added |
 | GPIO | AKD 0V Enable | — | **P0.22** | Added |
 | GPIO | User Button | — | **P0.26** | Added |
-| GPIO | LED Red | P0.28 | P0.28 | — |
-| GPIO | LED Green | P0.27 | P0.27 | — |
+| GPIO | LED White | P0.28 | P0.28 | — |
+| GPIO | LED Red | — | P1.14 | — |
+| GPIO | LED Green | — | P0.27 | — |
+| GPIO | LED Blue | — | P1.13 | — |
 | GPIO | cam_enb | — | P1.15 | Added |
 | GPIO | fg_int | — | P0.30 | Added |
 | GPIO | chgr_sts1 | — | P0.23 | Added |

@@ -27,8 +27,10 @@ extern struct k_sem led_sem;
 /**
  * @brief Device Tree node labels for LEDs.
  */
-#define RED_LED_NODE DT_NODELABEL(led_red)
-#define GREEN_LED_NODE DT_NODELABEL(led_green)
+#define led_white_NODE DT_NODELABEL(led_white)
+#define led_green_NODE DT_NODELABEL(led_green)
+#define led_red_NODE DT_NODELABEL(led_red)
+#define led_blue_NODE DT_NODELABEL(led_blue)
 
 /**
  * @brief LED tick interval in milliseconds.
@@ -45,15 +47,22 @@ extern struct k_sem led_sem;
  * LED patterns.
  */
 typedef enum {
-  LED_STATE_NORMAL_APP,      /**< Normal application running */
-  LED_STATE_BLE_CONNECTED,   /**< BLE connected */
-  LED_STATE_MODEL_RECEIVING, /**< Model/firmware receiving over BLE */
-  LED_STATE_FLASH_WRITE,     /**< Flash write in progress */
-  LED_STATE_UPDATE_SUCCESS,  /**< Update completed successfully */
-  LED_STATE_UPDATE_FAILED,   /**< Update failed */
-  LED_STATE_LEARN_SPEAK_NOW, /**< Learning: prompting user to speak (Red ON) */
-  LED_STATE_KEYWORD_TRIGGERED, /**< Inference: keyword detected (Red short
-                                  flash) */
+  LED_STATE_NORMAL_APP,            /**< Normal application running */
+  LED_STATE_BLE_CONNECTED,         /**< BLE connected */
+  LED_STATE_BLE_DISCONNECTED,      /**< BLE connect failed */
+  LED_STATE_MODEL_RECEIVING,       /**< Model receiving over BLE */
+  LED_STATE_FULL_ERASE,            /**< Flash write in progress */
+  LED_STATE_MODEL_UPDATE_SUCCESS,  /**< Update completed successfully */
+  LED_STATE_MODEL_UPDATE_FAILED,   /**< Update failed */
+  LED_STATE_LEARN_LISTENING,       /**< Edge-learn capture armed */
+  LED_STATE_LEARN_PROGRESS,        /**< Learning: prompting user to speak */
+  LED_STATE_SPEECH_DETECTED,       /**< Learning: training speech detected */
+  LED_STATE_LEARN_SUCCESS,         /**< Training completed OK */
+  LED_STATE_LEARN_FAILED,          /**< Capture/training error */
+  LED_STATE_LOW_BATTERY,           /**< Indicating low battery */
+  LED_STATE_FIRMWARE_UPDATE,       /**< Firmware receiving over BLE */
+  LED_STATE_KEYWORD_TRIGGERED,     /**< Inference: keyword detected flash) */
+  
 } led_state_t;
 
 /**
@@ -65,9 +74,14 @@ typedef enum {
 } ble_state;
 
 /**
- * @brief Initialize LED GPIOs and create LED indication thread.
+ * @brief Initialize LED GPIOs (white + RGB).
  *
- * @return 0 on success, negative error code on failure.
+ * Verifies each LED GPIO device is ready and configures every pin as
+ * GPIO_OUTPUT_INACTIVE. Does NOT create the indication thread.
+ *
+ * @return 0 on success.
+ * @return -ENODEV if any LED GPIO device is not ready.
+ * @return negative errno on GPIO configuration failure.
  */
 int32_t led_init(void);
 
@@ -91,6 +105,9 @@ void led_set_state(led_state_t state);
  */
 void led_ind_thread(void *a, void *b, void *c);
 
+/**
+ * @brief Toggle the DK run-status LED .
+ */
 void process_led(void);
 
 /* Get current BLE connection status. */

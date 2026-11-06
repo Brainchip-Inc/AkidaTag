@@ -103,7 +103,7 @@ void cli_worker_proc_thread(void* a, void* b, void* c);
 
 #ifdef CONFIG_AKIDATAG_BOARD
 /* Thread for processing Akida async results */
-#define AKD_ASYNC_STACK_SIZE 2048
+#define AKD_ASYNC_STACK_SIZE 4096
 #define AKD_ASYNC_PRIORITY 5
 K_THREAD_STACK_DEFINE(akd_async_stack, AKD_ASYNC_STACK_SIZE);
 static struct k_thread akd_async_thread_data;
@@ -984,6 +984,20 @@ extern "C" int kws_app_stop(void) {
 extern "C" bool kws_app_is_running(void) {
     return kws_app_running;
 }
+
+extern "C" int kws_edge_trigger(int val) {
+  if (is_el_model == 0) {
+    LOG_INF("kws_edge_trigger: not an edge learning model\n\r");
+    return -1;
+  }
+  if (cur_kws_edge_state == STATE_STOPPED) {
+    LOG_INF("kws_edge_trigger: STATE_STOPPED, input not possible\n\r");
+    return -1;
+  }
+  kws_edge_state[cur_kws_edge_state].on_user_input(val);
+  return 0;
+}
+
 #if IS_ENABLED(CONFIG_CAMERA_ENABLE_THREAD)
 static int initialize_spi_camera_interface(void) {
     camera_thread_id =
@@ -1050,7 +1064,7 @@ static void switch_learning_delayed(struct k_work* work) {
         learn_state.waiting_since_ts = time_ms();
         learn_rng_state = (uint32_t)k_uptime_get();
 #ifdef CONFIG_AKIDATAG_BOARD
-        led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+        led_set_state(LED_STATE_LEARN_PROGRESS);
 #endif
 
         /* Use shorter VAD timeout during learning for tighter capture */
@@ -1098,6 +1112,7 @@ static void enter_learn_select_handler(struct k_work* work) {
     akida_learn_mode(true);
     kws_set_edge_state(STATE_LEARN_SELECT);
     LOG_INF("inference -> learn_select");
+    led_set_state(LED_STATE_LEARN_LISTENING);
 }
 
 static void switch_mode(int mode) {
@@ -2072,6 +2087,7 @@ static void learn_select_on_user_input(int input_type) {
             /*  change the state to inference */
             switch_mode(STATE_INFERENCE);
             LOG_INF("learn_select -> inference");
+            restore_default_led_state();
             /* save the weights to flash only when labels are learnt and state chages to
              * STATE_INFERENCE */
             if (saved_learn_weights_ptr->learn_weights_data.label_learnt_val) {
@@ -2093,6 +2109,7 @@ static void learn_select_on_user_input(int input_type) {
             break;
         case USER_INPUT_LP(1):
             reset_learned_weights(base_labels_wts_ptr);
+            led_set_state(LED_STATE_FULL_ERASE);
             break;
         default:
             LOG_INF("input_type default");
@@ -2131,10 +2148,10 @@ static void generate_augmented_input(float captured[][SPECTROGRAM_RES], int keyw
     else
         target_start = (aug_index * available_padding) / (num_augs - 1);
 
-    if (target_start < 0)
-        target_start = 0;
     if (target_start + keyword_len > SPECTROGRAM_COUNT)
         target_start = SPECTROGRAM_COUNT - keyword_len;
+    if (target_start < 0)
+        target_start = 0;
 
     /* --- Determine augmentation type (cycle through 8 types) --- */
     int aug_type = aug_index % LEARN_NUM_AUG_TYPES;
@@ -2307,7 +2324,7 @@ static void complete_structured_learning(void) {
 
         save_weights_to_flash();
         LOG_INF("learn: weights saved MEM->FLASH");
-
+        led_set_state(LED_STATE_LEARN_SUCCESS);
         learning_completed();
     } else {
         LOG_ERR("learn: akida_save_learn_weights failed for class %d", cur_kws_edge_novel_class);
@@ -2315,9 +2332,6 @@ static void complete_structured_learning(void) {
     akida_learn_mode(false);
 
     switch_mode(STATE_LEARN_SELECT);
-#ifdef CONFIG_AKIDATAG_BOARD
-    restore_default_led_state();
-#endif
 }
 
 /**
@@ -2339,7 +2353,7 @@ static void learn_utterance_complete(void) {
                 LEARN_NUM_UTTERANCES);
         k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
 #ifdef CONFIG_AKIDATAG_BOARD
-        led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+        led_set_state(LED_STATE_LEARN_PROGRESS);
 #endif
     }
 }
@@ -2424,7 +2438,7 @@ static void learn_process_handler(struct k_work* work) {
                 LEARN_NUM_UTTERANCES);
         k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
 #ifdef CONFIG_AKIDATAG_BOARD
-        led_set_state(LED_STATE_LEARN_SPEAK_NOW);
+        led_set_state(LED_STATE_LEARN_PROGRESS);
 #endif
         return;
     }
@@ -2509,6 +2523,9 @@ static void learn_speech_end_handler(struct k_work* work) {
             learn_state.waiting_since_ts = time_ms();
             LOG_INF("learn: say keyword %d/%d", learn_state.current_utterance + 1,
                     LEARN_NUM_UTTERANCES);
+#ifdef CONFIG_AKIDATAG_BOARD
+    led_set_state(LED_STATE_LEARN_PROGRESS);
+#endif
         }
         /* Keep polling for timeout */
         k_work_reschedule(&learn_speech_end_work, K_MSEC(LEARN_SPEECH_END_GAP_MS));
@@ -2556,7 +2573,7 @@ static void learning_on_spectrogram(int spectrogram_index) {
             LOG_INF("learn: speech detected, capturing utterance %d/%d...",
                     learn_state.current_utterance + 1, LEARN_NUM_UTTERANCES);
 #ifdef CONFIG_AKIDATAG_BOARD
-            restore_default_led_state();
+            led_set_state(LED_STATE_SPEECH_DETECTED);
 #endif
             /* Fall through to capture the first batch of frames */
             /* fallthrough */
@@ -2653,7 +2670,7 @@ static void learning_on_user_input(int input_type) {
             duration_us = k_cyc_to_us_floor64(mesh_mem);
             LOG_INF("mesh_mem = %" PRIu64 " us", duration_us);
 #ifdef CONFIG_AKIDATAG_BOARD
-            restore_default_led_state();
+            led_set_state(LED_STATE_LEARN_LISTENING);
 #endif
 
             break;
@@ -3236,7 +3253,8 @@ static int cmd_spi_freq(const struct shell* shell, size_t argc, char** argv) {
 
 /* shell cli function to invoke erase function */
 static int cmd_full_erase(const struct shell* shell, size_t argc, char** argv) {
-    led_set_state(LED_STATE_FLASH_WRITE);
+    led_set_state(LED_STATE_FULL_ERASE);
+    erase_complete = false;
     if (spi_flash_erase_helper_func(0x1000, FLASH_MAX_16_MB_SIZE - 0x1000)) {
         return 1;
     }
@@ -3411,6 +3429,20 @@ static int cmd_app(const struct shell* shell, size_t argc, char** argv) {
 }
 void edge_learning_cmd_process(uint8_t value) {
     LOG_INF("cur_kws_edge_state %d", cur_kws_edge_state);
+    if(cur_kws_edge_state){
+        if (is_ble_connected()){
+            led_set_state(LED_STATE_BLE_CONNECTED);
+        }else{
+            led_set_state(LED_STATE_NORMAL_APP);
+        }
+    }else{
+        led_set_state(LED_STATE_LEARN_LISTENING);
+    }
+    if(value == 2){
+        led_set_state(LED_STATE_FULL_ERASE);
+    }else if(value == 3){
+        led_set_state(LED_STATE_LEARN_LISTENING);
+    }
     if (is_el_model == 0) {
         LOG_ERR(" illegal request, this is not an edge learning model");
         return;

@@ -5,7 +5,11 @@ The application uses the LittleFS file system and also keeps track of the number
 
 ### LED Indication
 
-This application provides visual status indication using Red and Green LEDs.  
+This application provides visual status indication using a dedicated White LED and a three-color RGB LED.
+
+White LED: Used primarily for BLE connectivity and communication status.
+RGB LED: Used for system/application status, including normal operation, learning, model update, and error indications.
+
 A dedicated Zephyr thread manages LED patterns based on the system state.
 
 ---
@@ -17,11 +21,12 @@ This application currently runs the following LED-related thread:
 - **LED Indication Thread**
   - **Function:** `led_ind_thread()`
   - **Responsibilities:**
-    - Controls the Red and Green LEDs.
+    - Controls the White LED and RGB LED.
     - Displays device status using predefined LED patterns.
-    - Monitors the global LED state (`current_state`).
+    - Monitors the global LED state (current_state).
     - Updates LED behavior based on the system state.
-
+    - Maintains the White LED indication according to BLE connection status.
+    - Provides visual indications for model updates, edge learning, full erase, battery status and keyword detection.
 ---
 
 ### LED Thread Synchronization
@@ -56,8 +61,10 @@ This allows the LED logic to operate in two modes:
 
 | LED        | GPIO  | Pin | Active Level |
 |------------|-------|-----|--------------|
-| Red LED    | GPIO0 | 28  | Active High  |
+| White LED  | GPIO0 | 28  | Active High  |
+| Red LED    | GPIO1 | 14  | Active High  |
 | Green LED  | GPIO0 | 27  | Active High  |
+| Blue LED   | GPIO1 | 13  | Active High  |
 
 ---
 
@@ -65,15 +72,39 @@ This allows the LED logic to operate in two modes:
 
 | State           | Behavior |
 |-----------------|----------|
-| NORMAL_APP      | Green slow blink (2s), Red OFF |
-| BLE_CONNECTED   | Green ON, Red OFF |
-| MODEL_RECEIVING | Green ON, Red fast blink (500ms) |
-| FLASH_WRITE / FLASH FULL_ERASE    | Green ON, Red ON |
-| UPDATE_SUCCESS  | Both LEDs blink 3 times, then restore runtime state based on BLE status |
-| UPDATE_FAILED   | Green OFF, Red ON |
-| EL_SPEAK_PROMPT (AkidaTag board)  | Red LED solid ON during each "speak now" prompt window in the edge-learning 5-utterance flow; cleared as soon as speech is detected or the flow is aborted/completed. Green LED behavior preserved. |
-| INFERENCE_TRIGGER (AkidaTag board)| Red LED flashes ~500 ms on every keyword prediction in inference mode for at-a-glance trigger confirmation. |
+| Power On / Boot | White ON + Green RGB ON for ~2 seconds, then both OFF |
+| NORMAL_APP      | White slow blink + Green RGB slow pulse |
+| BLE_CONNECTED   | White ON + Green RGB slow pulse |
+| BLE_DISCONNECTED| White slow blink |
+| MODEL_RECEIVING | White fast blink |
+| FLASH_WRITE / FLASH FULL_ERASE    | Yellow LED fast blink, White follows BLE status|
+| MODEL_UPDATE_SUCCESS  | Green RGB blinks 3 times, then restores runtime BLE/application state |
+| MODEL_UPDATE_FAILED   | Red RGB blinks 3 times, then restores runtime BLE/application state |
+| LEARN_LISTENING | Blue RGB fast blink; White follows BLE status |
+| LEARN_PROGRESS  | Blue RGB solid ON; White follows BLE status |
+| LEARN_SUCCESS   | Green RGB blinks 2 times, then restores runtime state |
+| LEARN_FAILED    | Red RGB blinks 3 times, then restores runtime BLE/application state|
+| KEYWORD_TRIGGERED| Intended Red RGB indication for ~500 ms, then restores runtime state |
+| LED_STATE_FIRMWARE_UPDATE| Purple slow blink (~2s).
+| LOW_BATTERY    | Amber RGB blinks Slow |
 
+### User Button — Interaction & Action Mapping
+
+A single user button on the AkidaTag board provides state-dependent control. The action
+taken depends on both the press gesture and the current device state; the table below
+gives the behavior for each combination of gesture and state.
+
+| Interaction      | Device State     | Action                          | Notes                   
+|------------------|------------------|---------------------------------|-------------------------------
+| Single press     | Idle             | Wake device                     |
+| Single press     | Any              | Arm edge-learning capture       | Pairs with RGB Listening state 
+| Double press     | BLE not connected| Enter BLE pairing/advertising   | Enter Advertising only if BLE is not connected. 
+| Double press     | Any              | Moving to next class            | After success on first class 
+| Triple press     | Any              | Clear learned model             | Yellow Fast blink 
+| Long press(3-5s) | Any              | Enter Learning Mode             | Confirm via RGB LED 
+| Long press(8-10s)| Any              | Reset/Delete Edge Learning class| Yellow Fast blink 
+| Any press        | Firmware update  | Ignored / locked out            | Prevent interrupted update 
+                   |  in progress     |
 ### PDM MIC 
 This application uses the DMIC (PDM microphone) interface with PDM_CLK on P1.9 and PDM_DIN on P1.10.
 The DMIC peripheral is enabled via DeviceTree using the dmic_dev node and pinctrl configuration.
@@ -542,16 +573,16 @@ ISR-Based SOC Notification
 The BQ27427 fuel gauge can generate hardware interrupts on the SOC_INT pin whenever the State of Charge (SOC) changes by a configured delta (default 1%). This enables event-driven battery level reporting to the phone app instead of continuous polling, reducing I2C traffic and power consumption
 
 ## Configuration
-Battery Parameters (1100mAh 4.2V Li-ion)
+Battery Parameters (500mAh 4.2V Li-ion)
 
 Parameter	            Value	    Description
-Design Capacity	        1100 mAh	Battery capacity
-Design Energy	        4070 mWh	Capacity × 3.7V
+Design Capacity	        500 mAh	Battery capacity
+Design Energy	        1850 mWh	Capacity × 3.7V
 Terminate Voltage	    3000 mV	    0% SOC cutoff
 Taper Rate	            100	        Full charge detection
 Taper Voltage           4150        Charge termination voltage
 
-**NOTE**: These values are for testing purposes only using a 1100mAh test battery.
+**NOTE**: These values are for testing purposes only using a 500mAh test battery.
 Always connect the battery before connecting USB power.
 
 ### Edge Learning BLE Service
@@ -895,6 +926,95 @@ cd AkidaTag
 | `--yaml <path>` | — | Path to `info.yaml` (use with `--send_ble`) |
 
 Output files are written to the directory given by the config's `output_dir`.
+
+---
+
+# Rev 2 flash timing fix and model-update pause/resume
+
+Two small changes that make model upload work on the AkidaTag revision 2 board
+(Winbond W25Q128JW flash). In plain terms: what changed, why, and what to check.
+
+---
+
+## Change 1: AKD1500 flash read timing (10 wait cycles becomes 6)
+
+**File:** `src/core/interface/akd_spi_flash/akd_spi_flash_handler.cpp`
+(function `init_akd_1500_spi_flash()`)
+
+```diff
+-    rw_data.uint_data = 0x08100200 | 1 << 20 | 10 << 11 | 6 << 2 | 1;
++    rw_data.uint_data = 0x08100200 | 1 << 20 | 6 << 11 | 6 << 2 | 1;
+```
+
+### What it does
+The model is stored in a flash chip that hangs off the AKD1500. When a model is
+installed, the AKD1500 reads the model data from that flash itself, using a
+fast "quad read" (opcode `0xEB`). The register written here tells the AKD1500
+how many clock cycles to wait between sending the address and starting to read
+the data.
+
+### Why it was needed
+- Revision 1 uses a Micron flash, which needs 10 wait cycles.
+- Revision 2 uses a Winbond flash, which needs about 6 (2 mode clocks plus
+  4 dummy clocks).
+- With 10, the AKD1500 started reading 4 clocks too late and got shifted,
+  wrong data. Reads from the nRF over the normal path still worked, which is
+  why uploads and CRC checks looked fine.
+- The visible symptom was the boot panic
+  `Timed out while processing dma configuration request` when installing the
+  KWS model.
+
+### Result
+Installing the model on revision 2 now works.
+
+
+## Change 2: pause the KWS app during a model update, resume afterwards
+
+**File:** `src/core/interface/ble_services/file_transfer.c`
+
+```diff
++    kws_app_stop();                      /* in start_transfer(), before transfer.active = true */
+     transfer.active = true;
+...
+     send_status(STATUS_READY);
++    kws_app_start();                     /* in install_transferred_model(), on success only */
+```
+
+### What it does
+- When the phone starts sending a new model, `kws_app_stop()` switches off the
+  microphone capture and the keyword-spotting loop.
+- When the new model has been installed successfully, `kws_app_start()` turns
+  them back on, so listening resumes with the new model without a reboot.
+
+### Why it was needed
+While a model is being written, the flash is being erased and programmed
+through the AKD1500, and then the chip is reprogrammed with the new model.
+If the keyword loop is still running, it keeps waking the chip, taking the
+flash bus and running inferences on a model that is about to be replaced. That
+causes clashes and timeouts. Stopping it first gives the update the chip and
+the flash to itself.
+
+
+## Change 3: edge learning no longer writes outside its buffer for long keywords
+
+**File:** `src/apps/demo_apps/main.cpp(function generate_augmented_input())`
+
+```diff
+-    if (target_start < 0)
+-        target_start = 0;
+     if (target_start + keyword_len > SPECTROGRAM_COUNT)
+         target_start = SPECTROGRAM_COUNT - keyword_len;
++    if (target_start < 0)
++        target_start = 0;
+```
+### What it does
+During edge learning, each spoken keyword is copied into a fixed window ofSPECTROGRAM_COUNT frames (49, the model input size) to make training samples.target_start is the frame where the keyword is placed. The new lines keeptarget_start from going below zero.
+
+### Why it was needed
+A captured keyword can be longer than 49 frames (up to 80). In that case the old code set target_start = 49 - keyword_len, for example -31 for an 80-frame keyword. The copy loop then wrote to output[-31 ...], which is memory in front of the buffer, and only checked the upper limit. That corrupts whatever sits there, and the damage can show up later as an unrelated crash. A crash seen after learning (assertion in spinlock.h, thread sysworkq) came right after a session that had 54 and 80 frame keywords, so this is the likely cause.
+
+### Result
+A keyword longer than the window is cut off at 49 frames instead of writing outside the buffer.
 
 ---
 
