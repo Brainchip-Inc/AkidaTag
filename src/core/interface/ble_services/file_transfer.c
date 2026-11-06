@@ -1,5 +1,6 @@
 #include "ble_services/file_transfer.h"
 #include "akd_spi_flash_handler.h"
+#include "kws_app.h"
 
 #include "led_init.h"
 
@@ -414,7 +415,7 @@ static void reset_transfer(void) {
  * reached, which is the only diagnostic the host gets.
  */
 static void fail_transfer(uint8_t result) {
-    led_set_state(LED_STATE_UPDATE_FAILED);
+    led_set_state(LED_STATE_MODEL_UPDATE_FAILED);
     send_status(result);
     reset_transfer();
 }
@@ -648,6 +649,7 @@ static uint8_t start_transfer(uint8_t type, uint32_t total_length) {
         }
     }
 
+    kws_app_stop();
     transfer.active = true;
     transfer.file_crc_state = 0xFFFFFFFF;
     led_set_state(LED_STATE_MODEL_RECEIVING);
@@ -670,7 +672,6 @@ static uint8_t start_transfer(uint8_t type, uint32_t total_length) {
 static int commit_block_to_flash(uint32_t flash_offset, uint32_t length) {
     uint32_t expected = transfer_crc32(model_transfer_buffer, length);
 
-    led_set_state(LED_STATE_FLASH_WRITE);
     if (spi_flash_erase_helper_func(flash_offset, MODEL_TRANSFER_BLOCK_SIZE) != 0) {
         LOG_ERR("Sector erase failed at 0x%08X\n", flash_offset);
         return -EIO;
@@ -833,12 +834,13 @@ static uint8_t commit_staged_block(void) {
 static void install_transferred_model(void) {
     if (infer(app_index) != 0) {
         LOG_ERR("Model stored but the AKD1500 would not run it\n");
-        led_set_state(LED_STATE_UPDATE_FAILED);
+        led_set_state(LED_STATE_MODEL_UPDATE_FAILED);
         send_status(STATUS_ERR_PROGRAM);
         return;
     }
-    led_set_state(LED_STATE_UPDATE_SUCCESS);
+    led_set_state(LED_STATE_MODEL_UPDATE_SUCCESS);
     send_status(STATUS_READY);
+    kws_app_start();
 }
 
 static ssize_t control_write(struct bt_conn* conn, const struct bt_gatt_attr* attr, const void* buf,
@@ -873,6 +875,7 @@ static ssize_t control_write(struct bt_conn* conn, const struct bt_gatt_attr* at
             LOG_INF("Transfer aborted by the host at %u/%u\n", transfer.received,
                     transfer.total_length);
             transfer.received = 0;
+            led_set_state(LED_STATE_MODEL_UPDATE_FAILED);
             send_status(STATUS_ABORTED);
             reset_transfer();
             return len;
@@ -962,7 +965,7 @@ static ssize_t data_write(struct bt_conn* conn, const struct bt_gatt_attr* attr,
     if (transfer.type == TRANSFER_TYPE_DATA) {
         install_transferred_model();
     } else {
-        led_set_state(LED_STATE_UPDATE_SUCCESS);
+        led_set_state(LED_STATE_MODEL_UPDATE_SUCCESS);
     }
     return len;
 }
@@ -977,7 +980,7 @@ static void on_disconnected(struct bt_conn* conn, uint8_t reason) {
     if (transfer.active) {
         LOG_WRN("Link dropped at %u/%u, transfer abandoned\n", transfer.received,
                 transfer.total_length);
-        led_set_state(LED_STATE_UPDATE_FAILED);
+        led_set_state(LED_STATE_MODEL_UPDATE_FAILED);
         reset_transfer();
     }
 }
