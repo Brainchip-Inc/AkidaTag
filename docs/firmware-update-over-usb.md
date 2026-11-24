@@ -97,7 +97,7 @@ is what makes a board carrying a bad image recoverable without a debug probe.
 
 ### What you see on the board
 
-In update mode the red LED is on and steady, and the green LED stops blinking. A blinking
+In update mode the White LED is on and steady, and the green LED stops blinking. A blinking
 green LED means the application is running normally and the board is not in update mode.
 
 ---

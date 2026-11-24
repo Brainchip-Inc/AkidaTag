@@ -95,7 +95,8 @@ extern model_meta_t kws_meta;
 extern model_data_meta_t kws_data_meta;
 extern uint32_t g_num_classes;
 extern uint8_t adv_manufacturer_data[];
-
+extern bool button_locked;
+extern bool adv_started;
 int ble_init(void);
 /*
  * Send a binary PCM waveform frame to the phone over NUS.
@@ -134,4 +135,9 @@ typedef enum { FLAG_DISABLE = 0, FLAG_ENABLE = 1 } flag_state_t;
  * Includes the detected keyword and its confidence score.
  */
 void send_event(int cmd, const char* label, float value);
+/*
+ * Begins connectable advertising so a mobile app can discover and
+ * pair with the device.
+ */
+int ble_adv_start(void);
 #endif /* BLE_INITIALIZATION_H */

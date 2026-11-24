@@ -24,7 +24,7 @@ extern const unsigned char* inputs[];
 extern uint32_t valid_program_data[];
 extern const unsigned char* program_info[];
 extern const int64_t program_info_len[];
-
+extern bool erase_complete;
 /* #################################################################### */
 
 void akida_config_spi(bool is_mcu_master);
